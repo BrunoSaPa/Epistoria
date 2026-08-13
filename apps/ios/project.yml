@@ -1,0 +1,80 @@
+name: Epistoria
+options:
+  bundleIdPrefix: com.epistoria
+  deploymentTarget:
+    iOS: "18.0"
+  createIntermediateGroups: true
+
+packages:
+  EpistoriaCore:
+    path: EpistoriaCore
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+    ENABLE_USER_SCRIPT_SANDBOXING: true
+
+targets:
+  Epistoria:
+    type: application
+    platform: iOS
+    deploymentTarget: "18.0"
+    sources:
+      - path: Epistoria
+    dependencies:
+      - package: EpistoriaCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.epistoria.notebook
+        PRODUCT_NAME: Epistoria
+        TARGETED_DEVICE_FAMILY: "2"
+        GENERATE_INFOPLIST_FILE: true
+        INFOPLIST_KEY_CFBundleDisplayName: Epistoria
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.education
+        INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents: true
+        INFOPLIST_KEY_UILaunchScreen_Generation: true
+        INFOPLIST_KEY_UISupportedInterfaceOrientations: "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
+        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
+        INFOPLIST_KEY_NSFaceIDUsageDescription: Unlock your encrypted Epistoria account key.
+        INFOPLIST_KEY_NSLocalNetworkUsageDescription: Connect to your private Epistoria sync server on your local network.
+        INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsLocalNetworking: true
+        CODE_SIGN_STYLE: Automatic
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+  EpistoriaTests:
+    type: bundle.unit-test
+    platform: iOS
+    deploymentTarget: "18.0"
+    sources:
+      - path: EpistoriaTests
+    dependencies:
+      - target: Epistoria
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: true
+  EpistoriaUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    deploymentTarget: "18.0"
+    sources:
+      - path: EpistoriaUITests
+    dependencies:
+      - target: Epistoria
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: true
+
+schemes:
+  Epistoria:
+    build:
+      targets:
+        Epistoria: all
+    run:
+      config: Debug
+    archive:
+      config: Release
+    test:
+      config: Debug
+      targets:
+        - EpistoriaTests
+        - EpistoriaUITests

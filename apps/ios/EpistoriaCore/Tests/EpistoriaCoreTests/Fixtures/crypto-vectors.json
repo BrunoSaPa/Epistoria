@@ -1,0 +1,20 @@
+{
+  "aad": "epistoria|entity|v1|11111111-1111-4111-8111-111111111111|NOTE|22222222-2222-4222-8222-222222222222|1",
+  "accountId": "11111111-1111-4111-8111-111111111111",
+  "accountKey": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+  "contentNonce": "WFlaW1xdXl9gYWJjZGVmZ2hpamtsbW5v",
+  "contentVersion": 1,
+  "dedupeKey": "_dy9xxc2aIzoiERMfW42QfGNYT9QHQjY9d_I6GVJIHE",
+  "dek": "ICEiIyQlJicoKSorLC0uLzAxMjM0NTY3ODk6Ozw9Pj8",
+  "dekNonce": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZX",
+  "entityId": "22222222-2222-4222-8222-222222222222",
+  "entityType": "NOTE",
+  "formatVersion": 1,
+  "payloadSize": 55,
+  "plaintext": "eyJzY2hlbWFWZXJzaW9uIjoibm90ZS92MSIsInRpdGxlIjoiU3ludGhldGljIGZpeHR1cmUifQ",
+  "recoveryWords": "abandon amount liar amount expire adjust cage candy arch gather drum bullet absurd math era live bid rhythm alien crouch range attend journey unaware",
+  "sealedContent": "WFlaW1xdXl9gYWJjZGVmZ2hpamtsbW5v0j6r4TOys1jCYCMm9onWGPbFqVkgO4pG5eB2EZah_l5gpqLzeWPpbXcMxFr_XP-3_jG-vKnKtQ6ZaGMmnTWStJOwiRlhHOk",
+  "sealedDek": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXFTwpb4L2W9IYXiAeDese8sX0SxmVLCAVPveLrBst0UckvmLdfVSrkOiEYnEoSs1o",
+  "wrappingKey": "aQ14sRx2JHWxoQZVEcfiYdjqHUUF_b9QR1-BA1gF8Fk"
+}
+

@@ -1,0 +1,241 @@
+generator client {
+  provider               = "prisma-client"
+  output                 = "../src/generated/prisma"
+  runtime                = "nodejs"
+  moduleFormat           = "esm"
+  generatedFileExtension = "ts"
+  importFileExtension    = "js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum DeviceKind {
+  IPAD
+  MAC
+}
+
+enum EntityType {
+  COLLECTION
+  COLLECTION_ITEM
+  INSTITUTION
+  ACADEMIC_TERM
+  COURSE
+  STUDY_SESSION
+  NOTE
+  NOTE_BLOCK
+  RESOURCE
+  ASSET
+  ANNOTATION
+  SESSION_NOTE
+  SESSION_RESOURCE
+  AI_ARTIFACT
+}
+
+enum MutationOperation {
+  UPSERT
+  DELETE
+}
+
+enum MutationStatus {
+  ACCEPTED
+  CONFLICT
+}
+
+enum AssetState {
+  PREPARED
+  AVAILABLE
+}
+
+enum AIJobType {
+  SESSION_DIGEST
+  PDF_EXTRACTION
+  NOTE_QUERY
+}
+
+enum AIJobStatus {
+  PENDING
+  LEASED
+  COMPLETE
+  FAILED
+  CANCELLED
+}
+
+model User {
+  id                  String              @id @db.Uuid
+  createdAt           DateTime            @default(now()) @map("created_at")
+  devices             Device[]
+  entities            EntityEnvelope[]
+  changes             ChangeLog[]
+  receipts            MutationReceipt[]
+  conflicts           ConflictCandidate[]
+  assets              AssetObject[]
+  aiJobs              AIJob[]
+
+  @@map("users")
+}
+
+model Device {
+  id                  String              @id @db.Uuid
+  ownerId             String              @map("owner_id") @db.Uuid
+  kind                DeviceKind
+  tokenHash           String              @unique @map("token_hash") @db.VarChar(64)
+  displayNameSealed   Bytes?              @map("display_name_sealed")
+  createdAt           DateTime            @default(now()) @map("created_at")
+  lastSeenAt          DateTime            @default(now()) @map("last_seen_at")
+  revokedAt           DateTime?           @map("revoked_at")
+  owner               User                @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  changes             ChangeLog[]
+  receipts            MutationReceipt[]
+  conflicts           ConflictCandidate[]
+  requestedJobs       AIJob[]              @relation("RequestedJobs")
+  leasedJobs          AIJob[]              @relation("LeasedJobs")
+
+  @@index([ownerId, revokedAt])
+  @@map("devices")
+}
+
+model EntityEnvelope {
+  id                  String              @id @db.Uuid
+  ownerId             String              @map("owner_id") @db.Uuid
+  entityType          EntityType          @map("entity_type")
+  parentId            String?             @map("parent_id") @db.Uuid
+  relationIds         String[]            @default([]) @map("relation_ids") @db.Uuid
+  revision            Int
+  tombstone           Boolean             @default(false)
+  cryptoVersion       Int                 @map("crypto_version")
+  contentVersion      Int                 @map("content_version")
+  sealedDek           Bytes               @map("sealed_dek")
+  sealedContent       Bytes               @map("sealed_content")
+  dedupeTag           String?             @map("dedupe_tag") @db.VarChar(64)
+  payloadSize         Int                 @map("payload_size")
+  clientModifiedAt    DateTime            @map("client_modified_at")
+  createdAt           DateTime            @default(now()) @map("created_at")
+  updatedAt           DateTime            @updatedAt @map("updated_at")
+  owner               User                @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  @@index([ownerId, entityType, updatedAt])
+  @@index([ownerId, parentId])
+  @@map("entity_envelopes")
+}
+
+model ChangeLog {
+  sequence            BigInt              @id @default(autoincrement())
+  ownerId             String              @map("owner_id") @db.Uuid
+  deviceId            String              @map("device_id") @db.Uuid
+  mutationId          String              @map("mutation_id") @db.Uuid
+  entityId            String              @map("entity_id") @db.Uuid
+  entityType          EntityType          @map("entity_type")
+  operation           MutationOperation
+  revision            Int
+  parentId            String?             @map("parent_id") @db.Uuid
+  relationIds         String[]            @default([]) @map("relation_ids") @db.Uuid
+  cryptoVersion       Int                 @map("crypto_version")
+  contentVersion      Int                 @map("content_version")
+  sealedDek           Bytes               @map("sealed_dek")
+  sealedContent       Bytes               @map("sealed_content")
+  dedupeTag           String?             @map("dedupe_tag") @db.VarChar(64)
+  payloadSize         Int                 @map("payload_size")
+  clientModifiedAt    DateTime            @map("client_modified_at")
+  changedAt           DateTime            @default(now()) @map("changed_at")
+  owner               User                @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  device              Device              @relation(fields: [deviceId], references: [id], onDelete: Restrict)
+
+  @@unique([ownerId, mutationId])
+  @@index([ownerId, sequence])
+  @@index([ownerId, entityId, revision])
+  @@map("change_log")
+}
+
+model MutationReceipt {
+  id                  String              @id @default(uuid()) @db.Uuid
+  ownerId             String              @map("owner_id") @db.Uuid
+  deviceId            String              @map("device_id") @db.Uuid
+  mutationId          String              @map("mutation_id") @db.Uuid
+  entityId            String              @map("entity_id") @db.Uuid
+  status              MutationStatus
+  revision            Int?
+  sequence            BigInt?
+  conflictId          String?             @map("conflict_id") @db.Uuid
+  createdAt           DateTime            @default(now()) @map("created_at")
+  owner               User                @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  device              Device              @relation(fields: [deviceId], references: [id], onDelete: Restrict)
+
+  @@unique([ownerId, mutationId])
+  @@index([ownerId, deviceId, createdAt])
+  @@map("mutation_receipts")
+}
+
+model ConflictCandidate {
+  id                  String              @id @default(uuid()) @db.Uuid
+  ownerId             String              @map("owner_id") @db.Uuid
+  deviceId            String              @map("device_id") @db.Uuid
+  mutationId          String              @map("mutation_id") @db.Uuid
+  entityId            String              @map("entity_id") @db.Uuid
+  entityType          EntityType          @map("entity_type")
+  operation           MutationOperation
+  baseRevision        Int                 @map("base_revision")
+  currentRevision     Int                 @map("current_revision")
+  parentId            String?             @map("parent_id") @db.Uuid
+  relationIds         String[]            @default([]) @map("relation_ids") @db.Uuid
+  cryptoVersion       Int                 @map("crypto_version")
+  contentVersion      Int                 @map("content_version")
+  sealedDek           Bytes               @map("sealed_dek")
+  sealedContent       Bytes               @map("sealed_content")
+  dedupeTag           String?             @map("dedupe_tag") @db.VarChar(64)
+  payloadSize         Int                 @map("payload_size")
+  clientModifiedAt    DateTime            @map("client_modified_at")
+  createdAt           DateTime            @default(now()) @map("created_at")
+  resolvedAt          DateTime?           @map("resolved_at")
+  owner               User                @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  device              Device              @relation(fields: [deviceId], references: [id], onDelete: Restrict)
+
+  @@unique([ownerId, mutationId])
+  @@index([ownerId, deviceId, resolvedAt])
+  @@map("conflict_candidates")
+}
+
+model AssetObject {
+  id                  String              @id @db.Uuid
+  ownerId             String              @map("owner_id") @db.Uuid
+  dedupeTag           String              @map("dedupe_tag") @db.VarChar(64)
+  objectKey           String              @unique @map("object_key")
+  byteSize            BigInt              @map("byte_size")
+  state               AssetState          @default(PREPARED)
+  createdAt           DateTime            @default(now()) @map("created_at")
+  availableAt         DateTime?           @map("available_at")
+  owner               User                @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  @@unique([ownerId, dedupeTag])
+  @@index([ownerId, state])
+  @@map("asset_objects")
+}
+
+model AIJob {
+  id                  String              @id @db.Uuid
+  ownerId             String              @map("owner_id") @db.Uuid
+  requestedByDeviceId String              @map("requested_by_device_id") @db.Uuid
+  jobType             AIJobType           @map("job_type")
+  status              AIJobStatus         @default(PENDING)
+  cryptoVersion       Int                 @map("crypto_version")
+  contentVersion      Int                 @map("content_version")
+  sealedDek           Bytes               @map("sealed_dek")
+  sealedPayload       Bytes               @map("sealed_payload")
+  payloadSize         Int                 @map("payload_size")
+  leasedByDeviceId    String?             @map("leased_by_device_id") @db.Uuid
+  leaseExpiresAt      DateTime?           @map("lease_expires_at")
+  attempts            Int                 @default(0)
+  artifactEntityId    String?             @map("artifact_entity_id") @db.Uuid
+  errorCode           String?             @map("error_code") @db.VarChar(64)
+  createdAt           DateTime            @default(now()) @map("created_at")
+  updatedAt           DateTime            @updatedAt @map("updated_at")
+  completedAt         DateTime?           @map("completed_at")
+  owner               User                @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  requestedBy         Device              @relation("RequestedJobs", fields: [requestedByDeviceId], references: [id], onDelete: Restrict)
+  leasedBy            Device?             @relation("LeasedJobs", fields: [leasedByDeviceId], references: [id], onDelete: SetNull)
+
+  @@index([ownerId, status, createdAt])
+  @@index([leaseExpiresAt])
+  @@map("ai_jobs")
+}

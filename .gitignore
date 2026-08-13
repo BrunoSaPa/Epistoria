@@ -1,0 +1,91 @@
+.DS_Store
+.env
+.env.*
+!.env.example
+!.env.production.example
+.envrc
+
+# Dependencies and build output (matched at any depth)
+**/node_modules/
+**/dist/
+coverage/
+*.log
+
+# Swift / Xcode build artifacts
+.swiftpm/
+.build/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+*.xcarchive/
+*.xcresult/
+*.dSYM/
+*.mobileprovision
+*.p12
+*.pem
+*.key
+
+# NOTE: apps/ios/Epistoria.xcodeproj is intentionally tracked.
+# It is the XcodeGen-generated project file checked in by design so the
+# project can be opened without running XcodeGen first.
+apps/ios/Epistoria.xcodeproj/project.xcworkspace/xcuserdata/
+
+# Python worker
+services/worker/.venv/
+services/worker/.pytest_cache/
+services/worker/.ruff_cache/
+services/worker/.mypy_cache/
+services/worker/**/__pycache__/
+
+# Infrastructure data and local backups 
+infra/data/
+backups/
+
+# Local notebook data and readable exports
+Epistoria-*.zip
+epistoria-export/
+*.sqlite
+*.sqlite-journal
+*.sqlite-shm
+*.sqlite-wal
+*.sqlite3
+*.sqlite3-journal
+*.sqlite3-shm
+*.sqlite3-wal
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Internal project documentation
+/docs/adr
+BUILD_LOG.md
+CHANGELOG.md
+docs/PUBLICATION.md
+docs/QA_MATRIX.md
+docs/README.md
+docs/ROADMAP.md
+docs/RUNBOOK.md
+docs/SECURITY.md
+docs/STORAGE.md
+docs/STYLE_GUIDE.md
+docs/SYNC.md
+docs/USER_GUIDE.md
+docs/VERIFICATION.md
+/.agents
+docs/AI_SYSTEM.md
+docs/ARCHITECTURE.md
+docs/BACKUP_RESTORE.md
+docs/COSTS.md
+docs/CRYPTO_FORMAT.md
+docs/DATA_MODEL.md
+docs/DESIGN_SYSTEM.md
+docs/DEVELOPMENT.md
+/AGENTS.md
+/docs/EXPORT_FORMAT.md
+/docs/MVP_UPGRADES.md
+/docs/POLISH_PLAN.md
+/docs/PRODUCT.md
+/docs/PROJECT_PLAN.md
+/packages/contracts/README.md
+/services/worker/README.md

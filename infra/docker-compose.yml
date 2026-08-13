@@ -1,0 +1,94 @@
+name: epistoria
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_DB: epistoria
+      POSTGRES_USER: epistoria
+      POSTGRES_PASSWORD: epistoria-local
+    ports:
+      # Avoid colliding with a native PostgreSQL installation on the Mac.
+      - "55432:5432"
+    volumes:
+      # PostgreSQL 18 stores data under a major-version subdirectory so future
+      # pg_upgrade --link operations do not cross a mount boundary.
+      - ./data/postgres:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U epistoria -d epistoria"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  minio:
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: epistoria
+      MINIO_ROOT_PASSWORD: epistoria-local-secret
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - ./data/minio:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  minio-bootstrap:
+    image: minio/mc:RELEASE.2025-08-13T08-35-41Z
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        mc alias set local http://minio:9000 epistoria epistoria-local-secret
+        mc mb --ignore-existing local/epistoria-assets
+        mc mb --ignore-existing local/epistoria-test-assets
+        mc anonymous set none local/epistoria-assets
+        mc anonymous set none local/epistoria-test-assets
+    restart: "no"
+
+  # Disposable integration-test database. E2E cleanup is confined here and can
+  # never erase the daily-use PostgreSQL volume.
+  test-postgres:
+    image: postgres:18-alpine
+    profiles: ["test"]
+    environment:
+      POSTGRES_DB: epistoria_test
+      POSTGRES_USER: epistoria_test
+      POSTGRES_PASSWORD: epistoria-test-isolated
+    ports:
+      - "55433:5432"
+    tmpfs:
+      - /var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U epistoria_test -d epistoria_test"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+    restart: "no"
+
+  # Used only by scripts/restore-check.sh. Its data lives in tmpfs and the
+  # container is removed after every drill, so it cannot overwrite daily-use data.
+  restore-postgres:
+    image: postgres:18-alpine
+    profiles: ["restore"]
+    environment:
+      POSTGRES_DB: epistoria_restore
+      POSTGRES_USER: epistoria_restore
+      POSTGRES_PASSWORD: epistoria-restore-isolated
+    tmpfs:
+      - /var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U epistoria_restore -d epistoria_restore"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+    restart: "no"

@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://epistoria.local/contracts/sync-wire-v1.schema.json",
+  "title": "Epistoria sync push v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["wireVersion", "deviceId", "mutations"],
+  "properties": {
+    "wireVersion": { "const": 1 },
+    "deviceId": { "$ref": "#/$defs/uuid" },
+    "mutations": {
+      "type": "array",
+      "maxItems": 100,
+      "items": { "$ref": "#/$defs/mutation" }
+    }
+  },
+  "$defs": {
+    "uuid": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "sealed": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]+$"
+    },
+    "envelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cryptoVersion", "contentVersion", "sealedDek", "sealedContent", "payloadSize"],
+      "properties": {
+        "cryptoVersion": { "type": "integer", "minimum": 1, "maximum": 255 },
+        "contentVersion": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "sealedDek": { "$ref": "#/$defs/sealed" },
+        "sealedContent": { "$ref": "#/$defs/sealed" },
+        "dedupeTag": { "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$" },
+        "payloadSize": { "type": "integer", "minimum": 0, "maximum": 2097152 }
+      }
+    },
+    "mutation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mutationId", "entityId", "entityType", "operation", "baseRevision", "relationIds", "clientModifiedAt", "envelope"],
+      "properties": {
+        "mutationId": { "$ref": "#/$defs/uuid" },
+        "entityId": { "$ref": "#/$defs/uuid" },
+        "entityType": {
+          "enum": ["COLLECTION", "COLLECTION_ITEM", "INSTITUTION", "ACADEMIC_TERM", "COURSE", "STUDY_SESSION", "NOTE", "NOTE_BLOCK", "RESOURCE", "ASSET", "ANNOTATION", "SESSION_NOTE", "SESSION_RESOURCE", "AI_ARTIFACT"]
+        },
+        "operation": { "enum": ["UPSERT", "DELETE"] },
+        "baseRevision": { "type": "integer", "minimum": 0 },
+        "parentId": { "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }] },
+        "relationIds": { "type": "array", "maxItems": 64, "uniqueItems": true, "items": { "$ref": "#/$defs/uuid" } },
+        "clientModifiedAt": { "type": "string", "format": "date-time" },
+        "envelope": { "$ref": "#/$defs/envelope" }
+      }
+    }
+  }
+}
+

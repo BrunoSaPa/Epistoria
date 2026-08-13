@@ -1,0 +1,193 @@
+# Epistoria
+
+Epistoria is a personal, local-first iPad notebook for study and research. It supports spatial
+notes, Apple Pencil input, images, PDFs, annotations, study sessions, local search, encrypted
+sync, and optional AI processing on a trusted Mac.
+
+This project started because I needed one notebook that I could use while learning any subject.
+It is a personal project. It is not currently intended for sale or multi-user use.
+
+## Problem statement
+
+Study material is usually split across note apps, PDF readers, drawing tools, and AI chat tools.
+This separation creates several problems:
+
+- Notes and source documents are hard to review together.
+- Cloud-first tools can require a network connection for basic work.
+- A service operator can often read synchronized content.
+- AI output can lose its connection to the source material.
+- Proprietary storage can make it difficult to inspect or move personal data.
+
+The project needs to support normal notebook work first. It must save locally, work without AI,
+preserve original files, and expose recovery and export limits directly.
+
+## Solution description
+
+Epistoria provides a native SwiftUI notebook for iPad. A note is a spatial workspace with the
+following options:
+
+- A4 or US Letter paper in portrait or landscape orientation.
+- An infinite canvas that supports positive and negative coordinates.
+- Plain, ruled, grid, or dotted paper.
+- One canvas-wide PencilKit ink layer.
+- Movable, resizable, rotatable, and layered text and image items.
+
+The app also provides:
+
+- Immutable PDF import and separate page annotations.
+- Collections, institutions, academic terms, courses, and study sessions.
+- Local full-text search with links to the matching note item or PDF page.
+- Reversible archive and restore for notes and courses.
+- Optional encrypted synchronization through a private server.
+- Explicit conflict review that preserves concurrent versions.
+- A readable ZIP export with JSON, original files, PencilKit data, and SHA-256 checksums.
+
+The iPad stores data in SQLCipher. Each local record change and its sync outbox entry commit in
+one transaction. A successful local save does not wait for the network. The sync service stores
+encrypted envelopes and structural metadata. It does not receive readable note text, titles,
+filenames, annotations, extracted PDF text, prompts, or AI results.
+
+## Selected challenge theme
+
+The selected challenge theme is **AI-augmented personal productivity tools**.
+
+Epistoria treats AI as an optional processing feature. The notebook remains usable when the AI
+provider, trusted Mac, or sync server is unavailable.
+
+## AI approach and architecture
+
+The iPad does not send notebook content directly to the AI provider. It creates an encrypted job
+for an explicitly requested operation. A paired Mac decrypts the job, prepares the selected
+evidence, calls the configured provider, validates the response, and encrypts the result before
+syncing it back.
+
+```text
+iPad
+  -> SQLCipher database and local outbox
+  -> encrypted sync API
+  -> encrypted job queue
+  -> trusted Mac worker
+  -> optional AI provider
+  -> validated and encrypted artifact
+  -> encrypted sync API
+  -> iPad review
+```
+
+The system supports these processing jobs:
+
+| Job | Input | Output | AI provider required |
+|---|---|---|---|
+| Session digest | Evidence linked to a study session | Cited study digest | Yes |
+| Note query | A selected note region, a question, and bounded note context | Cited answer and follow-up questions | Yes |
+| PDF extraction | An encrypted PDF | Locally extracted text | No |
+
+AI results are derived records. The user can accept, edit, reject, or delete them. They do not
+replace original notes, drawings, images, PDFs, annotations, or relationships. Each reviewed
+artifact records its source IDs and processing metadata.
+
+The OpenAI adapter uses structured output and `store=false`. The user sees a disclosure before
+an AI job is queued. Provider processing remains a separate plaintext disclosure from encrypted
+sync. See the public [privacy overview](docs/public/PRIVACY.md) for the user-facing processing
+boundaries.
+
+## How IBM Bob was used
+
+IBM Bob was used as a development assistant during the project. It helped with requirements
+analysis, implementation planning, code drafts, code review, troubleshooting, tests, and
+documentation updates.
+
+The project owner selected the product requirements, privacy boundaries, architecture, and final
+changes. IBM Bob is not a runtime dependency. The running app does not send notebook content to
+IBM Bob.
+
+## Project status
+
+The repository is a personal beta candidate. The following automated checks passed on
+2026-08-13:
+
+- `make verify`
+- Full unsigned iOS Simulator bundle build, including assets and the privacy manifest
+- 25 Swift Core tests
+- 12 iOS app and UI tests on an iPad Simulator
+- 7 API unit tests
+- 23 worker tests
+
+The following release checks are still open:
+
+- Physical iPad durability, Apple Pencil, accessibility, and large-file tests
+- Two-device synchronization and conflict tests
+- Fresh-device recovery against a real server and object store
+- Independent object-mirror and production restore drills
+- Code signing, archive validation, and private TestFlight installation
+- Import of a readable Epistoria export
+
+Do not use the current build as the only convenient copy of important data. See the public
+[known limitations](docs/public/KNOWN_LIMITATIONS.md) before using the beta.
+
+## Local development
+
+### Prerequisites
+
+- macOS with Xcode 16.2 or later
+- Node.js 24
+- Python 3.13
+- Docker with Compose v2
+- XcodeGen 2.46.0 when regenerating the Xcode project
+
+### Start the local services
+
+```sh
+cp .env.example .env
+chmod 600 .env
+make bootstrap
+make infra-up
+npm run prisma:deploy --workspace @epistoria/api
+make api-dev
+```
+
+Open `apps/ios/Epistoria.xcodeproj`, select the `Epistoria` scheme and an iPad destination, and
+run the app. A Simulator can use `http://127.0.0.1:3000/v1`. A physical iPad requires a private
+HTTPS address that it can reach.
+
+Run the automated repository gate:
+
+```sh
+make verify
+```
+
+Internal setup, deployment, backup, and troubleshooting procedures are maintained separately and
+are not published in this repository.
+
+## Cost options
+
+| Option | Estimated recurring infrastructure cost | Limitation |
+|---|---:|---|
+| Trusted Mac, Docker, and Tailscale Personal | $0 incremental | Sync and processing stop while the Mac is unavailable |
+| Small VM, provider backup, and private object storage | About $15.60 per month at the dated baseline | Requires server maintenance and recovery drills |
+
+AI is optional and billed by the configured provider when used. Pricing assumptions must be
+checked against the provider's current rates before deployment.
+
+## Repository layout
+
+| Path | Contents |
+|---|---|
+| `apps/ios` | SwiftUI iPad app and `EpistoriaCore` Swift package |
+| `apps/api` | NestJS API, Prisma schema, sync log, asset broker, devices, conflicts, and encrypted jobs |
+| `services/worker` | Trusted Python worker for PDF extraction and optional AI jobs |
+| `packages/contracts` | Versioned wire, content, AI, and cryptographic test contracts |
+| `infra` | Local and personal-production infrastructure templates |
+| `scripts` | Build, verification, backup, restore, retention, and worker helpers |
+| `docs/public` | Client-facing product information, guides, privacy notes, and roadmap |
+
+Use the [client-facing documentation](docs/public/README.md) for product information. Internal
+engineering and operations documentation is intentionally excluded from the public repository.
+
+## Data guarantees
+
+- A local save and its outbox entry commit together.
+- Network access is not required to create or edit local content.
+- The sync service stores ciphertext and structural metadata only.
+- Original files and PencilKit data remain separate from derived previews and AI output.
+- Concurrent versions remain available until the user resolves the conflict.
+- Readable export is not described as restore because no archive importer exists.

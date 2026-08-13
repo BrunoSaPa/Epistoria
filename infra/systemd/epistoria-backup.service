@@ -1,0 +1,27 @@
+[Unit]
+Description=Epistoria encrypted database and object backup
+Documentation=file:/opt/epistoria/docs/DEVELOPMENT.md
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=epistoria
+Group=epistoria
+WorkingDirectory=/opt/epistoria
+EnvironmentFile=/etc/epistoria/backup.env
+ExecStart=/opt/epistoria/scripts/scheduled-backup.sh
+UMask=0077
+Nice=10
+IOSchedulingClass=idle
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectClock=true
+ProtectControlGroups=true
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=multi-user.target

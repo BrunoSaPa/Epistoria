@@ -1,0 +1,703 @@
+import EpistoriaCore
+import PDFKit
+import SwiftUI
+import UniformTypeIdentifiers
+
+struct LibraryView: View {
+    @Bindable var model: AppModel
+    @State private var resources: [IdentifiedPayload<ResourcePayload>] = []
+    @State private var isImporting = false
+    @State private var importProgress: String?
+    @State private var errorMessage: String?
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if resources.isEmpty {
+                    ContentUnavailableView {
+                        Label("Your private library", systemImage: "books.vertical")
+                    } description: {
+                        Text("Import a PDF. Epistoria encrypts the original locally before it can sync.")
+                    } actions: {
+                        Button("Import your first PDF") { isImporting = true }
+                            .buttonStyle(.borderedProminent)
+                            .tint(EpistoriaDesign.ink)
+                    }
+                } else {
+                    List(resources, id: \.id) { resource in
+                        NavigationLink {
+                            ResourceDetailView(model: model, resourceId: resource.id)
+                        } label: {
+                            HStack(spacing: 14) {
+                                Image(systemName: resource.payload.resourceType == .pdf ? "doc.richtext" : "link")
+                                    .font(.title2)
+                                    .foregroundStyle(.tint)
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(resource.payload.title).font(.headline)
+                                    Text("\(resource.payload.resourceType.rawValue.capitalized) · imported \(resource.payload.importedAt.formatted(.relative(presentation: .named)))")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                        .accessibilityIdentifier("library.resource.\(resource.id.uuidString)")
+                    }
+                }
+            }
+            .navigationTitle("Library")
+            .epistoriaPageBackground()
+            .toolbar {
+                Button { isImporting = true } label: {
+                    Label("Import PDF", systemImage: "square.and.arrow.down")
+                }
+            }
+            .safeAreaInset(edge: .bottom) {
+                if let importProgress {
+                    HStack {
+                        ProgressView()
+                        Text(importProgress)
+                    }
+                    .padding(12)
+                    .background(.regularMaterial, in: Capsule())
+                    .padding()
+                }
+            }
+            .fileImporter(
+                isPresented: $isImporting,
+                allowedContentTypes: [.pdf],
+                allowsMultipleSelection: true
+            ) { result in
+                Task { await importFiles(result) }
+            }
+            .task { await load() }
+            .refreshable { await load() }
+            .alert("Library error", isPresented: .constant(errorMessage != nil)) {
+                Button("Try again") { Task { await load() } }
+                Button("Dismiss", role: .cancel) { errorMessage = nil }
+            } message: { Text(errorMessage ?? "") }
+        }
+    }
+
+    private func load() async {
+        guard let store = model.store else { return }
+        do {
+            resources = try await store.list(ResourcePayload.self)
+                .sorted { $0.payload.importedAt > $1.payload.importedAt }
+        }
+        catch { errorMessage = error.localizedDescription }
+    }
+
+    private func importFiles(_ result: Result<[URL], Error>) async {
+        guard let assetManager = model.assetManager else { return }
+        do {
+            let urls = try result.get()
+            for (index, url) in urls.enumerated() {
+                importProgress = "Encrypting \(index + 1) of \(urls.count): \(url.lastPathComponent)"
+                _ = try await assetManager.importPDF(from: url)
+            }
+            model.noteLocalMutation()
+            importProgress = nil
+            await load()
+        } catch {
+            importProgress = nil
+            errorMessage = error.localizedDescription
+        }
+    }
+}
+
+struct ResourceDetailView: View {
+    @Bindable var model: AppModel
+    let resourceId: UUID
+    var sessionId: UUID?
+    var initialPageNumber: Int?
+    var focusedAnnotationId: UUID?
+    var highlightText: String?
+
+    @State private var resource: IdentifiedPayload<ResourcePayload>?
+    @State private var pdfData: Data?
+    @State private var pageNumber = 1
+    @State private var pageCount = 0
+    @State private var annotations: [IdentifiedPayload<AnnotationPayload>] = []
+    @State private var extraction: IdentifiedPayload<PDFExtractionManifest>?
+    @State private var extractionJob: AIJobSummary?
+    @State private var annotationKind = AnnotationKind.comment
+    @State private var comment = ""
+    @State private var isLoading = true
+    @State private var isInspectorPresented = true
+    @State private var editingAnnotation: IdentifiedPayload<AnnotationPayload>?
+    @State private var pendingDeletion: IdentifiedPayload<AnnotationPayload>?
+    @State private var recentlyDeleted: IdentifiedPayload<AnnotationPayload>?
+    @State private var errorMessage: String?
+    @FocusState private var annotationEditorFocused: Bool
+
+    init(
+        model: AppModel,
+        resourceId: UUID,
+        sessionId: UUID? = nil,
+        initialPageNumber: Int? = nil,
+        focusedAnnotationId: UUID? = nil,
+        highlightText: String? = nil
+    ) {
+        self.model = model
+        self.resourceId = resourceId
+        self.sessionId = sessionId
+        self.initialPageNumber = initialPageNumber
+        self.focusedAnnotationId = focusedAnnotationId
+        self.highlightText = highlightText
+        _pageNumber = State(initialValue: max(initialPageNumber ?? 1, 1))
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            if isLoading {
+                ProgressView("Decrypting locally…")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if let pdfData {
+                PDFDocumentView(
+                    data: pdfData,
+                    pageNumber: $pageNumber,
+                    pageCount: $pageCount,
+                    highlightText: highlightText
+                )
+            } else {
+                ContentUnavailableView {
+                    Label("File unavailable", systemImage: "doc.questionmark")
+                } description: {
+                    Text("The encrypted original is not present on this device yet.")
+                } actions: {
+                    Button("Check again") { Task { await load() } }
+                        .buttonStyle(.bordered)
+                }
+            }
+        }
+        .epistoriaPageBackground()
+        .navigationTitle(resource?.payload.title ?? "Resource")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItemGroup(placement: .primaryAction) {
+                if pageCount > 0 {
+                    Button {
+                        pageNumber = max(1, pageNumber - 1)
+                    } label: {
+                        Label("Previous page", systemImage: "chevron.left")
+                    }
+                    .disabled(pageNumber <= 1)
+
+                    Text("\(pageNumber) / \(pageCount)")
+                        .font(.caption.monospacedDigit().weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .accessibilityLabel("Page \(pageNumber) of \(pageCount)")
+
+                    Button {
+                        pageNumber = min(pageCount, pageNumber + 1)
+                    } label: {
+                        Label("Next page", systemImage: "chevron.right")
+                    }
+                    .disabled(pageNumber >= pageCount)
+                }
+                Button {
+                    comment = ""
+                    isInspectorPresented = true
+                    annotationEditorFocused = true
+                } label: {
+                    Label("Annotate page", systemImage: "note.text.badge.plus")
+                }
+                .accessibilityIdentifier("resource.annotate")
+
+                Button {
+                    isInspectorPresented.toggle()
+                } label: {
+                    Label(
+                        isInspectorPresented ? "Hide annotations" : "Show annotations",
+                        systemImage: "sidebar.trailing"
+                    )
+                }
+                .accessibilityIdentifier("resource.toggle-inspector")
+            }
+        }
+        .inspector(isPresented: $isInspectorPresented) {
+            annotationInspector
+                .inspectorColumnWidth(min: 280, ideal: 340, max: 440)
+        }
+        .task { await load() }
+        .sheet(
+            isPresented: Binding(
+                get: { editingAnnotation != nil },
+                set: { if !$0 { editingAnnotation = nil } }
+            )
+        ) {
+            if let editingAnnotation {
+                EditAnnotationView(model: model, annotation: editingAnnotation) {
+                    self.editingAnnotation = nil
+                    Task { await load() }
+                }
+            }
+        }
+        .confirmationDialog(
+            "Delete this annotation?",
+            isPresented: Binding(
+                get: { pendingDeletion != nil },
+                set: { if !$0 { pendingDeletion = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Delete annotation", role: .destructive) {
+                guard let pendingDeletion else { return }
+                Task { await deleteAnnotation(pendingDeletion) }
+                self.pendingDeletion = nil
+            }
+            Button("Cancel", role: .cancel) { pendingDeletion = nil }
+        } message: {
+            Text("The PDF itself is never changed. You can undo while this resource remains open.")
+        }
+        .safeAreaInset(edge: .bottom) {
+            if recentlyDeleted != nil {
+                HStack(spacing: 14) {
+                    Label("Annotation deleted", systemImage: "trash")
+                    Spacer()
+                    Button("Undo") { Task { await undoAnnotationDelete() } }
+                        .fontWeight(.semibold)
+                }
+                .font(.subheadline)
+                .padding(.horizontal, 18)
+                .padding(.vertical, 12)
+                .background(.regularMaterial, in: Capsule())
+                .shadow(radius: 8, y: 3)
+                .padding()
+            }
+        }
+        .alert("Resource error", isPresented: .constant(errorMessage != nil)) {
+            Button("Try again") { Task { await load() } }
+            Button("Dismiss", role: .cancel) { errorMessage = nil }
+        } message: { Text(errorMessage ?? "") }
+    }
+
+    private var annotationInspector: some View {
+        NavigationStack {
+            ScrollViewReader { proxy in
+                List {
+                Section {
+                    Label("Original PDF preserved", systemImage: "lock.doc")
+                        .foregroundStyle(.secondary)
+                    Text("Annotations are separate encrypted records, so importing never modifies the source file.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Section("Searchable text") {
+                    if let extraction {
+                        Label("\(extraction.payload.pageCount) pages indexed", systemImage: "checkmark.circle.fill")
+                            .foregroundStyle(EpistoriaDesign.positive)
+                        LabeledContent(
+                            "Characters",
+                            value: extraction.payload.characterCount.formatted()
+                        )
+                        if !extraction.payload.pagesNeedingOcr.isEmpty {
+                            Text("OCR still needed on pages: \(extraction.payload.pagesNeedingOcr.map(String.init).joined(separator: ", "))")
+                                .font(.caption)
+                                .foregroundStyle(EpistoriaDesign.attention)
+                        }
+                    } else if let extractionJob {
+                        Label("Mac job \(extractionJob.status.lowercased())", systemImage: "desktopcomputer")
+                        Text("Run the trusted worker, then sync this iPad to index the result.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Button("Extract text on trusted Mac", systemImage: "text.viewfinder") {
+                            Task { await queueExtraction() }
+                        }
+                        .disabled(model.aiJobs == nil)
+                        Text("This is local processing and does not call an AI provider. The decrypted PDF exists only in Mac memory while text is extracted.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Section("Add to page \(pageNumber)") {
+                    Picker("Kind", selection: $annotationKind) {
+                        ForEach(AnnotationKind.allCases, id: \.self) { kind in
+                            Text(kind.rawValue.capitalized).tag(kind)
+                        }
+                    }
+                    TextEditor(text: $comment)
+                        .frame(minHeight: 90)
+                        .focused($annotationEditorFocused)
+                        .accessibilityLabel("Annotation text")
+                        .accessibilityIdentifier("resource.annotation-text")
+                    Button("Save annotation") { Task { await saveAnnotation() } }
+                        .buttonStyle(.borderedProminent)
+                        .tint(EpistoriaDesign.ink)
+                        .disabled(comment.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        .accessibilityIdentifier("resource.save-annotation")
+                }
+
+                Section("Annotations") {
+                    if annotations.isEmpty {
+                        Text("No annotations yet").foregroundStyle(.secondary)
+                    }
+                    ForEach(annotations, id: \.id) { annotation in
+                        VStack(alignment: .leading, spacing: 7) {
+                            HStack {
+                                EpistoriaStatusPill(
+                                    title: annotation.payload.annotationType.rawValue.capitalized,
+                                    symbol: annotationSymbol(annotation.payload.annotationType)
+                                )
+                                Spacer()
+                                if let page = annotation.payload.pageNumber {
+                                    Button("Page \(page)") {
+                                        pageNumber = page
+                                    }
+                                        .font(.caption)
+                                }
+                            }
+                            Text(annotation.payload.comment)
+                                .textSelection(.enabled)
+                            Text(annotation.payload.updatedAt, style: .relative)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.vertical, 4)
+                        .listRowBackground(
+                            annotation.id == focusedAnnotationId
+                                ? Color.primary.opacity(0.08)
+                                : Color.clear
+                        )
+                        .id(annotation.id)
+                        .accessibilityElement(children: .contain)
+                        .accessibilityIdentifier("resource.annotation.\(annotation.id.uuidString)")
+                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                            Button("Delete", systemImage: "trash", role: .destructive) {
+                                pendingDeletion = annotation
+                            }
+                            Button("Edit", systemImage: "pencil") {
+                                editingAnnotation = annotation
+                            }
+                            .tint(EpistoriaDesign.accent)
+                        }
+                        .contextMenu {
+                            Button("Edit annotation", systemImage: "pencil") {
+                                editingAnnotation = annotation
+                            }
+                            Button("Delete annotation…", systemImage: "trash", role: .destructive) {
+                                pendingDeletion = annotation
+                            }
+                        }
+                    }
+                }
+                }
+                .navigationTitle("Notes")
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Done") { isInspectorPresented = false }
+                    }
+                }
+                .task(id: focusedAnnotationId) {
+                    guard let focusedAnnotationId else { return }
+                    try? await Task.sleep(for: .milliseconds(120))
+                    withAnimation(.easeInOut) {
+                        proxy.scrollTo(focusedAnnotationId, anchor: .center)
+                    }
+                }
+            }
+        }
+    }
+
+    private func load() async {
+        guard let store = model.store else { return }
+        do {
+            let loaded = try await store.payload(ResourcePayload.self, id: resourceId)
+            resource = loaded
+            annotations = try await store.list(AnnotationPayload.self)
+                .filter { $0.payload.resourceId == resourceId }
+                .sorted {
+                    ($0.payload.pageNumber ?? 0, $0.payload.updatedAt)
+                        < ($1.payload.pageNumber ?? 0, $1.payload.updatedAt)
+                }
+            if let focusedAnnotationId,
+               let focused = annotations.first(where: { $0.id == focusedAnnotationId }),
+               let page = focused.payload.pageNumber
+            {
+                pageNumber = page
+                isInspectorPresented = true
+            } else if let initialPageNumber {
+                pageNumber = max(initialPageNumber, 1)
+            }
+            extraction = try await model.aiJobs?.latestPDFExtraction(resourceId: resourceId)
+            if let assetId = loaded.payload.originalAssetId, let assetManager = model.assetManager {
+                pdfData = try await assetManager.decryptedData(assetId: assetId)
+            }
+            isLoading = false
+        } catch {
+            isLoading = false
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func saveAnnotation() async {
+        guard let store = model.store else { return }
+        let clean = comment.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clean.isEmpty else { return }
+        do {
+            var payload = AnnotationPayload(
+                resourceId: resourceId,
+                annotationType: annotationKind,
+                pageNumber: pageNumber,
+                comment: clean
+            )
+            payload.studySessionId = sessionId
+            _ = try await store.save(
+                payload: payload,
+                parentId: resourceId,
+                relationIds: [resourceId, sessionId].compactMap(\.self)
+            )
+            comment = ""
+            model.noteLocalMutation()
+            await load()
+        } catch { errorMessage = error.localizedDescription }
+    }
+
+    private func queueExtraction() async {
+        guard let coordinator = model.aiJobs else {
+            errorMessage = "Connect the private server and pair your trusted Mac first."
+            return
+        }
+        await model.synchronize()
+        if let syncError = model.syncError {
+            errorMessage = syncError
+            return
+        }
+        do { extractionJob = try await coordinator.submitPDFExtraction(resourceId: resourceId) }
+        catch { errorMessage = error.localizedDescription }
+    }
+
+    private func deleteAnnotation(_ annotation: IdentifiedPayload<AnnotationPayload>) async {
+        guard let database = model.database else { return }
+        do {
+            try await database.deleteLocal(id: annotation.id)
+            recentlyDeleted = annotation
+            model.noteLocalMutation()
+            await load()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func undoAnnotationDelete() async {
+        guard let store = model.store, let annotation = recentlyDeleted else { return }
+        do {
+            _ = try await store.save(
+                id: annotation.id,
+                payload: annotation.payload,
+                parentId: resourceId,
+                relationIds: [
+                    Optional(resourceId),
+                    annotation.payload.studySessionId,
+                    annotation.payload.noteId,
+                ].compactMap(\.self)
+            )
+            recentlyDeleted = nil
+            model.noteLocalMutation()
+            await load()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func annotationSymbol(_ kind: AnnotationKind) -> String {
+        switch kind {
+        case .highlight: "highlighter"
+        case .comment: "text.bubble"
+        case .question: "questionmark.circle"
+        case .idea: "lightbulb"
+        case .important: "exclamationmark.circle"
+        case .disagreement: "hand.thumbsdown"
+        case .summary: "text.alignleft"
+        case .bookmark: "bookmark"
+        case .drawing: "pencil.tip"
+        }
+    }
+}
+
+private struct EditAnnotationView: View {
+    @Bindable var model: AppModel
+    @Environment(\.dismiss) private var dismiss
+    let annotation: IdentifiedPayload<AnnotationPayload>
+    let onSaved: () -> Void
+
+    @State private var kind: AnnotationKind
+    @State private var pageNumber: Int
+    @State private var comment: String
+    @State private var isSaving = false
+    @State private var errorMessage: String?
+
+    init(
+        model: AppModel,
+        annotation: IdentifiedPayload<AnnotationPayload>,
+        onSaved: @escaping () -> Void
+    ) {
+        self.model = model
+        self.annotation = annotation
+        self.onSaved = onSaved
+        _kind = State(initialValue: annotation.payload.annotationType)
+        _pageNumber = State(initialValue: max(annotation.payload.pageNumber ?? 1, 1))
+        _comment = State(initialValue: annotation.payload.comment)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Picker("Kind", selection: $kind) {
+                    ForEach(AnnotationKind.allCases, id: \.self) { kind in
+                        Text(kind.rawValue.capitalized).tag(kind)
+                    }
+                }
+                Stepper("Page \(pageNumber)", value: $pageNumber, in: 1...100_000)
+                Section("Annotation") {
+                    TextEditor(text: $comment)
+                        .frame(minHeight: 150)
+                        .accessibilityIdentifier("annotation-edit.comment")
+                }
+                if let errorMessage {
+                    Text(errorMessage)
+                        .foregroundStyle(.red)
+                }
+            }
+            .navigationTitle("Edit annotation")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(isSaving ? "Saving…" : "Save") {
+                        Task { await save() }
+                    }
+                    .disabled(isSaving || comment.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .accessibilityIdentifier("annotation-edit.save")
+                }
+            }
+        }
+    }
+
+    private func save() async {
+        guard let store = model.store else { return }
+        isSaving = true
+        defer { isSaving = false }
+        do {
+            var payload = annotation.payload
+            payload.annotationType = kind
+            payload.pageNumber = pageNumber
+            payload.comment = comment.trimmingCharacters(in: .whitespacesAndNewlines)
+            payload.updatedAt = .now
+            _ = try await store.save(
+                id: annotation.id,
+                payload: payload,
+                parentId: payload.resourceId,
+                relationIds: [
+                    Optional(payload.resourceId),
+                    payload.studySessionId,
+                    payload.noteId,
+                ].compactMap(\.self)
+            )
+            model.noteLocalMutation()
+            onSaved()
+            dismiss()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+}
+
+private struct PDFDocumentView: UIViewRepresentable {
+    let data: Data
+    @Binding var pageNumber: Int
+    @Binding var pageCount: Int
+    let highlightText: String?
+
+    func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
+
+    func makeUIView(context: Context) -> PDFView {
+        let view = PDFView()
+        view.autoScales = true
+        view.displayMode = .singlePageContinuous
+        view.displayDirection = .vertical
+        view.backgroundColor = .secondarySystemBackground
+        view.document = PDFDocument(data: data)
+        context.coordinator.pdfView = view
+        NotificationCenter.default.addObserver(
+            context.coordinator,
+            selector: #selector(Coordinator.pageChanged),
+            name: .PDFViewPageChanged,
+            object: view
+        )
+        DispatchQueue.main.async {
+            context.coordinator.updatePage()
+            context.coordinator.applyHighlightIfNeeded(highlightText)
+        }
+        return view
+    }
+
+    func updateUIView(_ view: PDFView, context: Context) {
+        context.coordinator.parent = self
+        // `data` is immutable for the lifetime of this detail view. Re-serializing the
+        // PDFDocument here would copy the entire file on routine page/highlight updates.
+        context.coordinator.applyHighlightIfNeeded(highlightText)
+        guard let document = view.document,
+              pageNumber > 0,
+              pageNumber <= document.pageCount,
+              let page = document.page(at: pageNumber - 1),
+              view.currentPage !== page
+        else { return }
+        view.go(to: page)
+    }
+
+    static func dismantleUIView(_ view: PDFView, coordinator: Coordinator) {
+        NotificationCenter.default.removeObserver(coordinator, name: .PDFViewPageChanged, object: view)
+    }
+
+    @MainActor
+    final class Coordinator: NSObject {
+        var parent: PDFDocumentView
+        weak var pdfView: PDFView?
+        private var lastHighlight: String?
+
+        init(parent: PDFDocumentView) { self.parent = parent }
+
+        @objc func pageChanged() { updatePage() }
+
+        func updatePage() {
+            guard let view = pdfView, let document = view.document else { return }
+            parent.pageCount = document.pageCount
+            if let current = view.currentPage {
+                parent.pageNumber = document.index(for: current) + 1
+            }
+        }
+
+        func applyHighlightIfNeeded(_ value: String?) {
+            let clean = value?.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard clean != lastHighlight else { return }
+            lastHighlight = clean
+            guard let clean, clean.count >= 2, let view = pdfView, let document = view.document else {
+                viewClearHighlights()
+                return
+            }
+            let selections = document.findString(clean, withOptions: .caseInsensitive)
+            let preferredPageIndex = max(parent.pageNumber - 1, 0)
+            let preferred = selections.first { selection in
+                guard let page = selection.pages.first else { return false }
+                return document.index(for: page) == preferredPageIndex
+            } ?? selections.first
+            guard let preferred else { return }
+            preferred.color = UIColor.systemYellow.withAlphaComponent(0.45)
+            view.highlightedSelections = [preferred]
+            view.go(to: preferred)
+            updatePage()
+            UIAccessibility.post(notification: .announcement, argument: "Matched PDF text highlighted")
+        }
+
+        private func viewClearHighlights() {
+            pdfView?.highlightedSelections = nil
+        }
+    }
+
+}

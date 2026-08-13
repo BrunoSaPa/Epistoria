@@ -1,0 +1,31 @@
+{
+  "name": "epistoria",
+  "version": "0.1.0",
+  "private": true,
+  "description": "The history of what you know.",
+  "workspaces": [
+    "apps/api"
+  ],
+  "engines": {
+    "node": ">=24"
+  },
+  "overrides": {
+    "js-yaml": "4.3.1"
+  },
+  "allowScripts": {
+    "@prisma/engines@7.9.1": true,
+    "@scarf/scarf": false,
+    "esbuild@0.25.12": true,
+    "fsevents": false,
+    "prisma@7.9.1": true
+  },
+  "scripts": {
+    "build": "npm run build --workspace @epistoria/api",
+    "dev": "npm run start:dev --workspace @epistoria/api",
+    "format": "npm run format --workspace @epistoria/api",
+    "lint": "npm run lint --workspace @epistoria/api",
+    "test": "npm run test --workspace @epistoria/api",
+    "test:e2e": "npm run test:e2e --workspace @epistoria/api",
+    "verify": "npm run lint && npm run test && npm run build"
+  }
+}

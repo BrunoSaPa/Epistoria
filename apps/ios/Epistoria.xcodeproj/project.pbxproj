@@ -1,0 +1,764 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		04236E6A6424E1E356863A5F /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 84F79068F407B2C7BBC367E9 /* Assets.xcassets */; };
+		0C13184662CE5717485E8BC1 /* LassoOverlayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 328ED5306D56EEB231FE8184 /* LassoOverlayView.swift */; };
+		1882F53EE20D174002135140 /* TodayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 507800F15F03EF683EB6D003 /* TodayView.swift */; };
+		2C79FFC1C80EB3DC2F7958CD /* EpistoriaApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 98E92AF31F99B4E43AAC5CFF /* EpistoriaApp.swift */; };
+		348DAD02CEA7B83998A25B00 /* NoteQuerySheetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB0B9C8761588D1DEF763E50 /* NoteQuerySheetView.swift */; };
+		35EF6CB34C88412ED6ED3677 /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 639D64932A90F21295231AD9 /* AppModel.swift */; };
+		3E66A6A86E116DD30AD26D1B /* EpistoriaExportServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DB9152EBDDEC2EE344EF519 /* EpistoriaExportServiceTests.swift */; };
+		3EFE1A6A662E4985817B5A07 /* SessionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 506A112DB7A5A7FDA172198B /* SessionsView.swift */; };
+		426067C698D45A2AD8D2CED3 /* DataHealthView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0F3B3FDFBB2BCD218101F2E /* DataHealthView.swift */; };
+		4295FF11D9057AB5501F087E /* CollectionDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE4D8FF2EA33C72A7A980377 /* CollectionDetailView.swift */; };
+		4AB03CD64DBD7DD0C95F2E38 /* PendingSaveRegistryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4A9C2EECA501629A0A6DE66 /* PendingSaveRegistryTests.swift */; };
+		4C3C9122AB20F2632A91F255 /* PendingSaveRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5AB1C23E0019EE50083F7840 /* PendingSaveRegistry.swift */; };
+		4D7AA72507C0FEEFD041A3F5 /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1CFA4F0C1427C4D173C8C791 /* OnboardingView.swift */; };
+		595221EF82584E451C0BFE87 /* WorkspacePresentationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 05409469B2C2B557F4ED04A7 /* WorkspacePresentationTests.swift */; };
+		5A5134EA299709B260A44067 /* EpistoriaAccessibilityUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A96413C31E6FBDD6548E083 /* EpistoriaAccessibilityUITests.swift */; };
+		63483CFD426EFD5BD4059DFB /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 9DC037239C3AAD04DDDC7E98 /* PrivacyInfo.xcprivacy */; };
+		9608B8B5525AE37248D76356 /* EpistoriaCore in Frameworks */ = {isa = PBXBuildFile; productRef = DBFCA34805D80887859E9A10 /* EpistoriaCore */; };
+		A423FEC02233BDC185DF7430 /* AccountConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E6623DB8C75432BEBBCAF11 /* AccountConfiguration.swift */; };
+		A5D94E2534C764EDA8A7B2C9 /* SpatialNotebookCanvas.swift in Sources */ = {isa = PBXBuildFile; fileRef = D375328611A336119E2F55C0 /* SpatialNotebookCanvas.swift */; };
+		B1545FB1ED851A4A6F5AA038 /* AppRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 994FB1067AAB271804368E81 /* AppRootView.swift */; };
+		C020D783090ACF29E186284D /* KnowledgeSearchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 296046E5F66D2C6212FE9F27 /* KnowledgeSearchView.swift */; };
+		C5F82045B47F32CFF46D15CE /* LibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7931BB0B2776308E4D8C7656 /* LibraryView.swift */; };
+		C7F469E7A36215F10F524E12 /* NoteQueryArtifactsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77B3805565CF9C5E40505BCF /* NoteQueryArtifactsView.swift */; };
+		D256CAAC165CDDF18A7D8A68 /* NotebookView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 07D6428F2835D5D270587135 /* NotebookView.swift */; };
+		D7268FC5ECD9944DCF92D7DE /* EpistoriaExportService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14FBF3B7A2C6EFB97A8C896A /* EpistoriaExportService.swift */; };
+		D9B6616E05DB2E898D413AF1 /* EpistoriaDesign.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A51BF1AFCD893DADFCF6CD8 /* EpistoriaDesign.swift */; };
+		DF9CD341ABD3A514D2FF6BB3 /* ConflictResolutionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF1667158D395E586B7CD1DF /* ConflictResolutionView.swift */; };
+		E49A752F660F93F32EB06C31 /* UniversityView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15B4A893BDC4C76907E1C2C1 /* UniversityView.swift */; };
+		E8739243E0E6F49401DB4C3F /* NoteEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B279FE27DE285AD320383789 /* NoteEditorView.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		284DDF8D16009C92CF48C247 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = DA6C2D03FC6D0244DBB5B43A /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 65C89720360569BD8ED0A4ED;
+			remoteInfo = Epistoria;
+		};
+		80CAA386DD2E9CFF4F4F344B /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = DA6C2D03FC6D0244DBB5B43A /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 65C89720360569BD8ED0A4ED;
+			remoteInfo = Epistoria;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		05409469B2C2B557F4ED04A7 /* WorkspacePresentationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspacePresentationTests.swift; sourceTree = "<group>"; };
+		07D6428F2835D5D270587135 /* NotebookView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotebookView.swift; sourceTree = "<group>"; };
+		0E6623DB8C75432BEBBCAF11 /* AccountConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountConfiguration.swift; sourceTree = "<group>"; };
+		14FBF3B7A2C6EFB97A8C896A /* EpistoriaExportService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EpistoriaExportService.swift; sourceTree = "<group>"; };
+		15B4A893BDC4C76907E1C2C1 /* UniversityView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UniversityView.swift; sourceTree = "<group>"; };
+		1A96413C31E6FBDD6548E083 /* EpistoriaAccessibilityUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EpistoriaAccessibilityUITests.swift; sourceTree = "<group>"; };
+		1CFA4F0C1427C4D173C8C791 /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
+		296046E5F66D2C6212FE9F27 /* KnowledgeSearchView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KnowledgeSearchView.swift; sourceTree = "<group>"; };
+		328ED5306D56EEB231FE8184 /* LassoOverlayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LassoOverlayView.swift; sourceTree = "<group>"; };
+		4A51BF1AFCD893DADFCF6CD8 /* EpistoriaDesign.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EpistoriaDesign.swift; sourceTree = "<group>"; };
+		506A112DB7A5A7FDA172198B /* SessionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionsView.swift; sourceTree = "<group>"; };
+		507800F15F03EF683EB6D003 /* TodayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodayView.swift; sourceTree = "<group>"; };
+		5AB1C23E0019EE50083F7840 /* PendingSaveRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PendingSaveRegistry.swift; sourceTree = "<group>"; };
+		639D64932A90F21295231AD9 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
+		6B327DC563DB084489F94B66 /* EpistoriaTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = EpistoriaTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		6C755E81DF1E06F682506F2E /* Epistoria.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Epistoria.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		77B3805565CF9C5E40505BCF /* NoteQueryArtifactsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteQueryArtifactsView.swift; sourceTree = "<group>"; };
+		7931BB0B2776308E4D8C7656 /* LibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryView.swift; sourceTree = "<group>"; };
+		84F79068F407B2C7BBC367E9 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		98E92AF31F99B4E43AAC5CFF /* EpistoriaApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EpistoriaApp.swift; sourceTree = "<group>"; };
+		994FB1067AAB271804368E81 /* AppRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppRootView.swift; sourceTree = "<group>"; };
+		9DB9152EBDDEC2EE344EF519 /* EpistoriaExportServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EpistoriaExportServiceTests.swift; sourceTree = "<group>"; };
+		9DC037239C3AAD04DDDC7E98 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		9F2107A5395CE766B240FE66 /* EpistoriaUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = EpistoriaUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		A4A9C2EECA501629A0A6DE66 /* PendingSaveRegistryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PendingSaveRegistryTests.swift; sourceTree = "<group>"; };
+		AE4D8FF2EA33C72A7A980377 /* CollectionDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CollectionDetailView.swift; sourceTree = "<group>"; };
+		B279FE27DE285AD320383789 /* NoteEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteEditorView.swift; sourceTree = "<group>"; };
+		D375328611A336119E2F55C0 /* SpatialNotebookCanvas.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpatialNotebookCanvas.swift; sourceTree = "<group>"; };
+		DA3EF4C44B5B4915DB15C54C /* EpistoriaCore */ = {isa = PBXFileReference; lastKnownFileType = folder; name = EpistoriaCore; path = EpistoriaCore; sourceTree = SOURCE_ROOT; };
+		E0F3B3FDFBB2BCD218101F2E /* DataHealthView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DataHealthView.swift; sourceTree = "<group>"; };
+		FB0B9C8761588D1DEF763E50 /* NoteQuerySheetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteQuerySheetView.swift; sourceTree = "<group>"; };
+		FF1667158D395E586B7CD1DF /* ConflictResolutionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConflictResolutionView.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		4831974CA0FE4154D9129D55 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				9608B8B5525AE37248D76356 /* EpistoriaCore in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		0155E6CAA591966DBE1DBB5B /* Packages */ = {
+			isa = PBXGroup;
+			children = (
+				DA3EF4C44B5B4915DB15C54C /* EpistoriaCore */,
+			);
+			name = Packages;
+			sourceTree = "<group>";
+		};
+		0262832711C8CFD405157601 /* App */ = {
+			isa = PBXGroup;
+			children = (
+				0E6623DB8C75432BEBBCAF11 /* AccountConfiguration.swift */,
+				639D64932A90F21295231AD9 /* AppModel.swift */,
+				994FB1067AAB271804368E81 /* AppRootView.swift */,
+				98E92AF31F99B4E43AAC5CFF /* EpistoriaApp.swift */,
+				5AB1C23E0019EE50083F7840 /* PendingSaveRegistry.swift */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		08F418E967856DBE107C3E9B /* DataHealth */ = {
+			isa = PBXGroup;
+			children = (
+				FF1667158D395E586B7CD1DF /* ConflictResolutionView.swift */,
+				E0F3B3FDFBB2BCD218101F2E /* DataHealthView.swift */,
+			);
+			path = DataHealth;
+			sourceTree = "<group>";
+		};
+		2280D44A44CB724C1572F179 /* DesignSystem */ = {
+			isa = PBXGroup;
+			children = (
+				4A51BF1AFCD893DADFCF6CD8 /* EpistoriaDesign.swift */,
+			);
+			path = DesignSystem;
+			sourceTree = "<group>";
+		};
+		2D821A9179B21BDB194041DA /* Today */ = {
+			isa = PBXGroup;
+			children = (
+				507800F15F03EF683EB6D003 /* TodayView.swift */,
+			);
+			path = Today;
+			sourceTree = "<group>";
+		};
+		39A6EDDEC3579DA45868CEE2 /* Export */ = {
+			isa = PBXGroup;
+			children = (
+				14FBF3B7A2C6EFB97A8C896A /* EpistoriaExportService.swift */,
+			);
+			path = Export;
+			sourceTree = "<group>";
+		};
+		4878F812341916F43C82B869 = {
+			isa = PBXGroup;
+			children = (
+				E557062CAC139695EC6C21DC /* Epistoria */,
+				EA43BCC539A106C69C15699E /* EpistoriaTests */,
+				CC01D55B94185DD52D36FB53 /* EpistoriaUITests */,
+				0155E6CAA591966DBE1DBB5B /* Packages */,
+				5A35D4415D5E51625B4B2A2A /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		5A35D4415D5E51625B4B2A2A /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				6C755E81DF1E06F682506F2E /* Epistoria.app */,
+				6B327DC563DB084489F94B66 /* EpistoriaTests.xctest */,
+				9F2107A5395CE766B240FE66 /* EpistoriaUITests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		62FCE15912606F089BADB210 /* Onboarding */ = {
+			isa = PBXGroup;
+			children = (
+				1CFA4F0C1427C4D173C8C791 /* OnboardingView.swift */,
+			);
+			path = Onboarding;
+			sourceTree = "<group>";
+		};
+		65E8ECE8CE5EE2E3B614BD8D /* Sessions */ = {
+			isa = PBXGroup;
+			children = (
+				506A112DB7A5A7FDA172198B /* SessionsView.swift */,
+			);
+			path = Sessions;
+			sourceTree = "<group>";
+		};
+		79FF157C90FEA0319D422A85 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				84F79068F407B2C7BBC367E9 /* Assets.xcassets */,
+				9DC037239C3AAD04DDDC7E98 /* PrivacyInfo.xcprivacy */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+		8695058FD9CB03E691DF1190 /* Search */ = {
+			isa = PBXGroup;
+			children = (
+				296046E5F66D2C6212FE9F27 /* KnowledgeSearchView.swift */,
+			);
+			path = Search;
+			sourceTree = "<group>";
+		};
+		8F4ABA578C3DAAB885C25790 /* Library */ = {
+			isa = PBXGroup;
+			children = (
+				7931BB0B2776308E4D8C7656 /* LibraryView.swift */,
+			);
+			path = Library;
+			sourceTree = "<group>";
+		};
+		91AC530B84B56864239A9AC9 /* Notebook */ = {
+			isa = PBXGroup;
+			children = (
+				AE4D8FF2EA33C72A7A980377 /* CollectionDetailView.swift */,
+				328ED5306D56EEB231FE8184 /* LassoOverlayView.swift */,
+				07D6428F2835D5D270587135 /* NotebookView.swift */,
+				B279FE27DE285AD320383789 /* NoteEditorView.swift */,
+				77B3805565CF9C5E40505BCF /* NoteQueryArtifactsView.swift */,
+				FB0B9C8761588D1DEF763E50 /* NoteQuerySheetView.swift */,
+				D375328611A336119E2F55C0 /* SpatialNotebookCanvas.swift */,
+			);
+			path = Notebook;
+			sourceTree = "<group>";
+		};
+		CC01D55B94185DD52D36FB53 /* EpistoriaUITests */ = {
+			isa = PBXGroup;
+			children = (
+				1A96413C31E6FBDD6548E083 /* EpistoriaAccessibilityUITests.swift */,
+			);
+			path = EpistoriaUITests;
+			sourceTree = "<group>";
+		};
+		E557062CAC139695EC6C21DC /* Epistoria */ = {
+			isa = PBXGroup;
+			children = (
+				0262832711C8CFD405157601 /* App */,
+				08F418E967856DBE107C3E9B /* DataHealth */,
+				2280D44A44CB724C1572F179 /* DesignSystem */,
+				39A6EDDEC3579DA45868CEE2 /* Export */,
+				8F4ABA578C3DAAB885C25790 /* Library */,
+				91AC530B84B56864239A9AC9 /* Notebook */,
+				62FCE15912606F089BADB210 /* Onboarding */,
+				79FF157C90FEA0319D422A85 /* Resources */,
+				8695058FD9CB03E691DF1190 /* Search */,
+				65E8ECE8CE5EE2E3B614BD8D /* Sessions */,
+				2D821A9179B21BDB194041DA /* Today */,
+				F1854594A282EDACD2B3A1EF /* University */,
+			);
+			path = Epistoria;
+			sourceTree = "<group>";
+		};
+		EA43BCC539A106C69C15699E /* EpistoriaTests */ = {
+			isa = PBXGroup;
+			children = (
+				9DB9152EBDDEC2EE344EF519 /* EpistoriaExportServiceTests.swift */,
+				A4A9C2EECA501629A0A6DE66 /* PendingSaveRegistryTests.swift */,
+				05409469B2C2B557F4ED04A7 /* WorkspacePresentationTests.swift */,
+			);
+			path = EpistoriaTests;
+			sourceTree = "<group>";
+		};
+		F1854594A282EDACD2B3A1EF /* University */ = {
+			isa = PBXGroup;
+			children = (
+				15B4A893BDC4C76907E1C2C1 /* UniversityView.swift */,
+			);
+			path = University;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		34CCF6192C01085ECB6FD284 /* EpistoriaTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = C40F3176647FCF57A87C9880 /* Build configuration list for PBXNativeTarget "EpistoriaTests" */;
+			buildPhases = (
+				55E38B789D29E2D505403741 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				C3A15A58D0A8803EFD764D62 /* PBXTargetDependency */,
+			);
+			name = EpistoriaTests;
+			packageProductDependencies = (
+			);
+			productName = EpistoriaTests;
+			productReference = 6B327DC563DB084489F94B66 /* EpistoriaTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		65C89720360569BD8ED0A4ED /* Epistoria */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = C1BE9A2145E021D834E4AAF5 /* Build configuration list for PBXNativeTarget "Epistoria" */;
+			buildPhases = (
+				54E0C3FD8061679B7A5D2147 /* Sources */,
+				313794AEFF32BD4164CF0058 /* Resources */,
+				4831974CA0FE4154D9129D55 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = Epistoria;
+			packageProductDependencies = (
+				DBFCA34805D80887859E9A10 /* EpistoriaCore */,
+			);
+			productName = Epistoria;
+			productReference = 6C755E81DF1E06F682506F2E /* Epistoria.app */;
+			productType = "com.apple.product-type.application";
+		};
+		73C31BC81160E750CB0D0812 /* EpistoriaUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 299F51617E1A22A3B4667F95 /* Build configuration list for PBXNativeTarget "EpistoriaUITests" */;
+			buildPhases = (
+				58C2E2F85C3FC356E578421D /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				DD03F4A8DC998A9B31A12CB3 /* PBXTargetDependency */,
+			);
+			name = EpistoriaUITests;
+			packageProductDependencies = (
+			);
+			productName = EpistoriaUITests;
+			productReference = 9F2107A5395CE766B240FE66 /* EpistoriaUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		DA6C2D03FC6D0244DBB5B43A /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					65C89720360569BD8ED0A4ED = {
+						ProvisioningStyle = Automatic;
+					};
+					73C31BC81160E750CB0D0812 = {
+						TestTargetID = 65C89720360569BD8ED0A4ED;
+					};
+				};
+			};
+			buildConfigurationList = 0E261D44AB4CEF57FC3B4F4F /* Build configuration list for PBXProject "Epistoria" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 4878F812341916F43C82B869;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				65FDD9729A96DF738CF86DB3 /* XCLocalSwiftPackageReference "EpistoriaCore" */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 5A35D4415D5E51625B4B2A2A /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				65C89720360569BD8ED0A4ED /* Epistoria */,
+				34CCF6192C01085ECB6FD284 /* EpistoriaTests */,
+				73C31BC81160E750CB0D0812 /* EpistoriaUITests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		313794AEFF32BD4164CF0058 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				04236E6A6424E1E356863A5F /* Assets.xcassets in Resources */,
+				63483CFD426EFD5BD4059DFB /* PrivacyInfo.xcprivacy in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		54E0C3FD8061679B7A5D2147 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A423FEC02233BDC185DF7430 /* AccountConfiguration.swift in Sources */,
+				35EF6CB34C88412ED6ED3677 /* AppModel.swift in Sources */,
+				B1545FB1ED851A4A6F5AA038 /* AppRootView.swift in Sources */,
+				4295FF11D9057AB5501F087E /* CollectionDetailView.swift in Sources */,
+				DF9CD341ABD3A514D2FF6BB3 /* ConflictResolutionView.swift in Sources */,
+				426067C698D45A2AD8D2CED3 /* DataHealthView.swift in Sources */,
+				2C79FFC1C80EB3DC2F7958CD /* EpistoriaApp.swift in Sources */,
+				D9B6616E05DB2E898D413AF1 /* EpistoriaDesign.swift in Sources */,
+				D7268FC5ECD9944DCF92D7DE /* EpistoriaExportService.swift in Sources */,
+				C020D783090ACF29E186284D /* KnowledgeSearchView.swift in Sources */,
+				0C13184662CE5717485E8BC1 /* LassoOverlayView.swift in Sources */,
+				C5F82045B47F32CFF46D15CE /* LibraryView.swift in Sources */,
+				E8739243E0E6F49401DB4C3F /* NoteEditorView.swift in Sources */,
+				C7F469E7A36215F10F524E12 /* NoteQueryArtifactsView.swift in Sources */,
+				348DAD02CEA7B83998A25B00 /* NoteQuerySheetView.swift in Sources */,
+				D256CAAC165CDDF18A7D8A68 /* NotebookView.swift in Sources */,
+				4D7AA72507C0FEEFD041A3F5 /* OnboardingView.swift in Sources */,
+				4C3C9122AB20F2632A91F255 /* PendingSaveRegistry.swift in Sources */,
+				3EFE1A6A662E4985817B5A07 /* SessionsView.swift in Sources */,
+				A5D94E2534C764EDA8A7B2C9 /* SpatialNotebookCanvas.swift in Sources */,
+				1882F53EE20D174002135140 /* TodayView.swift in Sources */,
+				E49A752F660F93F32EB06C31 /* UniversityView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		55E38B789D29E2D505403741 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				3E66A6A86E116DD30AD26D1B /* EpistoriaExportServiceTests.swift in Sources */,
+				4AB03CD64DBD7DD0C95F2E38 /* PendingSaveRegistryTests.swift in Sources */,
+				595221EF82584E451C0BFE87 /* WorkspacePresentationTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		58C2E2F85C3FC356E578421D /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				5A5134EA299709B260A44067 /* EpistoriaAccessibilityUITests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		C3A15A58D0A8803EFD764D62 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 65C89720360569BD8ED0A4ED /* Epistoria */;
+			targetProxy = 284DDF8D16009C92CF48C247 /* PBXContainerItemProxy */;
+		};
+		DD03F4A8DC998A9B31A12CB3 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 65C89720360569BD8ED0A4ED /* Epistoria */;
+			targetProxy = 80CAA386DD2E9CFF4F4F344B /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		2BD28B9AF8DBE4C429FE3575 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.epistoria.EpistoriaUITests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = Epistoria;
+			};
+			name = Release;
+		};
+		2EA58F17D645E6EA9A712319 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+		3B54341B7FB6ECAA810701ED /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.epistoria.EpistoriaTests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Epistoria.app/Epistoria";
+			};
+			name = Release;
+		};
+		44F340FA49417CDA18DBBE58 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		72A4F19E127055DC8A258391 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = Epistoria;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.education";
+				INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsLocalNetworking = YES;
+				INFOPLIST_KEY_NSFaceIDUsageDescription = "Unlock your encrypted Epistoria account key.";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Connect to your private Epistoria sync server on your local network.";
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.epistoria.notebook;
+				PRODUCT_NAME = Epistoria;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = 2;
+			};
+			name = Debug;
+		};
+		ABD72FAE04310F2097C39DA1 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = Epistoria;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.education";
+				INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsLocalNetworking = YES;
+				INFOPLIST_KEY_NSFaceIDUsageDescription = "Unlock your encrypted Epistoria account key.";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Connect to your private Epistoria sync server on your local network.";
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.epistoria.notebook;
+				PRODUCT_NAME = Epistoria;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = 2;
+			};
+			name = Release;
+		};
+		BD099E9DD7659126108A99F4 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.epistoria.EpistoriaUITests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = Epistoria;
+			};
+			name = Debug;
+		};
+		EECBDD41B66B1141B3ACE6E2 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.epistoria.EpistoriaTests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Epistoria.app/Epistoria";
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		0E261D44AB4CEF57FC3B4F4F /* Build configuration list for PBXProject "Epistoria" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				44F340FA49417CDA18DBBE58 /* Debug */,
+				2EA58F17D645E6EA9A712319 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		299F51617E1A22A3B4667F95 /* Build configuration list for PBXNativeTarget "EpistoriaUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				BD099E9DD7659126108A99F4 /* Debug */,
+				2BD28B9AF8DBE4C429FE3575 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		C1BE9A2145E021D834E4AAF5 /* Build configuration list for PBXNativeTarget "Epistoria" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				72A4F19E127055DC8A258391 /* Debug */,
+				ABD72FAE04310F2097C39DA1 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		C40F3176647FCF57A87C9880 /* Build configuration list for PBXNativeTarget "EpistoriaTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				EECBDD41B66B1141B3ACE6E2 /* Debug */,
+				3B54341B7FB6ECAA810701ED /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		65FDD9729A96DF738CF86DB3 /* XCLocalSwiftPackageReference "EpistoriaCore" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = EpistoriaCore;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		DBFCA34805D80887859E9A10 /* EpistoriaCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = EpistoriaCore;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = DA6C2D03FC6D0244DBB5B43A /* Project object */;
+}

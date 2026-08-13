@@ -1,0 +1,59 @@
+name: verify
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  api-worker-integration:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: services/worker/requirements.lock
+      - run: npm ci --strict-allow-scripts
+      - run: scripts/install-worker.sh
+      - run: scripts/scan-secrets.sh
+      - run: node scripts/validate-contracts.mjs
+      - run: node scripts/check-public-docs.mjs
+      - run: npm run verify
+      - run: services/worker/.venv/bin/python -m ruff check services/worker
+      - run: >-
+          services/worker/.venv/bin/python -m mypy
+          --config-file services/worker/pyproject.toml
+          services/worker/src
+      - run: services/worker/.venv/bin/python -m pytest -q services/worker/tests
+      - run: make api-test-e2e
+      - if: always()
+        run: make infra-down
+
+  swift:
+    runs-on: macos-15
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test core
+        working-directory: apps/ios/EpistoriaCore
+        run: swift test
+      - name: Build iPad app
+        run: >-
+          xcodebuild -quiet
+          -project apps/ios/Epistoria.xcodeproj
+          -scheme Epistoria
+          -destination 'generic/platform=iOS Simulator'
+          -derivedDataPath "$RUNNER_TEMP/EpistoriaDerivedData"
+          CODE_SIGNING_ALLOWED=NO
+          build

@@ -1,0 +1,12 @@
+[Unit]
+Description=Run the Epistoria backup every night
+
+[Timer]
+OnCalendar=*-*-* 02:15:00 UTC
+RandomizedDelaySec=30m
+AccuracySec=5m
+Persistent=true
+Unit=epistoria-backup.service
+
+[Install]
+WantedBy=timers.target

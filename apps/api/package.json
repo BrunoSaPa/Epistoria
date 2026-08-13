@@ -1,0 +1,58 @@
+{
+  "name": "@epistoria/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "npm run prisma:generate && tsc -p tsconfig.build.json",
+    "start": "node dist/main.js",
+    "start:dev": "npm run prisma:generate && tsx watch src/main.ts",
+    "format": "prettier --write 'src/**/*.ts' 'test/**/*.ts' 'prisma.config.ts'",
+    "lint": "eslint 'src/**/*.ts' 'test/**/*.ts' prisma.config.ts --no-error-on-unmatched-pattern --max-warnings=0 && tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --exclude 'test/**/*.e2e.spec.ts'",
+    "test:e2e": "vitest run test/api.e2e.spec.ts --testTimeout=30000",
+    "prisma:generate": "DATABASE_URL=${DATABASE_URL:-postgresql://build:build@127.0.0.1:5432/build} prisma generate",
+    "prisma:migrate": "prisma migrate dev",
+    "prisma:deploy": "prisma migrate deploy",
+    "prisma:status": "prisma migrate status"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "3.1106.0",
+    "@aws-sdk/s3-request-presigner": "3.1106.0",
+    "@nestjs/common": "11.1.28",
+    "@nestjs/config": "4.0.4",
+    "@nestjs/core": "11.1.28",
+    "@nestjs/platform-express": "11.1.28",
+    "@nestjs/swagger": "11.4.5",
+    "@nestjs/throttler": "6.5.0",
+    "@prisma/adapter-pg": "7.9.1",
+    "@prisma/client": "7.9.1",
+    "class-transformer": "0.5.1",
+    "class-validator": "0.14.2",
+    "helmet": "8.1.0",
+    "pg": "8.16.3",
+    "reflect-metadata": "0.2.2",
+    "rxjs": "7.8.2"
+  },
+  "devDependencies": {
+    "@eslint/js": "9.35.0",
+    "@nestjs/testing": "11.1.28",
+    "@types/node": "24.3.0",
+    "@types/express": "5.0.6",
+    "@types/pg": "8.15.5",
+    "@types/supertest": "6.0.3",
+    "eslint": "9.35.0",
+    "eslint-config-prettier": "10.1.8",
+    "globals": "16.3.0",
+    "prettier": "3.6.2",
+    "prisma": "7.9.1",
+    "supertest": "7.1.4",
+    "tsx": "4.20.5",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.42.0",
+    "vitest": "4.1.10"
+  }
+}
