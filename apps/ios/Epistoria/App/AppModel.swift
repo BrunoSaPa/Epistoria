@@ -5,6 +5,9 @@ import Observation
 
 private enum AppModelOperationError: Error, LocalizedError {
     case accountSetupRollbackFailed
+    case existingLocalNotebook
+    case configuredNotebookUnavailable
+    case notebookKeyUnavailable
     case serverIdentityMismatch
     case serverConnectionRollbackFailed
     case unlockedSessionUnavailable
@@ -13,6 +16,12 @@ private enum AppModelOperationError: Error, LocalizedError {
         switch self {
         case .accountSetupRollbackFailed:
             "Epistoria could not safely roll back account setup. Restart the app before trying again."
+        case .existingLocalNotebook:
+            "This iPad already has an Epistoria notebook. Open or recover it before creating another. Existing data was not changed."
+        case .configuredNotebookUnavailable:
+            "Epistoria could not find a configured notebook to open. Existing data was not changed."
+        case .notebookKeyUnavailable:
+            "The notebook key is not available on this iPad. Restore it with its account ID and 24 recovery words. Existing data was not changed."
         case .serverIdentityMismatch:
             "The server returned credentials for a different account or device. No credentials were saved."
         case .serverConnectionRollbackFailed:
@@ -69,10 +78,11 @@ final class AppModel {
     private(set) var aiJobs: AIJobCoordinator?
 
     private var accountKey: Data?
-    private let configurationStore = AccountConfigurationStore()
-    private let accountKeyStore = KeychainStore()
-    private let tokenStore = DeviceTokenStore()
-    private let crypto = EntityCrypto()
+    private let configurationStore: AccountConfigurationStore
+    private let accountKeyStore: KeychainStore
+    private let tokenStore: DeviceTokenStore
+    private let crypto: EntityCrypto
+    private let applicationSupportOverride: URL?
     private var isOpening = false
     private var automaticSyncTask: Task<Void, Never>?
     private var automaticSyncToken: UUID?
@@ -86,6 +96,41 @@ final class AppModel {
     private var sessionGeneration: UInt64 = 0
     private var isReconfiguringSync = false
     private var pendingSaveWarning: String?
+
+    init(
+        configurationStore: AccountConfigurationStore = AccountConfigurationStore(),
+        accountKeyStore: KeychainStore = KeychainStore(),
+        tokenStore: DeviceTokenStore = DeviceTokenStore(),
+        crypto: EntityCrypto = EntityCrypto(),
+        applicationSupportURL: URL? = nil
+    ) {
+        self.configurationStore = configurationStore
+        self.accountKeyStore = accountKeyStore
+        self.tokenStore = tokenStore
+        self.crypto = crypto
+        applicationSupportOverride = applicationSupportURL
+    }
+
+    var hasConfiguredNotebook: Bool {
+        configurationStore.load() != nil
+    }
+
+    var hasUnconfiguredLegacyNotebook: Bool {
+        guard !configurationStore.containsStoredConfiguration,
+              let support = try? applicationSupportURL()
+        else { return false }
+        return AccountStorageLocator(applicationSupportURL: support).hasLegacyDatabase
+    }
+
+    #if DEBUG
+    var hasLocalDevelopmentNotebookData: Bool {
+        if configurationStore.containsStoredConfiguration { return true }
+        guard let support = try? applicationSupportURL() else { return false }
+        return DevelopmentNotebookStorageResetter(
+            applicationSupportURL: support
+        ).hasLegacyStorage
+    }
+    #endif
 
     func start() async {
         if isOpening || isLocking {
@@ -118,7 +163,17 @@ final class AppModel {
                 restartRequested = false
                 return
             }
-            try await open(configuration: configuration, key: key, generation: generation)
+            let purpose = storagePurpose(for: configuration)
+            try await open(
+                configuration: configuration,
+                key: key,
+                generation: generation,
+                storagePurpose: purpose
+            )
+            try persistResolvedStorageScopeIfNeeded(
+                configuration,
+                purpose: purpose
+            )
             await beginReadyWork()
         } catch {
             if generation == sessionGeneration, !isLocking, !(error is CancellationError) {
@@ -205,6 +260,12 @@ final class AppModel {
     }
 
     func prepareNewAccount() throws -> NewAccountMaterial {
+        try configurationStore.validateForMutation()
+        guard !configurationStore.containsStoredConfiguration,
+              !hasUnconfiguredLegacyNotebook
+        else {
+            throw AppModelOperationError.existingLocalNotebook
+        }
         let key = try crypto.randomKey()
         return NewAccountMaterial(
             accountId: UUID(),
@@ -216,13 +277,20 @@ final class AppModel {
 
     func confirmNewAccount(_ material: NewAccountMaterial) async throws {
         guard !isOpening, !isLocking else { throw AppModelOperationError.unlockedSessionUnavailable }
+        try configurationStore.validateForMutation()
+        guard !configurationStore.containsStoredConfiguration,
+              !hasUnconfiguredLegacyNotebook
+        else {
+            throw AppModelOperationError.existingLocalNotebook
+        }
         isOpening = true
         let generation = sessionGeneration
         let configuration = AccountConfiguration(
             accountId: material.accountId,
             deviceId: material.deviceId,
             apiURL: nil,
-            serverConnected: false
+            serverConnected: false,
+            storageScope: .accountScoped
         )
         do {
             try accountKeyStore.saveAccountKey(
@@ -233,7 +301,8 @@ final class AppModel {
             try await open(
                 configuration: configuration,
                 key: material.accountKey,
-                generation: generation
+                generation: generation,
+                storagePurpose: .accountScoped
             )
             try configurationStore.save(configuration)
         } catch {
@@ -256,16 +325,38 @@ final class AppModel {
     func restoreLocalAccount(accountId: UUID, words: String) async throws {
         let key = try RecoveryKit.accountKey(from: words)
         guard !isOpening, !isLocking else { throw AppModelOperationError.unlockedSessionUnavailable }
+        try configurationStore.validateForMutation()
+        let existing = try configurationStore.loadValidated()
+        guard existing == nil || existing?.accountId == accountId else {
+            throw AppModelOperationError.existingLocalNotebook
+        }
         isOpening = true
         let generation = sessionGeneration
-        let configuration = AccountConfiguration(
+        let support = try applicationSupportURL()
+        let recoveredLocation = AccountStorageLocator(applicationSupportURL: support).location(
+            for: accountId,
+            purpose: .existingWithLegacyFallback
+        )
+        var configuration = existing ?? AccountConfiguration(
             accountId: accountId,
             deviceId: UUID(),
             apiURL: nil,
-            serverConnected: false
+            serverConnected: false,
+            storageScope: recoveredLocation.directoryURL.standardizedFileURL
+                == support.standardizedFileURL ? .legacyShared : .accountScoped
         )
+        let purpose = storagePurpose(for: configuration)
         do {
-            try await open(configuration: configuration, key: key, generation: generation)
+            try await open(
+                configuration: configuration,
+                key: key,
+                generation: generation,
+                storagePurpose: purpose
+            )
+            configuration = try resolvedStorageConfiguration(
+                configuration,
+                purpose: purpose
+            )
             try accountKeyStore.saveAccountKey(key, accountId: accountId, requiresUserPresence: true)
             try configurationStore.save(configuration)
         } catch {
@@ -281,6 +372,78 @@ final class AppModel {
         isOpening = false
         await honorDeferredRestartIfNeeded()
     }
+
+    func openConfiguredNotebook() async throws {
+        guard !isOpening, !isLocking else {
+            throw AppModelOperationError.unlockedSessionUnavailable
+        }
+        try configurationStore.validateForMutation()
+        guard let target = try configurationStore.loadValidated() else {
+            throw AppModelOperationError.configuredNotebookUnavailable
+        }
+        guard let key = try accountKeyStore.accountKey(
+            accountId: target.accountId,
+            prompt: "Open Epistoria"
+        ) else { throw AppModelOperationError.notebookKeyUnavailable }
+
+        isOpening = true
+        let generation = sessionGeneration
+        let purpose = storagePurpose(for: target)
+        do {
+            try await open(
+                configuration: target,
+                key: key,
+                generation: generation,
+                storagePurpose: purpose
+            )
+            try persistResolvedStorageScopeIfNeeded(target, purpose: purpose)
+        } catch {
+            let originalError = error
+            await tearDown(nextPhase: .onboarding, honorDeferredRestart: false)
+            isOpening = false
+            throw originalError
+        }
+        await beginReadyWork()
+        isOpening = false
+        await honorDeferredRestartIfNeeded()
+    }
+
+    #if DEBUG
+    /// Permanently removes the local development copy after a separate typed confirmation in the
+    /// interface. This method is not compiled into release builds and never contacts the server.
+    func deleteLocalDevelopmentNotebook() async throws {
+        guard !isOpening,
+              !isLocking,
+              !isCreatingPortableExport
+        else { throw AppModelOperationError.unlockedSessionUnavailable }
+        var storedConfiguration = try configurationStore.loadValidated()
+        if let unresolved = storedConfiguration, unresolved.storageScope == nil {
+            let resolved = try resolvedStorageConfiguration(
+                unresolved,
+                purpose: .existingWithLegacyFallback
+            )
+            try configurationStore.save(resolved)
+            storedConfiguration = resolved
+        }
+        let support = try applicationSupportURL()
+        let resetter = DevelopmentNotebookStorageResetter(applicationSupportURL: support)
+
+        await tearDown(nextPhase: .onboarding, honorDeferredRestart: false)
+        if let storedConfiguration {
+            try resetter.removeConfiguredStorage(
+                accountId: storedConfiguration.accountId,
+                purpose: storagePurpose(for: storedConfiguration)
+            )
+            try tokenStore.delete(deviceId: storedConfiguration.deviceId)
+            try accountKeyStore.deleteAccountKey(accountId: storedConfiguration.accountId)
+        } else {
+            try resetter.removeLegacyStorage()
+        }
+        configurationStore.clearForDevelopment()
+        configuration = nil
+        phase = .onboarding
+    }
+    #endif
 
     /// Returns to the recovery-safe onboarding surface without deleting the encrypted store.
     func beginRecovery() {
@@ -644,17 +807,17 @@ final class AppModel {
     private func open(
         configuration: AccountConfiguration,
         key: Data,
-        generation: UInt64
+        generation: UInt64,
+        storagePurpose: AccountStoragePurpose
     ) async throws {
-        let support = try FileManager.default.url(
-            for: .applicationSupportDirectory,
-            in: .userDomainMask,
-            appropriateFor: nil,
-            create: true
-        ).appendingPathComponent("Epistoria", isDirectory: true)
+        let support = try applicationSupportURL()
         try FileManager.default.createDirectory(at: support, withIntermediateDirectories: true)
+        let storage = AccountStorageLocator(applicationSupportURL: support).location(
+            for: configuration.accountId,
+            purpose: storagePurpose
+        )
         let database = try SQLCipherDatabase(
-            url: support.appendingPathComponent("epistoria.sqlite"),
+            url: storage.databaseURL,
             key: try crypto.localDatabaseKey(
                 accountKey: key,
                 accountId: configuration.accountId
@@ -665,7 +828,7 @@ final class AppModel {
             accountId: configuration.accountId,
             accountKey: key,
             store: store,
-            directory: support.appendingPathComponent("Assets", isDirectory: true)
+            directory: storage.assetsDirectoryURL
         )
         var openedAPI: EpistoriaAPIClient?
         var openedSyncEngine: SyncEngine?
@@ -713,6 +876,55 @@ final class AppModel {
         aiJobs = openedAIJobs
         syncError = connectionWarning
         phase = .ready
+    }
+
+    private func applicationSupportURL() throws -> URL {
+        if let applicationSupportOverride { return applicationSupportOverride }
+        return try FileManager.default.url(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: true
+        ).appendingPathComponent("Epistoria", isDirectory: true)
+    }
+
+    private func storagePurpose(
+        for configuration: AccountConfiguration
+    ) -> AccountStoragePurpose {
+        switch configuration.storageScope {
+        case .accountScoped:
+            .accountScoped
+        case .legacyShared:
+            .legacyShared
+        case nil:
+            .existingWithLegacyFallback
+        }
+    }
+
+    private func resolvedStorageConfiguration(
+        _ configuration: AccountConfiguration,
+        purpose: AccountStoragePurpose
+    ) throws -> AccountConfiguration {
+        guard configuration.storageScope == nil else { return configuration }
+        let support = try applicationSupportURL()
+        let location = AccountStorageLocator(applicationSupportURL: support).location(
+            for: configuration.accountId,
+            purpose: purpose
+        )
+        var resolved = configuration
+        resolved.storageScope = location.directoryURL.standardizedFileURL
+            == support.standardizedFileURL ? .legacyShared : .accountScoped
+        return resolved
+    }
+
+    private func persistResolvedStorageScopeIfNeeded(
+        _ configuration: AccountConfiguration,
+        purpose: AccountStoragePurpose
+    ) throws {
+        let resolved = try resolvedStorageConfiguration(configuration, purpose: purpose)
+        guard resolved != configuration else { return }
+        try configurationStore.save(resolved)
+        self.configuration = resolved
     }
 
     private func startPathMonitorIfNeeded() {

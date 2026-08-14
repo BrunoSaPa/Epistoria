@@ -12,6 +12,8 @@ Epistoria remains in personal beta. The following limits apply to the current pr
 - The app can create and validate a readable export but cannot import it.
 - Restored files download when first opened. There is no bulk offline-download action.
 - Full fresh-device and independent-backup recovery tests remain in progress.
+- Epistoria supports one private notebook account per installation. Different subjects belong in
+  that connected notebook.
 
 ## Notebook
 
@@ -40,10 +42,16 @@ Epistoria remains in personal beta. The following limits apply to the current pr
 - PDF extraction and AI features require a paired Mac.
 - AI features require a separately configured provider account and can incur provider charges.
 - A live paid AI evaluation is not part of the current release evidence.
+- The current beta does not create flashcards or practice tests.
+- The current beta does not store card reviews, saved tests, test answers, scores, or mistake
+  history.
+- The current beta does not create subject-scoped or comprehensive test outlines.
+- The current beta does not recommend what to study next.
+- The current beta does not run proactive AI tasks. Each current AI request starts with a user
+  action and a review of what will be processed.
 
 ## Product scope
 
 - The current project supports one owner.
 - Collaboration, public sharing, subscriptions, billing, and organization administration are not
   available.
-

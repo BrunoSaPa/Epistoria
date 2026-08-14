@@ -24,6 +24,7 @@ the current personal beta.
 
 ## Organization
 
+- Keep subjects in one connected private notebook.
 - Group material in collections.
 - Organize academic work by institution, term, and course.
 - Link notes, PDFs, and study sessions to a course.
@@ -65,6 +66,7 @@ This feature requires a paired Mac and a configured AI provider. It is optional.
 ## Recovery and portability
 
 - Recover the account key with the account ID and 24 recovery words.
+- Prevent new setup from replacing the configured notebook.
 - Verify selected recovery words during initial setup.
 - Create a readable export with standard files and checksums.
 - Preserve original PDFs, images, rich text, and Pencil data in the export.
@@ -81,4 +83,3 @@ The current app can validate a readable export but cannot import it. See
 - Uses text and symbols, not color alone, for status.
 
 Physical-device accessibility review remains part of the beta work.
-

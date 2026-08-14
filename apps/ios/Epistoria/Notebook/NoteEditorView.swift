@@ -162,7 +162,7 @@ struct NoteEditorView: View {
         }
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { editorToolbar }
-        .toolbarBackground(.regularMaterial, for: .navigationBar, .bottomBar)
+        .toolbarBackground(.regularMaterial, for: .navigationBar)
         .fileImporter(
             isPresented: $isImportingImage,
             allowedContentTypes: [.image],
@@ -171,7 +171,7 @@ struct NoteEditorView: View {
             Task { await importImage(result) }
         }
         .overlay(alignment: .topLeading) { statusOverlay }
-        .safeAreaInset(edge: .bottom) { transientBottomMessage }
+        .safeAreaInset(edge: .bottom, spacing: 0) { editorBottomInset }
         .task {
             workspacePresentation?.beginImmersiveEditing(id: immersiveEditorID)
             await load()
@@ -307,62 +307,6 @@ struct NoteEditorView: View {
             }
         }
 
-        ToolbarItemGroup(placement: .bottomBar) {
-            if mode == .lasso {
-                Button("Cancel") {
-                    mode = .select
-                    lassoSelection = LassoSelection()
-                }
-                if !lassoSelection.isEmpty {
-                    Button("Ask") { showNoteQuerySheet = true }
-                        .buttonStyle(.borderedProminent)
-                        .tint(EpistoriaDesign.ink)
-                }
-            } else {
-                Button {
-                    mode = .select
-                } label: {
-                    Label("Select", systemImage: mode == .select ? "cursorarrow.rays" : "cursorarrow")
-                }
-                .accessibilityIdentifier("note.tool.select")
-
-                Button {
-                    Task { await activateInk() }
-                } label: {
-                    Label("Pen", systemImage: "pencil.tip")
-                }
-                .disabled(isArchived)
-                .accessibilityIdentifier("note.tool.pen")
-
-                Button {
-                    Task { await addText() }
-                } label: {
-                    Label("Text", systemImage: "textformat")
-                }
-                .keyboardShortcut("t", modifiers: [.command, .option])
-                .disabled(isArchived)
-                .accessibilityIdentifier("note.tool.text")
-
-                Button {
-                    isImportingImage = true
-                } label: {
-                    Label("Image", systemImage: "photo.badge.plus")
-                }
-                .disabled(isArchived)
-                .accessibilityIdentifier("note.tool.image")
-
-                if model.aiJobs != nil {
-                    Button {
-                        selectedItemId = nil
-                        lassoSelection = LassoSelection()
-                        mode = .lasso
-                    } label: {
-                        Label("Select region", systemImage: "lasso")
-                    }
-                    .accessibilityIdentifier("note.tool.lasso")
-                }
-            }
-        }
     }
 
     private var canvasMenu: some View {
@@ -434,6 +378,94 @@ struct NoteEditorView: View {
             .accessibilityElement(children: .combine)
             .accessibilityIdentifier("note.persistence-status")
         }
+    }
+
+    private var editorBottomInset: some View {
+        VStack(spacing: 0) {
+            transientBottomMessage
+            Divider()
+            canvasToolShelf
+        }
+        .background(.regularMaterial)
+    }
+
+    @ViewBuilder
+    private var canvasToolShelf: some View {
+        HStack(spacing: 6) {
+            if mode == .lasso {
+                canvasToolButton("Cancel", systemImage: "xmark") {
+                    mode = .select
+                    lassoSelection = LassoSelection()
+                }
+                if !lassoSelection.isEmpty {
+                    canvasToolButton("Ask", systemImage: "sparkles", selected: true) {
+                        showNoteQuerySheet = true
+                    }
+                }
+            } else {
+                canvasToolButton(
+                    "Select",
+                    systemImage: mode == .select ? "cursorarrow.rays" : "cursorarrow",
+                    selected: mode == .select
+                ) {
+                    mode = .select
+                }
+                .accessibilityIdentifier("note.tool.select")
+
+                canvasToolButton("Pen", systemImage: "pencil.tip", selected: mode == .ink) {
+                    Task { await activateInk() }
+                }
+                .disabled(isArchived)
+                .accessibilityIdentifier("note.tool.pen")
+
+                canvasToolButton("Text", systemImage: "textformat") {
+                    Task { await addText() }
+                }
+                .keyboardShortcut("t", modifiers: [.command, .option])
+                .disabled(isArchived)
+                .accessibilityIdentifier("note.tool.text")
+
+                canvasToolButton("Image", systemImage: "photo.badge.plus") {
+                    isImportingImage = true
+                }
+                .disabled(isArchived)
+                .accessibilityIdentifier("note.tool.image")
+
+                if model.aiJobs != nil {
+                    canvasToolButton("Ask selection", systemImage: "lasso") {
+                        selectedItemId = nil
+                        lassoSelection = LassoSelection()
+                        mode = .lasso
+                    }
+                    .accessibilityIdentifier("note.tool.lasso")
+                }
+            }
+        }
+        .font(.subheadline.weight(.medium))
+        .foregroundStyle(EpistoriaDesign.ink)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity)
+        .accessibilityElement(children: .contain)
+    }
+
+    private func canvasToolButton(
+        _ title: String,
+        systemImage: String,
+        selected: Bool = false,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: systemImage)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 9)
+                .background(
+                    selected ? EpistoriaDesign.subtleFill : Color.clear,
+                    in: RoundedRectangle(cornerRadius: EpistoriaDesign.compactRadius, style: .continuous)
+                )
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(EpistoriaPressButtonStyle())
     }
 
     @ViewBuilder

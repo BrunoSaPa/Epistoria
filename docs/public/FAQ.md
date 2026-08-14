@@ -21,6 +21,14 @@ requests require the applicable service and connection.
 
 No. Epistoria can operate as a local-only notebook. Private synchronization is optional.
 
+## Can I keep more than one notebook on an iPad?
+
+No. Epistoria intentionally uses one private notebook so subjects, sources, notes, sessions, and
+learning history can remain connected. Use collections and courses to organize different areas.
+
+If the iPad already has a configured notebook, setup opens or recovers it instead of creating a
+second notebook.
+
 ## Can the synchronization service read my notes?
 
 It is designed to store encrypted content and the operational information required to
@@ -33,6 +41,62 @@ relationship shape.
 
 No. AI features require a configured provider and an explicit user action. Normal notebook use
 does not require AI.
+
+A planned proactive mode will allow the user to approve selected material, task types, frequency,
+expiration, and a spending limit in advance. It will be optional, pausable, and limited to that
+approved scope. Opening the app will not itself approve or send notebook content.
+
+## Will Epistoria create flashcards and practice tests?
+
+This is planned but is not available in the current beta. Generated cards, questions, answer
+keys, and grading guides will link to supporting notebook material. They will remain drafts until
+the user reviews them.
+
+Accepted cards and tests will remain available for offline practice. Previous attempts will not be
+rewritten when a card or question changes.
+
+## Will cards and tests be saved?
+
+Yes. This is a requirement for the planned learning system. Accepted decks, cards, tests, answers,
+scores, and review history will be stored as protected notebook data. They will not exist only in
+a temporary AI conversation.
+
+When private synchronization is enabled, the learning records will be included with the rest of
+the encrypted notebook. They will also be included in recovery and readable export work.
+
+Starting a test will preserve the exact version used for that attempt. Editing or regenerating the
+test later will not change the old result.
+
+## Can I create a test for one subject inside a notebook?
+
+This is planned. You will be able to select a notebook or another material range and enter a
+subject such as **factorization**.
+
+A Quick check will sample the subject. A Comprehensive test will first show the topics supported by
+the selected material, then cover each one and include broader questions that test method choice,
+execution, checking, and combined use when appropriate. A Custom test will let you choose the
+topics, question types, difficulty, weighting, and duration.
+
+If the notebook or requested duration cannot support full coverage, Epistoria will show what is
+missing. It will not silently omit those topics or claim the test is comprehensive.
+
+## Can I review an old test and see what I got wrong?
+
+This is planned. Test history will preserve the exact questions, your responses, the score,
+incorrect or skipped answers, feedback, confidence, time, and links to the supporting notebook
+material.
+
+You will be able to review only incorrect or low-confidence answers and start a new test for the
+missed material. The new attempt will not replace the original result.
+
+## How will Epistoria recommend what to study next?
+
+The planned **Study next** queue will consider user goals, deadlines, due reviews, test and
+flashcard results, confidence, unresolved questions, source coverage, and recent unfinished work.
+
+Each recommendation will state its reason. The user will be able to start it, pin it, snooze it,
+dismiss it, or mark it as irrelevant. The base queue will work on the iPad without a paid AI
+request.
 
 ## What information is sent for an AI question?
 
@@ -72,4 +136,3 @@ exports already stored on that device.
 Do not use the beta as the only copy of important information. Keep the recovery information and
 independent copies of important sources until the remaining device and recovery testing is
 complete.
-

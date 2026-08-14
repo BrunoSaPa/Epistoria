@@ -1,4 +1,5 @@
 import EpistoriaCore
+import os
 import PencilKit
 import SwiftUI
 import UIKit
@@ -113,11 +114,14 @@ final class SpatialNotebookHostView: UIView, UIScrollViewDelegate, PKCanvasViewD
     private var geometryNeedsInitialPosition = true
     private var isApplyingDrawing = false
     private var lastFocus: SpatialNotebookFocus?
+    private var pendingFocus: SpatialNotebookFocus?
     private var lastEditingItemId: UUID?
     private var isReadOnly = false
 
     private static let infiniteExtent: CGFloat = 16_384
     private static let fixedPasteboardMargin: CGFloat = 320
+    private static let minimumCanvasZoomScale: CGFloat = 0.25
+    private static let maximumCanvasZoomScale: CGFloat = 4
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -134,8 +138,6 @@ final class SpatialNotebookHostView: UIView, UIScrollViewDelegate, PKCanvasViewD
         accessibilityLabel = "Notebook canvas"
 
         scrollView.delegate = self
-        scrollView.minimumZoomScale = 0.25
-        scrollView.maximumZoomScale = 4
         scrollView.alwaysBounceHorizontal = true
         scrollView.alwaysBounceVertical = true
         scrollView.bouncesZoom = true
@@ -177,11 +179,14 @@ final class SpatialNotebookHostView: UIView, UIScrollViewDelegate, PKCanvasViewD
         lassoView.frame = bounds
         guard bounds.width > 0, bounds.height > 0 else { return }
         if geometryNeedsInitialPosition {
+            // `setZoomScale` can synchronously trigger another layout pass. Mark the one-time
+            // setup complete before changing zoom so UIKit cannot re-enter this branch.
+            geometryNeedsInitialPosition = false
             configureGeometry(preserving: nil)
             positionInitialViewport()
-            geometryNeedsInitialPosition = false
             reportViewport()
         }
+        applyPendingFocusIfPossible()
     }
 
     func apply(
@@ -224,8 +229,9 @@ final class SpatialNotebookHostView: UIView, UIScrollViewDelegate, PKCanvasViewD
 
         if focus != lastFocus {
             lastFocus = focus
-            if let focus { focusItem(focus) }
+            pendingFocus = focus
         }
+        applyPendingFocusIfPossible()
         if editingItemId != lastEditingItemId {
             lastEditingItemId = editingItemId
             if let editingItemId {
@@ -288,18 +294,46 @@ final class SpatialNotebookHostView: UIView, UIScrollViewDelegate, PKCanvasViewD
     }
 
     private func positionInitialViewport() {
+        guard hasUsableViewportGeometry else { return }
+        configureZoomLimits()
+
         if let width = configuration.pageWidth, let height = configuration.pageHeight {
             let available = CGSize(
                 width: max(bounds.width - 48, 1),
                 height: max(bounds.height - 48, 1)
             )
             let fit = min(available.width / width, available.height / height)
-            scrollView.setZoomScale(min(max(fit, scrollView.minimumZoomScale), 1.35), animated: false)
+            let targetScale = min(
+                max(fit, Self.minimumCanvasZoomScale),
+                min(Self.maximumCanvasZoomScale, 1.35)
+            )
+            guard targetScale.isFinite, targetScale > 0 else { return }
+            scrollView.setZoomScale(targetScale, animated: false)
             centerViewport(on: CGPoint(x: width / 2, y: height / 2), animated: false)
         } else {
             scrollView.setZoomScale(1, animated: false)
             centerViewport(on: .zero, animated: false)
         }
+    }
+
+    private var hasUsableViewportGeometry: Bool {
+        bounds.width.isFinite
+            && bounds.height.isFinite
+            && bounds.width > 0
+            && bounds.height > 0
+            && contentView.bounds.width.isFinite
+            && contentView.bounds.height.isFinite
+            && contentView.bounds.width > 0
+            && contentView.bounds.height > 0
+    }
+
+    private func configureZoomLimits() {
+        guard hasUsableViewportGeometry else { return }
+        if !scrollView.zoomScale.isFinite || scrollView.zoomScale <= 0 {
+            scrollView.setZoomScale(1, animated: false)
+        }
+        scrollView.maximumZoomScale = Self.maximumCanvasZoomScale
+        scrollView.minimumZoomScale = Self.minimumCanvasZoomScale
     }
 
     private func reconcileItems(_ items: [SpatialNotebookItem]) {
@@ -446,8 +480,12 @@ final class SpatialNotebookHostView: UIView, UIScrollViewDelegate, PKCanvasViewD
         onSelect?(id)
     }
 
-    private func focusItem(_ focus: SpatialNotebookFocus) {
-        guard let item = itemsByID[focus.blockId] else { return }
+    private func applyPendingFocusIfPossible() {
+        guard hasUsableViewportGeometry,
+              let focus = pendingFocus,
+              let item = itemsByID[focus.blockId]
+        else { return }
+        pendingFocus = nil
         let point = CGPoint(
             x: item.placement.x + item.placement.width / 2,
             y: item.placement.y + item.placement.height / 2
@@ -572,6 +610,10 @@ final class SpatialNotebookHostView: UIView, UIScrollViewDelegate, PKCanvasViewD
     }
 
     private func centerViewport(on worldPoint: CGPoint, animated: Bool) {
+        guard hasUsableViewportGeometry else { return }
+        let scale = scrollView.zoomScale
+        guard scale.isFinite, scale > 0 else { return }
+
         let needsInfiniteRecenter = configuration.pageFormat == .infinite
             && (
                 abs(worldPoint.x - infiniteWindowCenter.x) > Self.infiniteExtent / 3
@@ -592,14 +634,19 @@ final class SpatialNotebookHostView: UIView, UIScrollViewDelegate, PKCanvasViewD
             x: documentOrigin.x + worldPoint.x,
             y: documentOrigin.y + worldPoint.y
         )
-        let rect = CGRect(
-            x: contentPoint.x - bounds.width / max(scrollView.zoomScale, 0.01) / 2,
-            y: contentPoint.y - bounds.height / max(scrollView.zoomScale, 0.01) / 2,
-            width: bounds.width / max(scrollView.zoomScale, 0.01),
-            height: bounds.height / max(scrollView.zoomScale, 0.01)
+        let targetOffset = CGPoint(
+            x: contentPoint.x * scale - scrollView.bounds.width / 2,
+            y: contentPoint.y * scale - scrollView.bounds.height / 2
         )
-        scrollView.zoom(to: rect, animated: animated)
+        guard targetOffset.x.isFinite, targetOffset.y.isFinite else { return }
+        scrollView.setContentOffset(targetOffset, animated: animated)
     }
+
+#if DEBUG
+    var viewportZoomScaleForTesting: CGFloat { scrollView.zoomScale }
+    var viewportWorldCenterForTesting: CGPoint { currentWorldCenter() }
+    var hasPendingFocusForTesting: Bool { pendingFocus != nil }
+#endif
 
     private func selectionPNG(
         from image: UIImage,
@@ -654,10 +701,28 @@ final class SpatialNotebookHostView: UIView, UIScrollViewDelegate, PKCanvasViewD
 }
 
 @MainActor
-private final class NotebookPaperView: UIView {
-    var paperStyle = NotePaperStyle.plain
+final class NotebookPaperView: UIView {
+    private struct DrawingState: @unchecked Sendable {
+        var paperStyle = NotePaperStyle.plain
+        var worldOriginInView = CGPoint.zero
+        var lineColor = CGColor(gray: 0.5, alpha: 0.22)
+    }
+
+    private let drawingState = OSAllocatedUnfairLock(initialState: DrawingState())
+
+    var paperStyle = NotePaperStyle.plain {
+        didSet {
+            let value = paperStyle
+            drawingState.withLock { $0.paperStyle = value }
+        }
+    }
     var isInfinite = false
-    var worldOriginInView = CGPoint.zero
+    var worldOriginInView = CGPoint.zero {
+        didSet {
+            let value = worldOriginInView
+            drawingState.withLock { $0.worldOriginInView = value }
+        }
+    }
 
     override class var layerClass: AnyClass { CATiledLayer.self }
 
@@ -667,6 +732,14 @@ private final class NotebookPaperView: UIView {
         backgroundColor = .systemBackground
         layer.borderColor = UIColor.separator.withAlphaComponent(0.35).cgColor
         layer.borderWidth = 0.5
+        updateDrawingColor()
+        registerForTraitChanges([
+            UITraitUserInterfaceStyle.self,
+            UITraitAccessibilityContrast.self,
+        ]) { (view: NotebookPaperView, _: UITraitCollection) in
+            view.updateDrawingColor()
+            view.setNeedsDisplay()
+        }
         if let tiled = layer as? CATiledLayer {
             tiled.tileSize = CGSize(width: 512, height: 512)
             tiled.levelsOfDetail = 1
@@ -676,40 +749,63 @@ private final class NotebookPaperView: UIView {
 
     required init?(coder: NSCoder) { fatalError() }
 
-    override func draw(_ rect: CGRect) {
-        super.draw(rect)
-        guard paperStyle != .plain, let context = UIGraphicsGetCurrentContext() else { return }
-        let color = UIColor.separator.withAlphaComponent(0.22)
-        context.setStrokeColor(color.cgColor)
-        context.setFillColor(color.cgColor)
+    private func updateDrawingColor() {
+        let resolved = UIColor.separator
+            .withAlphaComponent(0.22)
+            .resolvedColor(with: traitCollection)
+            .cgColor
+        drawingState.withLock { $0.lineColor = resolved }
+    }
+
+    /// `CATiledLayer` invokes this callback on its image-provider queue. It must not inherit the
+    /// view's main-actor isolation or read UIKit view state from that background renderer.
+    nonisolated override func draw(_ rect: CGRect) {
+        let state = drawingState.withLock { $0 }
+        guard state.paperStyle != .plain,
+              let context = UIGraphicsGetCurrentContext()
+        else { return }
+        context.setStrokeColor(state.lineColor)
+        context.setFillColor(state.lineColor)
         context.setLineWidth(0.5)
 
-        switch paperStyle {
+        switch state.paperStyle {
         case .plain:
             break
         case .ruled:
-            alignedValues(in: rect.minY ... rect.maxY, spacing: 28, offset: worldOriginInView.y + 14)
+            alignedValues(
+                in: rect.minY ... rect.maxY,
+                spacing: 28,
+                offset: state.worldOriginInView.y + 14
+            )
                 .forEach { y in
-                context.move(to: CGPoint(x: 0, y: y))
-                context.addLine(to: CGPoint(x: bounds.width, y: y))
+                context.move(to: CGPoint(x: rect.minX, y: y))
+                context.addLine(to: CGPoint(x: rect.maxX, y: y))
             }
             context.strokePath()
         case .grid:
-            alignedValues(in: rect.minX ... rect.maxX, spacing: 28, offset: worldOriginInView.x)
+            alignedValues(in: rect.minX ... rect.maxX, spacing: 28, offset: state.worldOriginInView.x)
                 .forEach { x in
-                context.move(to: CGPoint(x: x, y: 0))
-                context.addLine(to: CGPoint(x: x, y: bounds.height))
+                context.move(to: CGPoint(x: x, y: rect.minY))
+                context.addLine(to: CGPoint(x: x, y: rect.maxY))
             }
-            alignedValues(in: rect.minY ... rect.maxY, spacing: 28, offset: worldOriginInView.y)
+            alignedValues(in: rect.minY ... rect.maxY, spacing: 28, offset: state.worldOriginInView.y)
                 .forEach { y in
-                context.move(to: CGPoint(x: 0, y: y))
-                context.addLine(to: CGPoint(x: bounds.width, y: y))
+                context.move(to: CGPoint(x: rect.minX, y: y))
+                context.addLine(to: CGPoint(x: rect.maxX, y: y))
             }
             context.strokePath()
         case .dotted:
-            alignedValues(in: rect.minX ... rect.maxX, spacing: 24, offset: worldOriginInView.x + 12)
+            alignedValues(
+                in: rect.minX ... rect.maxX,
+                spacing: 24,
+                offset: state.worldOriginInView.x + 12
+            )
                 .forEach { x in
-                alignedValues(in: rect.minY ... rect.maxY, spacing: 24, offset: worldOriginInView.y + 12)
+                alignedValues(
+                    in: rect.minY ... rect.maxY,
+                    spacing: 24,
+                    offset: state.worldOriginInView.y + 12
+                )
                     .forEach { y in
                     context.fillEllipse(in: CGRect(x: x - 0.7, y: y - 0.7, width: 1.4, height: 1.4))
                 }
@@ -717,7 +813,7 @@ private final class NotebookPaperView: UIView {
         }
     }
 
-    private func alignedValues(
+    nonisolated private func alignedValues(
         in range: ClosedRange<CGFloat>,
         spacing: CGFloat,
         offset: CGFloat

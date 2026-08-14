@@ -16,6 +16,10 @@ struct OnboardingView: View {
     @State private var isWorking = false
     @State private var errorMessage: String?
     @State private var showRestore = false
+    @State private var showLegacyNotebookChoice = false
+    #if DEBUG
+    @State private var showDevelopmentReset = false
+    #endif
 
     var body: some View {
         NavigationStack {
@@ -43,6 +47,26 @@ struct OnboardingView: View {
             .sheet(isPresented: $showRestore) {
                 RestoreAccountView(model: model)
             }
+            #if DEBUG
+            .sheet(isPresented: $showDevelopmentReset) {
+                DeveloperNotebookResetView {
+                    try await model.deleteLocalDevelopmentNotebook()
+                }
+            }
+            #endif
+            .alert("An older notebook is on this iPad", isPresented: $showLegacyNotebookChoice) {
+                Button("Recover older notebook") {
+                    showRestore = true
+                }
+                #if DEBUG
+                Button("Delete local development notebook", role: .destructive) {
+                    showDevelopmentReset = true
+                }
+                #endif
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Epistoria uses one notebook for everything you know. Recover this notebook with its account ID and 24 words. Debug builds can deliberately erase the local development copy.")
+            }
             .alert("Setup problem", isPresented: Binding(
                 get: { errorMessage != nil },
                 set: { if !$0 { errorMessage = nil } }
@@ -66,9 +90,13 @@ struct OnboardingView: View {
                     .font(.caption.weight(.semibold))
                     .tracking(0.5)
                     .foregroundStyle(.primary)
-                Text("A quiet place for what you learn.")
+                Text(model.hasConfiguredNotebook ? "Your notebook is already here." : "A quiet place for what you learn.")
                     .font(.largeTitle.bold())
-                Text("Capture notes, study with focus, and keep the original sources beside your thinking.")
+                Text(
+                    model.hasConfiguredNotebook
+                        ? "Open the notebook already configured on this iPad, or recover it with its account ID and 24 words."
+                        : "Capture notes, study with focus, and keep everything you know connected in one place."
+                )
                     .font(.title3)
                     .foregroundStyle(EpistoriaDesign.mutedInk)
                     .fixedSize(horizontal: false, vertical: true)
@@ -103,20 +131,45 @@ struct OnboardingView: View {
             }
 
             adaptiveActionLayout {
-                createNotebookButton
+                if model.hasConfiguredNotebook {
+                    openNotebookButton
+                } else {
+                    createNotebookButton
+                }
                 restoreNotebookButton
             }
+
+            #if DEBUG
+            if model.hasLocalDevelopmentNotebookData {
+                VStack(alignment: .leading, spacing: 8) {
+                    Divider()
+                    Text("DEVELOPMENT ONLY")
+                        .font(.caption.weight(.semibold))
+                        .tracking(0.5)
+                        .foregroundStyle(EpistoriaDesign.mutedInk)
+                    Button {
+                        showDevelopmentReset = true
+                    } label: {
+                        Label("Delete local development notebook…", systemImage: "trash")
+                    }
+                    .foregroundStyle(.primary)
+                    .accessibilityIdentifier("onboarding.development.reset")
+                    Text("This control is excluded from release builds. It does not delete a connected server copy.")
+                        .font(.caption)
+                        .foregroundStyle(EpistoriaDesign.mutedInk)
+                }
+            }
+            #endif
         }
     }
 
     private var createNotebookButton: some View {
         Button {
-            do {
-                material = try model.prepareNewAccount()
-                recoveryStage = .display
-                verificationAnswers = [:]
+            if model.hasUnconfiguredLegacyNotebook {
+                showLegacyNotebookChoice = true
+            } else {
+                prepareNewAccount()
             }
-            catch { errorMessage = error.localizedDescription }
         } label: {
             Text("Create my private notebook")
                 .font(.body)
@@ -125,6 +178,35 @@ struct OnboardingView: View {
         }
         .buttonStyle(EpistoriaPrimaryButtonStyle())
         .accessibilityIdentifier("onboarding.create")
+    }
+
+    private var openNotebookButton: some View {
+        Button {
+            isWorking = true
+            Task {
+                defer { isWorking = false }
+                do { try await model.openConfiguredNotebook() }
+                catch { errorMessage = error.localizedDescription }
+            }
+        } label: {
+            Text("Open this notebook")
+                .font(.body)
+                .fontWeight(.medium)
+                .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(EpistoriaPrimaryButtonStyle())
+        .disabled(isWorking)
+        .accessibilityIdentifier("onboarding.open")
+    }
+
+    private func prepareNewAccount() {
+        do {
+            material = try model.prepareNewAccount()
+            recoveryStage = .display
+            verificationAnswers = [:]
+        } catch {
+            errorMessage = error.localizedDescription
+        }
     }
 
     private var restoreNotebookButton: some View {
@@ -391,7 +473,11 @@ private struct RestoreAccountView: View {
                             }
                         }
                     }
-                    .disabled(UUID(uuidString: accountId) == nil || normalizedWords.count != 24 || isWorking)
+                    .disabled(
+                        UUID(uuidString: accountId) == nil
+                            || normalizedWords.count != 24
+                            || isWorking
+                    )
                     .accessibilityIdentifier("restore.confirm")
                 }
             }

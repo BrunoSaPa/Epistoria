@@ -29,6 +29,14 @@ the account ID and recovery words can access a recovered copy of the notebook da
 
 The note saves on the iPad without requiring a server.
 
+Epistoria will not replace a notebook that is already configured on the iPad. If setup reports an
+existing notebook, open or recover it with its account ID and 24 words. Existing local information
+remains unchanged. If setup finds older encrypted data without an active configuration, it asks
+you to recover that notebook.
+
+Epistoria intentionally uses one notebook for all subjects. Organize material with collections,
+institutions, terms, and courses.
+
 ## Import a PDF
 
 1. Open **Today** or a course.
@@ -66,4 +74,3 @@ A local saved state is not the same as another synchronized copy.
 
 See the [user guide](USER_GUIDE.md) for notes, PDFs, organization, search, optional sync,
 conflicts, recovery, and export.
-

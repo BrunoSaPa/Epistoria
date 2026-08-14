@@ -2,6 +2,14 @@
 
 This guide describes the product workflow in the current personal beta.
 
+## Use one connected notebook
+
+Epistoria keeps subjects, courses, sources, notes, and study history in one private notebook. Use
+collections and courses to organize different areas of knowledge.
+
+If the iPad already has a configured notebook, Epistoria opens or recovers that notebook instead
+of creating another one. Save its account ID and 24 recovery words offline.
+
 ## Use Today
 
 Today provides the main actions and recent work:
@@ -137,3 +145,4 @@ Use a spare device for the first recovery test. Do not erase the primary iPad.
 The recovery words reconstruct access to encrypted data. They do not contain a copy of the notes
 or files.
 
+If the iPad already has a different configured account, recovery stops without replacing it.

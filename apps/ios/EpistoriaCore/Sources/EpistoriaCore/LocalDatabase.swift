@@ -137,13 +137,30 @@ public struct DataHealthSnapshot: Equatable, Sendable {
     public var databaseIntegrity: String
 }
 
-public enum LocalDatabaseError: Error, Equatable {
+public enum LocalDatabaseError: Error, Equatable, LocalizedError {
     case openFailed(String)
     case keyRejected
     case queryFailed(String)
     case invalidRow
     case payloadTooLarge
     case cursorRegression
+
+    public var errorDescription: String? {
+        switch self {
+        case .openFailed:
+            "Epistoria could not open its protected notebook file."
+        case .keyRejected:
+            "The available key could not unlock this notebook. It may belong to another account or be damaged. No local data was changed."
+        case .queryFailed:
+            "Epistoria could not read or update its protected notebook."
+        case .invalidRow:
+            "Epistoria found an invalid local notebook record and stopped before changing it."
+        case .payloadTooLarge:
+            "This item is larger than the local notebook limit. The previous saved version remains available."
+        case .cursorRegression:
+            "Epistoria rejected an older synchronization position. Local data was not changed."
+        }
+    }
 }
 
 private final class SQLCipherConnection: @unchecked Sendable {
@@ -196,6 +213,11 @@ public actor SQLCipherDatabase {
         }
         do {
             try Self.execute(database, "SELECT count(*) FROM sqlite_master")
+        } catch {
+            sqlite3_close(database)
+            throw LocalDatabaseError.keyRejected
+        }
+        do {
             try Self.execute(database, "PRAGMA cipher_memory_security = ON")
             try Self.execute(database, "PRAGMA foreign_keys = ON")
             try Self.execute(database, "PRAGMA secure_delete = ON")
@@ -207,9 +229,6 @@ public actor SQLCipherDatabase {
             connection = SQLCipherConnection(database)
         } catch {
             sqlite3_close(database)
-            if case LocalDatabaseError.queryFailed = error {
-                throw LocalDatabaseError.keyRejected
-            }
             throw error
         }
     }

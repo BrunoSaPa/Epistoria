@@ -34,6 +34,7 @@ following options:
 
 The app also provides:
 
+- One private notebook that connects subjects, sources, notes, sessions, and learning history.
 - Immutable PDF import and separate page annotations.
 - Collections, institutions, academic terms, courses, and study sessions.
 - Local full-text search with links to the matching note item or PDF page.
@@ -41,6 +42,17 @@ The app also provides:
 - Optional encrypted synchronization through a private server.
 - Explicit conflict review that preserves concurrent versions.
 - A readable ZIP export with JSON, original files, PencilKit data, and SHA-256 checksums.
+
+The planned learning system will add durable source-linked flashcards, generated practice tests,
+review history, and a **Study next** queue. Accepted cards and tests will be normal notebook
+records, not temporary chat output. A completed attempt will retain the exact questions, answers,
+score, feedback, and source versions that the user saw.
+
+A test request can target a subject inside one notebook. Comprehensive mode will first produce a
+coverage outline, then include every relevant learning objective found in that notebook, broader
+questions that combine related skills, and a visible report of anything it could not cover. The
+queue will use goals, due reviews, unresolved questions, and practice results. It will state why it
+recommends each action. These learning features are not implemented in the current personal beta.
 
 The iPad stores data in SQLCipher. Each local record change and its sync outbox entry commit in
 one transaction. A successful local save does not wait for the network. The sync service stores
@@ -73,13 +85,29 @@ iPad
   -> iPad review
 ```
 
-The system supports these processing jobs:
+The current system supports these processing jobs:
 
 | Job | Input | Output | AI provider required |
 |---|---|---|---|
 | Session digest | Evidence linked to a study session | Cited study digest | Yes |
 | Note query | A selected note region, a question, and bounded note context | Cited answer and follow-up questions | Yes |
 | PDF extraction | An encrypted PDF | Locally extracted text | No |
+
+Planned jobs will create flashcard drafts, practice-test drafts, free-response feedback, and
+source-backed study-plan proposals. Generated material will remain a draft until the user reviews
+it. Accepted cards, tests, attempts, and review schedules will remain available without a network
+connection.
+
+The planned assistant will support three levels of proactivity:
+
+1. **Off** disables AI processing.
+2. **Suggest** identifies useful actions on the iPad but does not send notebook content to a
+   provider.
+3. **Automatic for selected material** uses a revocable permission that names the courses or
+   notebooks, permitted job types, frequency, and spending limit.
+
+Opening the app will not itself send notebook content to a provider. The local study queue will
+continue to work when the Mac, network, or provider is unavailable.
 
 AI results are derived records. The user can accept, edit, reject, or delete them. They do not
 replace original notes, drawings, images, PDFs, annotations, or relationships. Each reviewed
@@ -108,7 +136,7 @@ The repository is a personal beta candidate. The following automated checks pass
 - `make verify`
 - Full unsigned iOS Simulator bundle build, including assets and the privacy manifest
 - 25 Swift Core tests
-- 12 iOS app and UI tests on an iPad Simulator
+- 17 iOS app and UI tests on an iPad Simulator
 - 7 API unit tests
 - 23 worker tests
 
@@ -191,3 +219,5 @@ engineering and operations documentation is intentionally excluded from the publ
 - Original files and PencilKit data remain separate from derived previews and AI output.
 - Concurrent versions remain available until the user resolves the conflict.
 - Readable export is not described as restore because no archive importer exists.
+- One Epistoria notebook connects the owner's subjects, sources, notes, sessions, and planned
+  learning history. Setup does not create a second local notebook when one is configured.

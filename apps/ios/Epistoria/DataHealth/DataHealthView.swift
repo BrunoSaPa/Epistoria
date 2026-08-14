@@ -45,6 +45,9 @@ struct DataHealthView: View {
     @State private var isChoosingExportDirectory = false
     @State private var validationMessage: String?
     @State private var errorMessage: String?
+    #if DEBUG
+    @State private var showDevelopmentReset = false
+    #endif
 
     var body: some View {
         NavigationStack {
@@ -61,6 +64,9 @@ struct DataHealthView: View {
                     recoverySection
                     exportSection
                     advancedSection
+                    #if DEBUG
+                    developmentSection
+                    #endif
                 }
                 .disabled(model.isCreatingPortableExport)
             }
@@ -75,6 +81,13 @@ struct DataHealthView: View {
                 await load()
             }
             .sheet(item: $pairing) { PairMacView(material: $0, apiURL: model.configuration?.apiURL) }
+            #if DEBUG
+            .sheet(isPresented: $showDevelopmentReset) {
+                DeveloperNotebookResetView {
+                    try await model.deleteLocalDevelopmentNotebook()
+                }
+            }
+            #endif
             .sheet(item: $exportResult) { result in
                 ExportReadyView(result: result) {
                     removeExport(result)
@@ -380,6 +393,25 @@ struct DataHealthView: View {
             }
         }
     }
+
+    #if DEBUG
+    private var developmentSection: some View {
+        Section {
+            Button {
+                showDevelopmentReset = true
+            } label: {
+                Label("Delete local development notebook…", systemImage: "trash")
+            }
+            .foregroundStyle(.primary)
+            .disabled(isWorking || model.isCreatingPortableExport)
+            .accessibilityIdentifier("dataHealth.development.reset")
+        } header: {
+            Text("Development only")
+        } footer: {
+            Text("This control is excluded from release builds. It deletes only the local development copy after you type DELETE; a connected server copy is not removed.")
+        }
+    }
+    #endif
 
     private func healthRow(_ title: String, value: String, symbol: String) -> some View {
         HStack {

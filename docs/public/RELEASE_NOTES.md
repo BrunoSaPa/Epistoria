@@ -12,6 +12,8 @@ Release date: Not published.
 - Added canvas-wide Apple Pencil writing.
 - Added movable, resizable, rotatable, and layered text and images.
 - Added immersive note presentation in the iPad detail area.
+- Fixed a crash that could occur while opening or creating a note.
+- Stabilized the note tools while the immersive editor opens.
 
 ### Study and organization
 
@@ -41,6 +43,14 @@ Release date: Not published.
 - Added account recovery with 24 words and setup verification.
 - Added readable exports with original files and checksums.
 
+### Setup and recovery
+
+- Prevented new setup from trying to open an older local notebook with a newly generated recovery
+  kit.
+- Kept one notebook account for all subjects on an iPad.
+- Prevented new setup from replacing a valid or unreadable local account configuration.
+- Replaced internal setup error codes with readable, non-destructive guidance.
+
 ### Interface
 
 - Added a monochrome interface.
@@ -50,4 +60,3 @@ Release date: Not published.
 ### Current limits
 
 See [Known limitations](KNOWN_LIMITATIONS.md).
-
