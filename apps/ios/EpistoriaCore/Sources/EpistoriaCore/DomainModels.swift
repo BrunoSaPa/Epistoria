@@ -27,6 +27,7 @@ public enum NoteBlockKind: String, Codable, CaseIterable, Sendable {
     case equation = "EQUATION"
     case code = "CODE"
     case callout = "CALLOUT"
+    case shape = "SHAPE"
 }
 
 public enum NotePageFormat: String, Codable, CaseIterable, Sendable {
@@ -45,25 +46,90 @@ public enum NotePaperStyle: String, Codable, CaseIterable, Sendable {
     case ruled = "RULED"
     case grid = "GRID"
     case dotted = "DOTTED"
+    case isometric = "ISOMETRIC"
+}
+
+public enum NotePaperColor: String, Codable, CaseIterable, Sendable {
+    case white = "WHITE"
+    case ivory = "IVORY"
+    case fog = "FOG"
+    case stone = "STONE"
+}
+
+public enum NoteCanvasColor: String, Codable, CaseIterable, Sendable {
+    case black = "BLACK"
+    case graphite = "GRAPHITE"
+    case red = "RED"
+    case blue = "BLUE"
+    case green = "GREEN"
+    case white = "WHITE"
+}
+
+public enum NoteCanvasShapeKind: String, Codable, CaseIterable, Sendable {
+    case rectangle = "RECTANGLE"
+    case roundedRectangle = "ROUNDED_RECTANGLE"
+    case ellipse = "ELLIPSE"
+    case triangle = "TRIANGLE"
+    case diamond = "DIAMOND"
+    case line = "LINE"
+    case arrow = "ARROW"
+}
+
+public struct NoteCanvasShape: Codable, Equatable, Sendable {
+    public var kind: NoteCanvasShapeKind
+    public var strokeColor: NoteCanvasColor
+    public var fillColor: NoteCanvasColor?
+    public var lineWidth: Double
+
+    public init(
+        kind: NoteCanvasShapeKind,
+        strokeColor: NoteCanvasColor = .black,
+        fillColor: NoteCanvasColor? = nil,
+        lineWidth: Double = 3
+    ) {
+        self.kind = kind
+        self.strokeColor = strokeColor
+        self.fillColor = fillColor
+        self.lineWidth = min(max(lineWidth, 1), 24)
+    }
 }
 
 /// The spatial presentation of one note. Measurements use document points (72 per inch),
 /// independent of device scale and zoom. Infinite canvases share the same origin as fixed
 /// paper and allow negative coordinates in every direction.
 public struct NoteCanvasConfiguration: Codable, Equatable, Sendable {
-    public var schemaVersion = "note-canvas/v1"
+    public var schemaVersion = "note-canvas/v3"
     public var pageFormat: NotePageFormat
     public var orientation: NotePageOrientation
     public var paperStyle: NotePaperStyle
+    public var paperColor: NotePaperColor
+    /// Pattern spacing in document points. The renderer clamps decoded values before use.
+    public var paperSpacing: Double
+    /// Fixed-paper notes append compact, numbered pages. Infinite canvases always have one
+    /// unbounded surface.
+    public var pageCount: Int
 
     public init(
         pageFormat: NotePageFormat = .a4,
         orientation: NotePageOrientation = .portrait,
-        paperStyle: NotePaperStyle = .plain
+        paperStyle: NotePaperStyle = .plain,
+        paperColor: NotePaperColor = .white,
+        paperSpacing: Double? = nil,
+        pageCount: Int = 1
     ) {
         self.pageFormat = pageFormat
         self.orientation = orientation
         self.paperStyle = paperStyle
+        self.paperColor = paperColor
+        self.paperSpacing = min(
+            max(paperSpacing ?? (paperStyle == .dotted ? 24 : 28), 12),
+            72
+        )
+        self.pageCount = pageFormat == .infinite ? 1 : max(pageCount, 1)
+    }
+
+    public var effectivePageCount: Int {
+        pageFormat == .infinite ? 1 : max(pageCount, 1)
     }
 
     public var pageWidth: Double? {
@@ -78,6 +144,51 @@ public struct NoteCanvasConfiguration: Codable, Equatable, Sendable {
         let portraitWidth = pageFormat == .a4 ? 595.0 : 612.0
         let portraitHeight = pageFormat == .a4 ? 842.0 : 792.0
         return orientation == .portrait ? portraitHeight : portraitWidth
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case schemaVersion
+        case pageFormat
+        case orientation
+        case paperStyle
+        case paperColor
+        case paperSpacing
+        case pageCount
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        schemaVersion = try container.decodeIfPresent(String.self, forKey: .schemaVersion)
+            ?? "note-canvas/v1"
+        pageFormat = try container.decode(NotePageFormat.self, forKey: .pageFormat)
+        orientation = try container.decode(NotePageOrientation.self, forKey: .orientation)
+        paperStyle = try container.decode(NotePaperStyle.self, forKey: .paperStyle)
+        paperColor = try container.decodeIfPresent(NotePaperColor.self, forKey: .paperColor)
+            ?? .white
+        paperSpacing = min(
+            max(
+                try container.decodeIfPresent(Double.self, forKey: .paperSpacing)
+                    ?? (paperStyle == .dotted ? 24 : 28),
+                12
+            ),
+            72
+        )
+        let decodedPageCount = max(
+            try container.decodeIfPresent(Int.self, forKey: .pageCount) ?? 1,
+            1
+        )
+        pageCount = pageFormat == .infinite ? 1 : decodedPageCount
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(schemaVersion, forKey: .schemaVersion)
+        try container.encode(pageFormat, forKey: .pageFormat)
+        try container.encode(orientation, forKey: .orientation)
+        try container.encode(paperStyle, forKey: .paperStyle)
+        try container.encode(paperColor, forKey: .paperColor)
+        try container.encode(paperSpacing, forKey: .paperSpacing)
+        try container.encode(effectivePageCount, forKey: .pageCount)
     }
 }
 
@@ -275,7 +386,7 @@ public struct StudySessionPayload: EntityPayload, Equatable {
 
 public struct NotePayload: EntityPayload, Equatable {
     public static let entityType = EntityType.note
-    public var schemaVersion = "note/v2"
+    public var schemaVersion = "note/v3"
     public var title: String
     public var courseId: UUID?
     public var studySessionId: UUID?
@@ -305,7 +416,7 @@ public struct NotePayload: EntityPayload, Equatable {
 
 public struct NoteBlockPayload: EntityPayload, Equatable {
     public static let entityType = EntityType.noteBlock
-    public var schemaVersion = "note-block/v2"
+    public var schemaVersion = "note-block/v4"
     public var noteId: UUID
     public var blockType: NoteBlockKind
     public var orderKey: String
@@ -317,6 +428,10 @@ public struct NoteBlockPayload: EntityPayload, Equatable {
     /// Spatial geometry is optional so v1 vertical notes decode without a destructive migration.
     public var canvasPlacement: NoteCanvasPlacement?
     public var canvasRole: NoteBlockCanvasRole?
+    /// Vector geometry for durable canvas shapes. Missing for older and non-shape records.
+    public var canvasShape: NoteCanvasShape?
+    /// Page-local records use a zero-based index. A missing value is legacy page zero.
+    public var canvasPageIndex: Int?
     public var tombstone: Bool
     public var createdAt: Date
     public var updatedAt: Date
@@ -338,6 +453,8 @@ public struct NoteBlockPayload: EntityPayload, Equatable {
         transcription = nil
         canvasPlacement = nil
         canvasRole = nil
+        canvasShape = nil
+        canvasPageIndex = nil
         tombstone = false
         createdAt = now
         updatedAt = now

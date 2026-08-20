@@ -21,11 +21,13 @@ change after personal use and beta testing.
 
 ## Notebook tools
 
-- Add multi-page notebooks with page thumbnails and ordering.
-- Support larger Pencil documents through multiple ink sections.
-- Add print and PDF output.
+- Add page thumbnails, insertion, duplication, deletion with recovery, and ordering to the
+  continuous fixed-page document.
+- Add direct printing and PDF page-range and layout options.
 - Add image crop and mask tools.
-- Evaluate shapes, handwriting recognition, and math recognition after Pencil testing.
+- Add editing for an existing shape's style, connectors, snapping, and alignment guides.
+- Evaluate handwriting recognition, handwritten-math recognition, equation layout, LaTeX input,
+  and graphing after Pencil testing.
 
 ## Review and learning
 

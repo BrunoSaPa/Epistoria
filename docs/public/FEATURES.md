@@ -7,12 +7,26 @@ the current personal beta.
 
 - Choose A4 or US Letter paper in portrait or landscape orientation.
 - Use an infinite canvas when a fixed page is not appropriate.
-- Select plain, ruled, grid, or dotted paper.
+- Select plain, ruled, grid, dotted, or isometric paper.
+- Choose compact, standard, or wide pattern spacing and a neutral page color.
+- Scroll through fixed-paper pages as one continuous vertical document.
+- Jump directly to a numbered page or append a blank page from the persistent tool rail.
+- Switch between Select, Pen, Marker, Eraser, Text, Image, Shape, Symbol, and undo controls without
+  opening the system Pencil palette.
+- Choose a pixel eraser with an adjustable circular width or a stroke eraser that removes a
+  complete Pencil stroke.
+- Tap a selected Pen or Marker again to change its width and color.
+- Place rectangles, rounded rectangles, ellipses, triangles, diamonds, lines, and arrows. Choose
+  outline color, fill, and line width before placement.
+- Place editable algebra, calculus, Greek, set, logic, and comparison symbols.
 - Write anywhere with Apple Pencil.
 - Add typed text and images.
-- Move, resize, rotate, and reorder text and images.
+- Move, resize, rotate, and reorder text, images, shapes, and symbols.
 - Write over text and images without flattening the underlying material.
 - Open a note in an immersive workspace that uses the full iPad detail area.
+- Keep Pencil data separate by page so editing one page does not rewrite the complete note.
+- Export one note as a readable PDF that includes its paper, typed text, math symbols, vector
+  shapes, images, and Pencil ink.
 
 ## PDF study
 

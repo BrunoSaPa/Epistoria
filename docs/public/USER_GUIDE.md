@@ -31,21 +31,67 @@ Open the page menu beside the note title. Choose one format:
 - US Letter portrait or landscape.
 - Infinite canvas.
 
-Then choose Plain, Ruled, Grid, or Dotted paper.
+Then choose Plain, Ruled, Grid, Dotted, or Isometric paper. For patterned paper, choose Compact,
+Standard, or Wide spacing. Choose White, Ivory, Fog, or Stone as the page color.
 
 Changing the format does not delete or resize content. Material outside a fixed page remains
 available around the page.
 
+For A4 or US Letter notes, scroll vertically through the pages. The page closest to the center of
+the screen becomes the current page for new content and notebook commands.
+
+Use the persistent tool rail:
+
+- Select the page counter to jump to an existing page.
+- Select **Add page** to append a blank page and scroll to it.
+- Use Command-Shift-N with a keyboard to append a page.
+
+An empty page uses only a small metadata entry. Epistoria creates page content records when you
+add text, an image, a shape, a symbol, or Pencil writing. Infinite canvases do not show
+numbered-page controls.
+
 ## Write and arrange content
 
-- Select **Pen** to write with Apple Pencil.
+- Select **Pen** or **Marker** to write with Apple Pencil. Tap the selected tool again to change
+  width and color.
+- Select **Eraser** once to activate it. Tap the selected Eraser again to open its options. Use
+  **Pixel eraser** to remove only the area under the adjustable circle. Use **Stroke eraser** to
+  remove the complete Pencil stroke you touch.
+- Select **Size** to choose a Pen or Marker stroke width.
 - Select **Text** to add typed text at the current view center.
 - Select **Image** to add an image.
-- Select **Select** to move, resize, rotate, or reorder text and images.
+- Select **Shape**, then tap the page to place the current shape. Tap the selected Shape tool
+  again to choose rectangle, rounded rectangle, ellipse, triangle, diamond, line, or arrow and
+  set its outline, fill, and line width.
+- Select **Symbol**, then tap the page to place the current math symbol. Tap the selected Symbol
+  tool again to choose from algebra, calculus, Greek, set, logic, and comparison symbols.
+- Select **Select** to move, resize, rotate, or reorder text, images, shapes, and symbols.
 - Use the notebook actions to bring an item forward or send it backward.
+- Select **Undo** or **Redo** in the rail for current-page ink changes.
 
 Pencil writing stays separate from the text or image below it. Removing an item requires
 confirmation and provides temporary undo while the note remains open.
+
+Shapes and symbols are stored as notebook items. Switch to **Select** to move, resize, rotate, or
+remove them. Select a symbol again in Select mode to edit it as text.
+
+## Export one note as a PDF
+
+A note PDF is readable and contains decrypted personal information. Save it only to a trusted
+location.
+
+1. Open the note.
+2. Open **Notebook actions**.
+3. Select **Export note as PDF…**.
+4. Read the warning and select **Create readable PDF**.
+5. Select **Save or share PDF**.
+6. Select **Done** after saving the destination copy.
+
+Fixed-paper notes keep their A4 or US Letter page size and orientation. Each notebook sheet
+becomes one PDF page. An infinite note becomes one custom-size PDF page that contains the used
+area. The PDF includes paper appearance, typed text, math symbols, vector shapes, images, and
+Pencil ink. It is for reading, printing, or sharing. It is not an Epistoria backup and cannot be
+imported into the app.
 
 ## Organize notes
 

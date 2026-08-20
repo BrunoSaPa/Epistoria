@@ -22,10 +22,11 @@ the account ID and recovery words can access a recovered copy of the notebook da
 2. Select **Quick note**.
 3. Open the page menu beside the note title.
 4. Choose A4, US Letter, or Infinite canvas.
-5. Choose Plain, Ruled, Grid, or Dotted paper.
+5. Choose the paper pattern, spacing, and neutral page color.
 6. Select **Pen** to write with Apple Pencil.
 7. Select **Text** to add typed text.
 8. Select **Image** to add an image.
+9. Select **Shape** or **Symbol**, then tap the page to place it.
 
 The note saves on the iPad without requiring a server.
 

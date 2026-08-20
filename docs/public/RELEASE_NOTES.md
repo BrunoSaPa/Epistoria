@@ -8,12 +8,25 @@ Release date: Not published.
 
 - Added A4, US Letter, and infinite note formats.
 - Added portrait and landscape fixed pages.
+- Added a continuous vertically scrolling document for numbered fixed pages.
+- Added a persistent custom tool rail with Pen, Marker, Eraser, stroke size, Text, Image, page,
+  and ink history controls.
+- Added a pixel eraser with an adjustable circular width and a whole-stroke eraser.
+- Added repeated-tap options for the selected Pen, Marker, Eraser, Shape, and Symbol tools.
+- Added neutral page colors, adjustable pattern spacing, and isometric paper.
+- Added durable vector shapes with outline, fill, and line-width options.
+- Added an editable math-symbol palette for algebra, calculus, Greek, sets, logic, and comparisons.
+- Stored Pencil writing separately per fixed page to limit the data rewritten during editing.
 - Added plain, ruled, grid, and dotted paper.
-- Added canvas-wide Apple Pencil writing.
+- Added editable Apple Pencil writing above text and images.
 - Added movable, resizable, rotatable, and layered text and images.
 - Added immersive note presentation in the iPad detail area.
 - Fixed a crash that could occur while opening or creating a note.
 - Stabilized the note tools while the immersive editor opens.
+- Refit fixed pages when the editor first appears or changes size so page one uses the available
+  width consistently.
+- Added readable note PDF export with fixed-page dimensions, text, math symbols, vector shapes,
+  images, paper appearance, and Pencil ink.
 
 ### Study and organization
 

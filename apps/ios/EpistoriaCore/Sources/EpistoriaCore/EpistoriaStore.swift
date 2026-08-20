@@ -209,7 +209,8 @@ public actor EpistoriaStore {
     public func appendCanvasText(
         noteId: UUID,
         text: String = "",
-        placement: NoteCanvasPlacement
+        placement: NoteCanvasPlacement,
+        pageIndex: Int = 0
     ) async throws -> UUID {
         let count = try await database.entities(type: .noteBlock, parentId: noteId).count
         var block = NoteBlockPayload(
@@ -219,6 +220,7 @@ public actor EpistoriaStore {
             plainText: text
         )
         block.canvasPlacement = placement
+        block.canvasPageIndex = max(pageIndex, 0)
         return try await save(payload: block, parentId: noteId, relationIds: [noteId])
     }
 
@@ -227,7 +229,8 @@ public actor EpistoriaStore {
         noteId: UUID,
         assetId: UUID,
         filename: String,
-        placement: NoteCanvasPlacement
+        placement: NoteCanvasPlacement,
+        pageIndex: Int = 0
     ) async throws -> UUID {
         let count = try await database.entities(type: .noteBlock, parentId: noteId).count
         var block = NoteBlockPayload(
@@ -238,6 +241,7 @@ public actor EpistoriaStore {
         )
         block.assetId = assetId
         block.canvasPlacement = placement
+        block.canvasPageIndex = max(pageIndex, 0)
         return try await save(
             payload: block,
             parentId: noteId,
@@ -246,7 +250,46 @@ public actor EpistoriaStore {
     }
 
     @discardableResult
-    public func appendCanvasInkLayer(noteId: UUID) async throws -> UUID {
+    public func appendCanvasShape(
+        noteId: UUID,
+        shape: NoteCanvasShape,
+        placement: NoteCanvasPlacement,
+        pageIndex: Int = 0
+    ) async throws -> UUID {
+        let count = try await database.entities(type: .noteBlock, parentId: noteId).count
+        var block = NoteBlockPayload(
+            noteId: noteId,
+            blockType: .shape,
+            orderKey: String(format: "%012d", count * 1_000),
+            plainText: "\(shape.kind.rawValue.lowercased()) shape"
+        )
+        block.canvasShape = shape
+        block.canvasPlacement = placement
+        block.canvasPageIndex = max(pageIndex, 0)
+        return try await save(payload: block, parentId: noteId, relationIds: [noteId])
+    }
+
+    @discardableResult
+    public func appendCanvasEquation(
+        noteId: UUID,
+        symbol: String,
+        placement: NoteCanvasPlacement,
+        pageIndex: Int = 0
+    ) async throws -> UUID {
+        let count = try await database.entities(type: .noteBlock, parentId: noteId).count
+        var block = NoteBlockPayload(
+            noteId: noteId,
+            blockType: .equation,
+            orderKey: String(format: "%012d", count * 1_000),
+            plainText: symbol
+        )
+        block.canvasPlacement = placement
+        block.canvasPageIndex = max(pageIndex, 0)
+        return try await save(payload: block, parentId: noteId, relationIds: [noteId])
+    }
+
+    @discardableResult
+    public func appendCanvasInkLayer(noteId: UUID, pageIndex: Int = 0) async throws -> UUID {
         let count = try await database.entities(type: .noteBlock, parentId: noteId).count
         var block = NoteBlockPayload(
             noteId: noteId,
@@ -254,6 +297,7 @@ public actor EpistoriaStore {
             orderKey: String(format: "%012d", count * 1_000)
         )
         block.canvasRole = .inkLayer
+        block.canvasPageIndex = max(pageIndex, 0)
         return try await save(payload: block, parentId: noteId, relationIds: [noteId])
     }
 

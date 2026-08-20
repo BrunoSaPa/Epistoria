@@ -10,6 +10,9 @@ Epistoria remains in personal beta. The following limits apply to the current pr
 ## Recovery and export
 
 - The app can create and validate a readable export but cannot import it.
+- A note can be exported as a readable PDF. The PDF cannot be imported as an editable note.
+- An infinite note exports its used area as one custom-size PDF page. Very large infinite notes
+  are scaled to the PDF page-dimension limit.
 - Restored files download when first opened. There is no bulk offline-download action.
 - Full fresh-device and independent-backup recovery tests remain in progress.
 - Epistoria supports one private notebook account per installation. Different subjects belong in
@@ -17,10 +20,15 @@ Epistoria remains in personal beta. The following limits apply to the current pr
 
 ## Notebook
 
-- A note contains one spatial sheet rather than a multi-page page manager.
-- Very large Pencil documents have a current per-note ink limit.
-- Image crop, masks, shapes, handwriting recognition, math recognition, and print output are not
-  available.
+- Fixed notes scroll continuously and support page jump and append. They do not yet have
+  thumbnails, insertion, duplication, deletion, or reordering.
+- Very large Pencil documents have a current per-page ink limit.
+- Image crop, masks, handwriting recognition, handwritten-math recognition, and direct printing
+  are not available.
+- Shapes support placement, movement, resizing, rotation, outline, optional fill, and PDF output.
+  Existing shape style cannot yet be changed after placement.
+- Math symbols are editable text items. The app does not yet provide equation layout, LaTeX
+  input, graphing, or recognition of handwritten equations.
 
 ## Organization and removal
 

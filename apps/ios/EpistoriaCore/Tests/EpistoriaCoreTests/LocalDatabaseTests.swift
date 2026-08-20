@@ -268,9 +268,10 @@ final class LocalDatabaseTests: XCTestCase {
     }
 
     func testPageFormatsUsePrintPointsAndSupportTwoDirectionalWorldCoordinates() {
-        let a4 = NoteCanvasConfiguration(pageFormat: .a4, orientation: .portrait)
+        let a4 = NoteCanvasConfiguration(pageFormat: .a4, orientation: .portrait, pageCount: 3)
         XCTAssertEqual(a4.pageWidth, 595)
         XCTAssertEqual(a4.pageHeight, 842)
+        XCTAssertEqual(a4.effectivePageCount, 3)
 
         let letterLandscape = NoteCanvasConfiguration(
             pageFormat: .letter,
@@ -282,9 +283,109 @@ final class LocalDatabaseTests: XCTestCase {
         let infinite = NoteCanvasConfiguration(pageFormat: .infinite)
         XCTAssertNil(infinite.pageWidth)
         XCTAssertNil(infinite.pageHeight)
+        XCTAssertEqual(infinite.effectivePageCount, 1)
         let placement = NoteCanvasPlacement(x: -12_000, y: -8_000, width: 400, height: 200)
         XCTAssertLessThan(placement.x, 0)
         XCTAssertLessThan(placement.y, 0)
+
+        let modifiedPaper = NoteCanvasConfiguration(
+            pageFormat: .letter,
+            paperStyle: .isometric,
+            paperColor: .stone,
+            paperSpacing: 18
+        )
+        XCTAssertEqual(modifiedPaper.schemaVersion, "note-canvas/v3")
+        XCTAssertEqual(modifiedPaper.paperStyle, .isometric)
+        XCTAssertEqual(modifiedPaper.paperColor, .stone)
+        XCTAssertEqual(modifiedPaper.paperSpacing, 18)
+    }
+
+    func testLegacyCanvasDefaultsToOnePage() throws {
+        let legacy = """
+        {
+          "orientation": "PORTRAIT",
+          "pageFormat": "A4",
+          "paperStyle": "PLAIN",
+          "schemaVersion": "note-canvas/v1"
+        }
+        """
+
+        let canvas = try CanonicalJSON.decode(
+            NoteCanvasConfiguration.self,
+            from: Data(legacy.utf8)
+        )
+
+        XCTAssertEqual(canvas.schemaVersion, "note-canvas/v1")
+        XCTAssertEqual(canvas.effectivePageCount, 1)
+        XCTAssertEqual(canvas.paperColor, .white)
+        XCTAssertEqual(canvas.paperSpacing, 28)
+    }
+
+    func testFinitePagesPersistAsMetadataWithPageLocalBlocks() async throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let database = try SQLCipherDatabase(
+            url: directory.appendingPathComponent("pages.sqlite"),
+            key: Data(repeating: 23, count: 32)
+        )
+        let store = EpistoriaStore(database: database)
+        let noteId = try await store.createNote(
+            title: "Paged note",
+            canvas: NoteCanvasConfiguration(pageFormat: .a4, pageCount: 4)
+        )
+
+        let emptyPages = try await store.list(NoteBlockPayload.self, parentId: noteId)
+        XCTAssertTrue(emptyPages.isEmpty)
+
+        let textId = try await store.appendCanvasText(
+            noteId: noteId,
+            text: "Only on page four",
+            placement: NoteCanvasPlacement(x: 40, y: 60, width: 320, height: 120),
+            pageIndex: 3
+        )
+        let inkId = try await store.appendCanvasInkLayer(noteId: noteId, pageIndex: 3)
+        let shapeId = try await store.appendCanvasShape(
+            noteId: noteId,
+            shape: NoteCanvasShape(
+                kind: .triangle,
+                strokeColor: .blue,
+                fillColor: .graphite,
+                lineWidth: 5
+            ),
+            placement: NoteCanvasPlacement(x: 80, y: 220, width: 180, height: 140),
+            pageIndex: 3
+        )
+        let symbolId = try await store.appendCanvasEquation(
+            noteId: noteId,
+            symbol: "∫",
+            placement: NoteCanvasPlacement(x: 280, y: 220, width: 100, height: 90),
+            pageIndex: 3
+        )
+
+        let reopened = try EpistoriaStore(
+            database: SQLCipherDatabase(
+                url: directory.appendingPathComponent("pages.sqlite"),
+                key: Data(repeating: 23, count: 32)
+            )
+        )
+        let note = try await reopened.payload(NotePayload.self, id: noteId)
+        let text = try await reopened.payload(NoteBlockPayload.self, id: textId)
+        let ink = try await reopened.payload(NoteBlockPayload.self, id: inkId)
+        let shape = try await reopened.payload(NoteBlockPayload.self, id: shapeId)
+        let symbol = try await reopened.payload(NoteBlockPayload.self, id: symbolId)
+
+        XCTAssertEqual(note.payload.canvas?.effectivePageCount, 4)
+        XCTAssertEqual(text.payload.canvasPageIndex, 3)
+        XCTAssertEqual(ink.payload.canvasPageIndex, 3)
+        XCTAssertEqual(ink.payload.canvasRole, .inkLayer)
+        XCTAssertEqual(shape.payload.canvasShape?.kind, .triangle)
+        XCTAssertEqual(shape.payload.canvasShape?.strokeColor, .blue)
+        XCTAssertEqual(shape.payload.canvasShape?.fillColor, .graphite)
+        XCTAssertEqual(shape.payload.canvasShape?.lineWidth, 5)
+        XCTAssertEqual(shape.payload.canvasPageIndex, 3)
+        XCTAssertEqual(symbol.payload.blockType, .equation)
+        XCTAssertEqual(symbol.payload.plainText, "∫")
+        XCTAssertEqual(symbol.payload.canvasPageIndex, 3)
     }
 
     func testConflictCandidateKeepsContentAndRelationshipUntilResolved() async throws {

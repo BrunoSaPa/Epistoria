@@ -67,6 +67,7 @@ final class AppModel {
     var pendingFileCount = 0
     var unresolvedConflictCount = 0
     private(set) var isCreatingPortableExport = false
+    private(set) var isCreatingNotePDF = false
     var configuration: AccountConfiguration?
     let pendingSaves = PendingSaveRegistry()
 
@@ -89,6 +90,7 @@ final class AppModel {
     private var periodicSyncTask: Task<Void, Never>?
     private var syncAttemptTask: Task<SyncReport, Error>?
     private var exportTask: Task<EpistoriaExportResult, Error>?
+    private var notePDFExportTask: Task<NotePDFExportResult, Error>?
     private var syncRequestedWhileRunning = false
     private var pathMonitor: NWPathMonitor?
     private var isLocking = false
@@ -218,6 +220,14 @@ final class AppModel {
         }
         exportTask = nil
         isCreatingPortableExport = false
+
+        let activeNotePDFExport = notePDFExportTask
+        activeNotePDFExport?.cancel()
+        if let activeNotePDFExport {
+            _ = await activeNotePDFExport.result
+        }
+        notePDFExportTask = nil
+        isCreatingNotePDF = false
         isReconfiguringSync = false
 
         // Give disappearing editors a main-actor turn to stage their last snapshot, then
@@ -248,6 +258,7 @@ final class AppModel {
         pendingFileCount = 0
         unresolvedConflictCount = 0
         try? EpistoriaExportService.removeAllTemporaryExports()
+        try? NotePDFExportService.removeAllTemporaryPDFs()
         configuration = configurationStore.load()
         phase = nextPhase
         isLocking = false
@@ -414,7 +425,8 @@ final class AppModel {
     func deleteLocalDevelopmentNotebook() async throws {
         guard !isOpening,
               !isLocking,
-              !isCreatingPortableExport
+              !isCreatingPortableExport,
+              !isCreatingNotePDF
         else { throw AppModelOperationError.unlockedSessionUnavailable }
         var storedConfiguration = try configurationStore.loadValidated()
         if let unresolved = storedConfiguration, unresolved.storageScope == nil {
@@ -534,6 +546,7 @@ final class AppModel {
 
     func createPortableExport(includingDerivedAI: Bool) async throws -> EpistoriaExportResult {
         guard !isCreatingPortableExport,
+              !isCreatingNotePDF,
               !isReconfiguringSync,
               !isLocking,
               case .ready = phase,
@@ -574,6 +587,45 @@ final class AppModel {
             try await service.exportDecrypted(includingDerivedAI: includingDerivedAI)
         }
         exportTask = task
+        return try await withTaskCancellationHandler {
+            try await task.value
+        } onCancel: {
+            task.cancel()
+        }
+    }
+
+    func createNotePDF(noteId: UUID) async throws -> NotePDFExportResult {
+        guard !isCreatingPortableExport,
+              !isCreatingNotePDF,
+              !isReconfiguringSync,
+              !isLocking,
+              case .ready = phase,
+              let store,
+              let assetManager
+        else { throw AppModelOperationError.unlockedSessionUnavailable }
+        isCreatingNotePDF = true
+        let generation = sessionGeneration
+        defer {
+            if generation == sessionGeneration {
+                notePDFExportTask = nil
+                isCreatingNotePDF = false
+                resumeSyncSchedulingIfNeeded()
+            }
+        }
+        automaticSyncTask?.cancel()
+        automaticSyncTask = nil
+        automaticSyncToken = nil
+        syncRequestedWhileRunning = false
+        if let syncAttemptTask { _ = await syncAttemptTask.result }
+        guard generation == sessionGeneration, !isLocking, case .ready = phase else {
+            isCreatingNotePDF = false
+            throw CancellationError()
+        }
+        try await pendingSaves.flushAll()
+
+        let service = NotePDFExportService(store: store, assetManager: assetManager)
+        let task = Task { try await service.export(noteId: noteId) }
+        notePDFExportTask = task
         return try await withTaskCancellationHandler {
             try await task.value
         } onCancel: {
@@ -634,7 +686,7 @@ final class AppModel {
     }
 
     private func synchronize(reportMissingServer: Bool) async {
-        guard !isCreatingPortableExport, !isReconfiguringSync else { return }
+        guard !isCreatingPortableExport, !isCreatingNotePDF, !isReconfiguringSync else { return }
         guard !isLocking, case .ready = phase, let syncEngine else {
             if reportMissingServer {
                 syncError = "Connect a private sync server in Data Health first."
@@ -687,7 +739,11 @@ final class AppModel {
     }
 
     private func scheduleAutomaticSync(delay: Duration = .seconds(1.5)) {
-        guard syncEngine != nil, !isCreatingPortableExport, !isReconfiguringSync else { return }
+        guard syncEngine != nil,
+              !isCreatingPortableExport,
+              !isCreatingNotePDF,
+              !isReconfiguringSync
+        else { return }
         automaticSyncTask?.cancel()
         let token = UUID()
         automaticSyncToken = token
@@ -752,6 +808,7 @@ final class AppModel {
     private func resumeSyncSchedulingIfNeeded() {
         guard !isLocking,
               !isCreatingPortableExport,
+              !isCreatingNotePDF,
               !isReconfiguringSync,
               case .ready = phase
         else { return }

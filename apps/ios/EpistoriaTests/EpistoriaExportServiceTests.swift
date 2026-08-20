@@ -18,7 +18,10 @@ final class EpistoriaExportServiceTests: XCTestCase {
         let fixture = try makeFixture()
         defer { try? FileManager.default.removeItem(at: fixture.root) }
 
-        let noteId = try await fixture.store.createNote(title: "A durable thought")
+        let noteId = try await fixture.store.createNote(
+            title: "A durable thought",
+            canvas: NoteCanvasConfiguration(pageCount: 2)
+        )
         _ = try await fixture.store.appendTextBlock(
             noteId: noteId,
             text: "Evidence stays portable."
@@ -50,7 +53,8 @@ final class EpistoriaExportServiceTests: XCTestCase {
             noteId: noteId,
             assetId: importedImage.assetId,
             filename: importedImage.filename,
-            placement: NoteCanvasPlacement(x: 40, y: 80, width: 240, height: 180, zIndex: 2)
+            placement: NoteCanvasPlacement(x: 40, y: 80, width: 240, height: 180, zIndex: 2),
+            pageIndex: 1
         )
 
         let pdf = Data("%PDF-1.4\n% Epistoria portability test\n%%EOF\n".utf8)
@@ -118,6 +122,14 @@ final class EpistoriaExportServiceTests: XCTestCase {
         XCTAssertTrue(canvasAssets.lowercased().contains(imageItemId.uuidString.lowercased()))
         XCTAssertTrue(canvasAssets.lowercased().contains(importedImage.assetId.uuidString.lowercased()))
         XCTAssertTrue(canvasAssets.contains("notes/images/"))
+        let noteRecord = try String(
+            contentsOf: package.appendingPathComponent(
+                "notes/\(noteId.uuidString.lowercased()).json"
+            ),
+            encoding: .utf8
+        )
+        XCTAssertTrue(noteRecord.contains("\"pageCount\" : 2"))
+        XCTAssertTrue(noteRecord.contains("\"canvasPageIndex\" : 1"))
 
         let exportedBytes = try recursiveFileData(in: package)
         XCTAssertFalse(exportedBytes.contains { $0.range(of: fixture.accountKey) != nil })

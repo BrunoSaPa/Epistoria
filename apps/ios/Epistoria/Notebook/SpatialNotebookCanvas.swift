@@ -8,6 +8,57 @@ enum SpatialNotebookMode: Equatable {
     case select
     case ink
     case lasso
+    case shape
+    case symbol
+}
+
+enum SpatialNotebookInkTool: Equatable {
+    case pen
+    case marker
+    case eraser
+
+    func pencilKitTool(
+        width: CGFloat,
+        color: NoteCanvasColor,
+        eraserMode: SpatialNotebookEraserMode,
+        eraserWidth: CGFloat
+    ) -> PKTool {
+        switch self {
+        case .pen:
+            PKInkingTool(.pen, color: color.uiColor, width: width)
+        case .marker:
+            PKInkingTool(.marker, color: color.uiColor.withAlphaComponent(0.32), width: width)
+        case .eraser:
+            switch eraserMode {
+            case .pixel:
+                PKEraserTool(.fixedWidthBitmap, width: eraserWidth)
+            case .stroke:
+                PKEraserTool(.vector)
+            }
+        }
+    }
+}
+
+enum SpatialNotebookEraserMode: String, CaseIterable, Equatable {
+    case pixel
+    case stroke
+
+    var label: String {
+        switch self {
+        case .pixel: "Pixel eraser"
+        case .stroke: "Stroke eraser"
+        }
+    }
+}
+
+struct SpatialNotebookCommand: Equatable {
+    enum Action: Equatable {
+        case undo
+        case redo
+    }
+
+    let id = UUID()
+    let action: Action
 }
 
 struct SpatialNotebookItem: Identifiable {
@@ -15,6 +66,7 @@ struct SpatialNotebookItem: Identifiable {
         case text(NSAttributedString)
         case image(UIImage, filename: String)
         case legacyDrawing(PKDrawing)
+        case shape(NoteCanvasShape)
         case unsupported(String)
     }
 
@@ -30,10 +82,18 @@ struct SpatialNotebookFocus: Equatable {
 
 struct SpatialNotebookCanvas: UIViewRepresentable {
     let configuration: NoteCanvasConfiguration
+    let pageIndex: Int
     let items: [SpatialNotebookItem]
     let inkData: Data
     let inkBlockId: UUID?
     let mode: SpatialNotebookMode
+    let inkTool: SpatialNotebookInkTool
+    let inkWidth: CGFloat
+    let inkColor: NoteCanvasColor
+    let eraserMode: SpatialNotebookEraserMode
+    let eraserWidth: CGFloat
+    let command: SpatialNotebookCommand?
+    let allowsViewportNavigation: Bool
     let selectedItemId: UUID?
     let lassoSelectedIds: Set<UUID>
     let focus: SpatialNotebookFocus?
@@ -45,6 +105,7 @@ struct SpatialNotebookCanvas: UIViewRepresentable {
     let onTextEditingEnded: (UUID) -> Void
     let onInkChanged: (Data) -> Void
     let onLassoSelection: (LassoSelection) -> Void
+    let onCanvasTap: (CGPoint) -> Void
     let isReadOnly: Bool
 
     func makeUIView(context: Context) -> SpatialNotebookHostView {
@@ -65,12 +126,21 @@ struct SpatialNotebookCanvas: UIViewRepresentable {
         view.onTextEditingEnded = onTextEditingEnded
         view.onInkChanged = onInkChanged
         view.onLassoSelection = onLassoSelection
+        view.onCanvasTap = onCanvasTap
         view.apply(
             configuration: configuration,
+            pageIndex: pageIndex,
             items: items,
             inkData: inkData,
             inkBlockId: inkBlockId,
             mode: mode,
+            inkTool: inkTool,
+            inkWidth: inkWidth,
+            inkColor: inkColor,
+            eraserMode: eraserMode,
+            eraserWidth: eraserWidth,
+            command: command,
+            allowsViewportNavigation: allowsViewportNavigation,
             selectedItemId: selectedItemId,
             lassoSelectedIds: lassoSelectedIds,
             focus: focus,
@@ -89,16 +159,21 @@ final class SpatialNotebookHostView: UIView, UIScrollViewDelegate, PKCanvasViewD
     var onTextEditingEnded: ((UUID) -> Void)?
     var onInkChanged: ((Data) -> Void)?
     var onLassoSelection: ((LassoSelection) -> Void)?
+    var onCanvasTap: ((CGPoint) -> Void)?
 
     private let scrollView = UIScrollView()
     private let contentView = UIView()
     private let paperView = NotebookPaperView()
     private let pencilCanvas = PKCanvasView()
     private let lassoView = LassoGestureView()
-    private var toolPicker: PKToolPicker?
+    private lazy var placementTap = UITapGestureRecognizer(
+        target: self,
+        action: #selector(handlePlacementTap(_:))
+    )
     private var itemViews: [UUID: CanvasItemView] = [:]
     private var itemsByID: [UUID: SpatialNotebookItem] = [:]
     private var configuration = NoteCanvasConfiguration()
+    private var pageIndex = 0
     private var mode = SpatialNotebookMode.select
     private var selectedItemId: UUID?
     private var lassoSelectedIds: Set<UUID> = []
@@ -117,6 +192,9 @@ final class SpatialNotebookHostView: UIView, UIScrollViewDelegate, PKCanvasViewD
     private var pendingFocus: SpatialNotebookFocus?
     private var lastEditingItemId: UUID?
     private var isReadOnly = false
+    private var allowsViewportNavigation = true
+    private var lastCommandID: UUID?
+    private var lastLayoutSize = CGSize.zero
 
     private static let infiniteExtent: CGFloat = 16_384
     private static let fixedPasteboardMargin: CGFloat = 320
@@ -154,6 +232,9 @@ final class SpatialNotebookHostView: UIView, UIScrollViewDelegate, PKCanvasViewD
 
         paperView.isUserInteractionEnabled = false
         contentView.addSubview(paperView)
+        placementTap.cancelsTouchesInView = false
+        placementTap.isEnabled = false
+        contentView.addGestureRecognizer(placementTap)
 
         pencilCanvas.delegate = self
         pencilCanvas.backgroundColor = .clear
@@ -184,10 +265,16 @@ final class SpatialNotebookHostView: UIView, UIScrollViewDelegate, PKCanvasViewD
         scrollView.frame = bounds
         lassoView.frame = bounds
         guard bounds.width > 0, bounds.height > 0 else { return }
+        let sizeChanged = bounds.size != lastLayoutSize
+        lastLayoutSize = bounds.size
         if geometryNeedsInitialPosition {
             // `setZoomScale` can synchronously trigger another layout pass. Mark the one-time
             // setup complete before changing zoom so UIKit cannot re-enter this branch.
             geometryNeedsInitialPosition = false
+            configureGeometry(preserving: nil)
+            positionInitialViewport()
+            reportViewport()
+        } else if sizeChanged, !allowsViewportNavigation {
             configureGeometry(preserving: nil)
             positionInitialViewport()
             reportViewport()
@@ -197,31 +284,69 @@ final class SpatialNotebookHostView: UIView, UIScrollViewDelegate, PKCanvasViewD
 
     func apply(
         configuration: NoteCanvasConfiguration,
+        pageIndex: Int,
         items: [SpatialNotebookItem],
         inkData: Data,
         inkBlockId: UUID?,
         mode: SpatialNotebookMode,
+        inkTool: SpatialNotebookInkTool,
+        inkWidth: CGFloat,
+        inkColor: NoteCanvasColor,
+        eraserMode: SpatialNotebookEraserMode,
+        eraserWidth: CGFloat,
+        command: SpatialNotebookCommand?,
+        allowsViewportNavigation: Bool,
         selectedItemId: UUID?,
         lassoSelectedIds: Set<UUID>,
         focus: SpatialNotebookFocus?,
         editingItemId: UUID?,
         isReadOnly: Bool
     ) {
-        let geometryChanged = configuration != self.configuration
-        let preservedCenter = geometryChanged && !geometryNeedsInitialPosition
+        let surfaceChanged = configuration.pageFormat != self.configuration.pageFormat
+            || configuration.orientation != self.configuration.orientation
+            || configuration.paperStyle != self.configuration.paperStyle
+            || configuration.paperColor != self.configuration.paperColor
+            || configuration.paperSpacing != self.configuration.paperSpacing
+        let pageChanged = pageIndex != self.pageIndex
+        let preservedCenter = surfaceChanged && !geometryNeedsInitialPosition
             ? currentWorldCenter()
             : nil
         self.configuration = configuration
+        self.pageIndex = max(pageIndex, 0)
         self.mode = mode
+        self.allowsViewportNavigation = allowsViewportNavigation
+        pencilCanvas.tool = inkTool.pencilKitTool(
+            width: inkWidth,
+            color: inkColor,
+            eraserMode: eraserMode,
+            eraserWidth: eraserWidth
+        )
         self.selectedItemId = selectedItemId
         self.lassoSelectedIds = lassoSelectedIds
-        if inkBlockId != self.inkBlockId { lastExternalInkData = nil }
+        if inkBlockId != self.inkBlockId || pageChanged { lastExternalInkData = nil }
         self.inkBlockId = inkBlockId
         self.isReadOnly = isReadOnly
         itemsByID = Dictionary(uniqueKeysWithValues: items.map { ($0.id, $0) })
 
-        if geometryChanged, bounds.width > 0, bounds.height > 0 {
-            configureGeometry(preserving: preservedCenter)
+        if pageChanged {
+            contentView.endEditing(true)
+            worldDrawing = PKDrawing()
+            if bounds.width > 0, bounds.height > 0 {
+                geometryNeedsInitialPosition = false
+                configureGeometry(preserving: nil)
+                positionInitialViewport()
+                reportViewport()
+            } else {
+                geometryNeedsInitialPosition = true
+            }
+        } else if surfaceChanged, bounds.width > 0, bounds.height > 0 {
+            if allowsViewportNavigation {
+                configureGeometry(preserving: preservedCenter)
+            } else {
+                configureGeometry(preserving: nil)
+                positionInitialViewport()
+                reportViewport()
+            }
         } else if configuration.pageFormat != .infinite,
                   bounds.width > 0,
                   fixedGeometryNeedsExpansion()
@@ -232,6 +357,7 @@ final class SpatialNotebookHostView: UIView, UIScrollViewDelegate, PKCanvasViewD
         applyInkData(inkData)
         applyInteractionMode()
         applySelection()
+        applyCommand(command)
 
         if focus != lastFocus {
             lastFocus = focus
@@ -288,6 +414,8 @@ final class SpatialNotebookHostView: UIView, UIScrollViewDelegate, PKCanvasViewD
             contentView.backgroundColor = .systemBackground
         }
         paperView.paperStyle = configuration.paperStyle
+        paperView.paperColor = configuration.paperColor
+        paperView.paperSpacing = CGFloat(configuration.paperSpacing)
         paperView.setNeedsDisplay()
         reconcileItems(Array(itemsByID.values))
         applyWorldDrawing()
@@ -304,14 +432,18 @@ final class SpatialNotebookHostView: UIView, UIScrollViewDelegate, PKCanvasViewD
         configureZoomLimits()
 
         if let width = configuration.pageWidth, let height = configuration.pageHeight {
+            let viewportInset: CGFloat = allowsViewportNavigation ? 48 : 0
             let available = CGSize(
-                width: max(bounds.width - 48, 1),
-                height: max(bounds.height - 48, 1)
+                width: max(bounds.width - viewportInset, 1),
+                height: max(bounds.height - viewportInset, 1)
             )
             let fit = min(available.width / width, available.height / height)
+            let maximumInitialScale = allowsViewportNavigation
+                ? min(Self.maximumCanvasZoomScale, 1.35)
+                : Self.maximumCanvasZoomScale
             let targetScale = min(
                 max(fit, Self.minimumCanvasZoomScale),
-                min(Self.maximumCanvasZoomScale, 1.35)
+                maximumInitialScale
             )
             guard targetScale.isFinite, targetScale > 0 else { return }
             scrollView.setZoomScale(targetScale, animated: false)
@@ -454,24 +586,36 @@ final class SpatialNotebookHostView: UIView, UIScrollViewDelegate, PKCanvasViewD
         pencilCanvas.isUserInteractionEnabled = drawing
         itemViews.values.forEach { $0.setInteractionEnabled(mode == .select && !isReadOnly) }
         lassoView.isHidden = mode != .lasso
-        scrollView.isScrollEnabled = mode != .lasso
+        placementTap.isEnabled = (mode == .shape || mode == .symbol) && !isReadOnly
+        scrollView.isScrollEnabled = allowsViewportNavigation && mode != .lasso
 
         if drawing {
-            if toolPicker == nil {
-                let picker = PKToolPicker()
-                picker.addObserver(pencilCanvas)
-                toolPicker = picker
-            }
-            if let toolPicker {
-                toolPicker.setVisible(true, forFirstResponder: pencilCanvas)
-            }
             pencilCanvas.becomeFirstResponder()
         } else {
-            if let toolPicker {
-                toolPicker.setVisible(false, forFirstResponder: pencilCanvas)
-            }
             if pencilCanvas.isFirstResponder { pencilCanvas.resignFirstResponder() }
         }
+    }
+
+    private func applyCommand(_ command: SpatialNotebookCommand?) {
+        guard let command, command.id != lastCommandID else { return }
+        lastCommandID = command.id
+        switch command.action {
+        case .undo:
+            pencilCanvas.undoManager?.undo()
+        case .redo:
+            pencilCanvas.undoManager?.redo()
+        }
+    }
+
+    @objc private func handlePlacementTap(_ recognizer: UITapGestureRecognizer) {
+        guard recognizer.state == .ended,
+              !isReadOnly,
+              mode == .shape || mode == .symbol
+        else { return }
+        let point = recognizer.location(in: contentView)
+        onCanvasTap?(
+            CGPoint(x: point.x - documentOrigin.x, y: point.y - documentOrigin.y)
+        )
     }
 
     private func applySelection() {
@@ -653,6 +797,27 @@ final class SpatialNotebookHostView: UIView, UIScrollViewDelegate, PKCanvasViewD
     var viewportWorldCenterForTesting: CGPoint { currentWorldCenter() }
     var hasPendingFocusForTesting: Bool { pendingFocus != nil }
     var acceptsAnyInkInputForTesting: Bool { pencilCanvas.drawingPolicy == .anyInput }
+    var displayedPageIndexForTesting: Int { pageIndex }
+    var allowsViewportNavigationForTesting: Bool { allowsViewportNavigation }
+    var usesVectorEraserForTesting: Bool {
+        (pencilCanvas.tool as? PKEraserTool)?.eraserType == .vector
+    }
+    var eraserTypeForTesting: PKEraserTool.EraserType? {
+        (pencilCanvas.tool as? PKEraserTool)?.eraserType
+    }
+    var eraserWidthForTesting: CGFloat? {
+        (pencilCanvas.tool as? PKEraserTool)?.width
+    }
+    var inkColorForTesting: UIColor? {
+        (pencilCanvas.tool as? PKInkingTool)?.color
+    }
+    var paperColorForTesting: NotePaperColor { paperView.paperColor }
+    var paperSpacingForTesting: CGFloat { paperView.paperSpacing }
+    var renderedShapeCountForTesting: Int {
+        itemsByID.values.reduce(into: 0) { count, item in
+            if case .shape = item.content { count += 1 }
+        }
+    }
 #endif
 
     private func selectionPNG(
@@ -711,6 +876,7 @@ final class SpatialNotebookHostView: UIView, UIScrollViewDelegate, PKCanvasViewD
 final class NotebookPaperView: UIView {
     private struct DrawingState: @unchecked Sendable {
         var paperStyle = NotePaperStyle.plain
+        var paperSpacing: CGFloat = 28
         var worldOriginInView = CGPoint.zero
         var lineColor = CGColor(gray: 0.5, alpha: 0.22)
     }
@@ -721,6 +887,18 @@ final class NotebookPaperView: UIView {
         didSet {
             let value = paperStyle
             drawingState.withLock { $0.paperStyle = value }
+        }
+    }
+    var paperColor = NotePaperColor.white {
+        didSet {
+            backgroundColor = paperColor.uiColor
+            updateDrawingColor()
+        }
+    }
+    var paperSpacing: CGFloat = 28 {
+        didSet {
+            let value = min(max(paperSpacing, 12), 72)
+            drawingState.withLock { $0.paperSpacing = value }
         }
     }
     var isInfinite = false
@@ -736,7 +914,7 @@ final class NotebookPaperView: UIView {
     override init(frame: CGRect) {
         super.init(frame: frame)
         contentMode = .redraw
-        backgroundColor = .systemBackground
+        backgroundColor = paperColor.uiColor
         layer.borderColor = UIColor.separator.withAlphaComponent(0.35).cgColor
         layer.borderWidth = 0.5
         updateDrawingColor()
@@ -757,10 +935,7 @@ final class NotebookPaperView: UIView {
     required init?(coder: NSCoder) { fatalError() }
 
     private func updateDrawingColor() {
-        let resolved = UIColor.separator
-            .withAlphaComponent(0.22)
-            .resolvedColor(with: traitCollection)
-            .cgColor
+        let resolved = paperColor.lineColor.resolvedColor(with: traitCollection).cgColor
         drawingState.withLock { $0.lineColor = resolved }
     }
 
@@ -781,8 +956,8 @@ final class NotebookPaperView: UIView {
         case .ruled:
             alignedValues(
                 in: rect.minY ... rect.maxY,
-                spacing: 28,
-                offset: state.worldOriginInView.y + 14
+                spacing: state.paperSpacing,
+                offset: state.worldOriginInView.y + state.paperSpacing / 2
             )
                 .forEach { y in
                 context.move(to: CGPoint(x: rect.minX, y: y))
@@ -790,12 +965,20 @@ final class NotebookPaperView: UIView {
             }
             context.strokePath()
         case .grid:
-            alignedValues(in: rect.minX ... rect.maxX, spacing: 28, offset: state.worldOriginInView.x)
+            alignedValues(
+                in: rect.minX ... rect.maxX,
+                spacing: state.paperSpacing,
+                offset: state.worldOriginInView.x
+            )
                 .forEach { x in
                 context.move(to: CGPoint(x: x, y: rect.minY))
                 context.addLine(to: CGPoint(x: x, y: rect.maxY))
             }
-            alignedValues(in: rect.minY ... rect.maxY, spacing: 28, offset: state.worldOriginInView.y)
+            alignedValues(
+                in: rect.minY ... rect.maxY,
+                spacing: state.paperSpacing,
+                offset: state.worldOriginInView.y
+            )
                 .forEach { y in
                 context.move(to: CGPoint(x: rect.minX, y: y))
                 context.addLine(to: CGPoint(x: rect.maxX, y: y))
@@ -804,19 +987,38 @@ final class NotebookPaperView: UIView {
         case .dotted:
             alignedValues(
                 in: rect.minX ... rect.maxX,
-                spacing: 24,
-                offset: state.worldOriginInView.x + 12
+                spacing: state.paperSpacing,
+                offset: state.worldOriginInView.x + state.paperSpacing / 2
             )
                 .forEach { x in
                 alignedValues(
                     in: rect.minY ... rect.maxY,
-                    spacing: 24,
-                    offset: state.worldOriginInView.y + 12
+                    spacing: state.paperSpacing,
+                    offset: state.worldOriginInView.y + state.paperSpacing / 2
                 )
                     .forEach { y in
                     context.fillEllipse(in: CGRect(x: x - 0.7, y: y - 0.7, width: 1.4, height: 1.4))
                 }
             }
+        case .isometric:
+            let spacing = state.paperSpacing
+            alignedValues(
+                in: rect.minY ... rect.maxY,
+                spacing: spacing,
+                offset: state.worldOriginInView.y
+            ).forEach { y in
+                context.move(to: CGPoint(x: rect.minX, y: y))
+                context.addLine(to: CGPoint(x: rect.maxX, y: y))
+            }
+            let diagonalSpan = rect.width + rect.height * 0.58
+            let start = floor((rect.minX - rect.maxY * 0.58) / spacing) * spacing
+            for offset in stride(from: start, through: start + diagonalSpan, by: spacing) {
+                context.move(to: CGPoint(x: offset + rect.minY * 0.58, y: rect.minY))
+                context.addLine(to: CGPoint(x: offset + rect.maxY * 0.58, y: rect.maxY))
+                context.move(to: CGPoint(x: offset - rect.minY * 0.58, y: rect.minY))
+                context.addLine(to: CGPoint(x: offset - rect.maxY * 0.58, y: rect.maxY))
+            }
+            context.strokePath()
         }
     }
 
@@ -868,6 +1070,7 @@ private final class CanvasItemView: UIView, UITextViewDelegate, UIGestureRecogni
 
     private let textView = CanvasTextView()
     private let imageView = UIImageView()
+    private let shapeLayer = CAShapeLayer()
     private let placeholderLabel = UILabel()
     private var item: SpatialNotebookItem?
     private var documentOrigin = CGPoint.zero
@@ -910,6 +1113,11 @@ private final class CanvasItemView: UIView, UITextViewDelegate, UIGestureRecogni
         imageView.clipsToBounds = true
         addSubview(imageView)
 
+        shapeLayer.fillColor = UIColor.clear.cgColor
+        shapeLayer.lineCap = .round
+        shapeLayer.lineJoin = .round
+        layer.addSublayer(shapeLayer)
+
         placeholderLabel.numberOfLines = 0
         placeholderLabel.textAlignment = .center
         placeholderLabel.textColor = .secondaryLabel
@@ -929,6 +1137,9 @@ private final class CanvasItemView: UIView, UITextViewDelegate, UIGestureRecogni
         super.layoutSubviews()
         textView.frame = bounds
         imageView.frame = bounds
+        if case let .shape(shape) = item?.content {
+            applyShape(shape)
+        }
         placeholderLabel.frame = bounds.insetBy(dx: 12, dy: 12)
     }
 
@@ -945,6 +1156,7 @@ private final class CanvasItemView: UIView, UITextViewDelegate, UIGestureRecogni
 
         textView.isHidden = true
         imageView.isHidden = true
+        shapeLayer.isHidden = true
         placeholderLabel.isHidden = true
         switch item.content {
         case let .text(value):
@@ -963,6 +1175,10 @@ private final class CanvasItemView: UIView, UITextViewDelegate, UIGestureRecogni
             let renderRect = CGRect(origin: .zero, size: modelSize)
             imageView.image = drawing.image(from: renderRect, scale: 2)
             accessibilityLabel = "Handwritten drawing"
+        case let .shape(shape):
+            shapeLayer.isHidden = false
+            applyShape(shape)
+            accessibilityLabel = "\(shape.kind.label) shape"
         case let .unsupported(label):
             placeholderLabel.isHidden = false
             placeholderLabel.text = label
@@ -970,6 +1186,16 @@ private final class CanvasItemView: UIView, UITextViewDelegate, UIGestureRecogni
         }
         setInteractionEnabled(interactionEnabled)
         setSelected(selected)
+    }
+
+    private func applyShape(_ shape: NoteCanvasShape) {
+        let width = CGFloat(shape.lineWidth)
+        shapeLayer.frame = bounds
+        shapeLayer.path = NotebookShapePath.make(kind: shape.kind, in: bounds, lineWidth: width)
+        shapeLayer.lineWidth = width
+        shapeLayer.strokeColor = shape.strokeColor.uiColor.cgColor
+        shapeLayer.fillColor = shape.fillColor?.uiColor.withAlphaComponent(0.18).cgColor
+            ?? UIColor.clear.cgColor
     }
 
     func setInteractionEnabled(_ enabled: Bool) {
