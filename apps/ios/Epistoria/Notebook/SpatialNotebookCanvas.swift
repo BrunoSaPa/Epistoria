@@ -158,7 +158,13 @@ final class SpatialNotebookHostView: UIView, UIScrollViewDelegate, PKCanvasViewD
         pencilCanvas.delegate = self
         pencilCanvas.backgroundColor = .clear
         pencilCanvas.isOpaque = false
+        #if targetEnvironment(simulator)
+        // The Simulator has no Apple Pencil source. Accept pointer input so the ink workflow can
+        // be exercised during development without changing physical-iPad palm rejection.
+        pencilCanvas.drawingPolicy = .anyInput
+        #else
         pencilCanvas.drawingPolicy = .pencilOnly
+        #endif
         pencilCanvas.isScrollEnabled = false
         pencilCanvas.bounces = false
         pencilCanvas.alwaysBounceVertical = false
@@ -646,6 +652,7 @@ final class SpatialNotebookHostView: UIView, UIScrollViewDelegate, PKCanvasViewD
     var viewportZoomScaleForTesting: CGFloat { scrollView.zoomScale }
     var viewportWorldCenterForTesting: CGPoint { currentWorldCenter() }
     var hasPendingFocusForTesting: Bool { pendingFocus != nil }
+    var acceptsAnyInkInputForTesting: Bool { pencilCanvas.drawingPolicy == .anyInput }
 #endif
 
     private func selectionPNG(

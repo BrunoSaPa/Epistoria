@@ -37,7 +37,6 @@
 		D7268FC5ECD9944DCF92D7DE /* EpistoriaExportService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14FBF3B7A2C6EFB97A8C896A /* EpistoriaExportService.swift */; };
 		D9B6616E05DB2E898D413AF1 /* EpistoriaDesign.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A51BF1AFCD893DADFCF6CD8 /* EpistoriaDesign.swift */; };
 		DF9CD341ABD3A514D2FF6BB3 /* ConflictResolutionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF1667158D395E586B7CD1DF /* ConflictResolutionView.swift */; };
-		DFF6F33AF8F0D3DC0DA11786 /* TemporaryNoteOpenSmokeUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 09D14098B7B2667C787282D9 /* TemporaryNoteOpenSmokeUITests.swift */; };
 		E49A752F660F93F32EB06C31 /* UniversityView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15B4A893BDC4C76907E1C2C1 /* UniversityView.swift */; };
 		E8739243E0E6F49401DB4C3F /* NoteEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B279FE27DE285AD320383789 /* NoteEditorView.swift */; };
 /* End PBXBuildFile section */
@@ -62,7 +61,6 @@
 /* Begin PBXFileReference section */
 		05409469B2C2B557F4ED04A7 /* WorkspacePresentationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspacePresentationTests.swift; sourceTree = "<group>"; };
 		07D6428F2835D5D270587135 /* NotebookView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotebookView.swift; sourceTree = "<group>"; };
-		09D14098B7B2667C787282D9 /* TemporaryNoteOpenSmokeUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TemporaryNoteOpenSmokeUITests.swift; sourceTree = "<group>"; };
 		0E6623DB8C75432BEBBCAF11 /* AccountConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountConfiguration.swift; sourceTree = "<group>"; };
 		14FBF3B7A2C6EFB97A8C896A /* EpistoriaExportService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EpistoriaExportService.swift; sourceTree = "<group>"; };
 		15B4A893BDC4C76907E1C2C1 /* UniversityView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UniversityView.swift; sourceTree = "<group>"; };
@@ -244,7 +242,6 @@
 			isa = PBXGroup;
 			children = (
 				1A96413C31E6FBDD6548E083 /* EpistoriaAccessibilityUITests.swift */,
-				09D14098B7B2667C787282D9 /* TemporaryNoteOpenSmokeUITests.swift */,
 			);
 			path = EpistoriaUITests;
 			sourceTree = "<group>";
@@ -448,7 +445,6 @@
 			buildActionMask = 2147483647;
 			files = (
 				5A5134EA299709B260A44067 /* EpistoriaAccessibilityUITests.swift in Sources */,
-				DFF6F33AF8F0D3DC0DA11786 /* TemporaryNoteOpenSmokeUITests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

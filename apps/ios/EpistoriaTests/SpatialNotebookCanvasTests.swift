@@ -4,6 +4,16 @@ import XCTest
 
 @MainActor
 final class SpatialNotebookCanvasTests: XCTestCase {
+    func testSimulatorAcceptsPointerInkForDevelopment() {
+        let host = SpatialNotebookHostView(frame: CGRect(x: 0, y: 0, width: 1_024, height: 768))
+
+        #if targetEnvironment(simulator)
+        XCTAssertTrue(host.acceptsAnyInkInputForTesting)
+        #else
+        XCTAssertFalse(host.acceptsAnyInkInputForTesting)
+        #endif
+    }
+
     func testTiledPaperDrawCanRunOffTheMainExecutor() async {
         struct UncheckedBox<Value>: @unchecked Sendable {
             let value: Value
