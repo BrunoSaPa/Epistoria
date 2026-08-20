@@ -1,5 +1,6 @@
 @testable import Epistoria
 import EpistoriaCore
+import SwiftUI
 import XCTest
 
 @MainActor
@@ -218,6 +219,46 @@ final class SpatialNotebookCanvasTests: XCTestCase {
         XCTAssertEqual(actualComponents.blue, expectedComponents.blue, accuracy: 0.01)
         XCTAssertEqual(actualComponents.alpha, expectedComponents.alpha, accuracy: 0.01)
         XCTAssertEqual(host.renderedShapeCountForTesting, 1)
+    }
+
+    func testToolModifierPreviewsRenderCurrentSettings() throws {
+        let shape = NoteCanvasShape(
+            kind: .arrow,
+            strokeColor: .blue,
+            fillColor: .graphite,
+            lineWidth: 7
+        )
+        let content = VStack(spacing: 10) {
+            NotebookModifierPreview(name: "Pen", value: "Blue · 8 pt") {
+                NotebookInkPreview(color: .blue, width: 8, isMarker: false)
+            }
+            NotebookModifierPreview(name: "Marker", value: "Green · 18 pt") {
+                NotebookInkPreview(color: .green, width: 18, isMarker: true)
+            }
+            NotebookModifierPreview(name: "Pixel eraser", value: "Round · 42 pt") {
+                NotebookEraserPreview(mode: .pixel, width: 42)
+            }
+            NotebookModifierPreview(name: "Stroke eraser", value: "Whole stroke") {
+                NotebookEraserPreview(mode: .stroke, width: 42)
+            }
+            NotebookModifierPreview(name: "Shape", value: "Arrow · 7 pt") {
+                NotebookShapePreview(shape: shape)
+            }
+        }
+        .padding()
+        .frame(width: 360)
+        .background(Color(uiColor: .systemBackground))
+
+        let renderer = ImageRenderer(content: content)
+        renderer.scale = 1
+        let image = try XCTUnwrap(renderer.uiImage)
+        XCTAssertGreaterThan(image.size.width, 300)
+        XCTAssertGreaterThan(image.size.height, 300)
+        XCTAssertGreaterThan(try XCTUnwrap(image.pngData()).count, 1_000)
+        let attachment = XCTAttachment(image: image)
+        attachment.name = "Notebook tool modifier previews"
+        attachment.lifetime = .keepAlways
+        add(attachment)
     }
 
     func testContinuousDocumentSelectsPageNearestViewportMidpoint() {

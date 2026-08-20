@@ -26,6 +26,7 @@ change after personal use and beta testing.
 - Add direct printing and PDF page-range and layout options.
 - Add image crop and mask tools.
 - Add editing for an existing shape's style, connectors, snapping, and alignment guides.
+- Evaluate square, angled, and custom eraser footprints after physical Apple Pencil testing.
 - Evaluate handwriting recognition, handwritten-math recognition, equation layout, LaTeX input,
   and graphing after Pencil testing.
 

@@ -118,3 +118,175 @@ enum NotebookShapePath {
         return path.cgPath
     }
 }
+
+struct NotebookModifierPreview<Content: View>: View {
+    let name: String
+    let value: String
+    private let content: Content
+
+    init(
+        name: String,
+        value: String,
+        @ViewBuilder content: () -> Content
+    ) {
+        self.name = name
+        self.value = value
+        self.content = content()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Preview")
+                    .font(.caption.weight(.semibold))
+                Spacer(minLength: 8)
+                Text(value)
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(EpistoriaDesign.mutedInk)
+                    .lineLimit(1)
+            }
+            content
+                .frame(maxWidth: .infinity)
+                .frame(height: 72)
+                .background(
+                    Color(uiColor: .secondarySystemBackground),
+                    in: RoundedRectangle(cornerRadius: EpistoriaDesign.compactRadius)
+                )
+                .overlay {
+                    RoundedRectangle(cornerRadius: EpistoriaDesign.compactRadius)
+                        .stroke(EpistoriaDesign.border, lineWidth: 0.5)
+                }
+                .clipShape(RoundedRectangle(cornerRadius: EpistoriaDesign.compactRadius))
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(name) preview")
+        .accessibilityValue(value)
+    }
+}
+
+struct NotebookInkPreview: View {
+    let color: NoteCanvasColor
+    let width: CGFloat
+    let isMarker: Bool
+
+    var body: some View {
+        Canvas { context, size in
+            var path = Path()
+            path.move(to: CGPoint(x: 22, y: size.height * 0.58))
+            path.addCurve(
+                to: CGPoint(x: size.width - 22, y: size.height * 0.43),
+                control1: CGPoint(x: size.width * 0.30, y: size.height * 0.18),
+                control2: CGPoint(x: size.width * 0.67, y: size.height * 0.82)
+            )
+            context.stroke(
+                path,
+                with: .color(Color(uiColor: color.uiColor).opacity(isMarker ? 0.32 : 1)),
+                style: StrokeStyle(
+                    lineWidth: width,
+                    lineCap: .round,
+                    lineJoin: .round
+                )
+            )
+        }
+    }
+}
+
+struct NotebookEraserPreview: View {
+    let mode: SpatialNotebookEraserMode
+    let width: CGFloat
+
+    var body: some View {
+        Canvas { context, size in
+            let ink = Color(uiColor: .label)
+            let fadedInk = Color(uiColor: .secondaryLabel)
+            let paper = Color(uiColor: .secondarySystemBackground)
+
+            for index in 0 ..< 3 {
+                let y = size.height * (0.28 + CGFloat(index) * 0.22)
+                var stroke = Path()
+                stroke.move(to: CGPoint(x: 18, y: y))
+                stroke.addCurve(
+                    to: CGPoint(x: size.width - 18, y: y + (index == 1 ? -3 : 3)),
+                    control1: CGPoint(x: size.width * 0.32, y: y - 8),
+                    control2: CGPoint(x: size.width * 0.68, y: y + 8)
+                )
+                let isRemovedStroke = mode == .stroke && index == 1
+                context.stroke(
+                    stroke,
+                    with: .color(isRemovedStroke ? fadedInk.opacity(0.28) : ink),
+                    style: StrokeStyle(
+                        lineWidth: 3,
+                        lineCap: .round,
+                        dash: isRemovedStroke ? [5, 5] : []
+                    )
+                )
+            }
+
+            if mode == .pixel {
+                let diameter = min(max(width, 8), 56)
+                let footprint = CGRect(
+                    x: size.width / 2 - diameter / 2,
+                    y: size.height / 2 - diameter / 2,
+                    width: diameter,
+                    height: diameter
+                )
+                context.fill(Path(ellipseIn: footprint), with: .color(paper))
+                context.stroke(
+                    Path(ellipseIn: footprint),
+                    with: .color(fadedInk),
+                    style: StrokeStyle(lineWidth: 1, dash: [3, 3])
+                )
+            } else {
+                let center = CGPoint(x: size.width / 2, y: size.height / 2)
+                var removalMark = Path()
+                removalMark.move(to: CGPoint(x: center.x - 7, y: center.y - 7))
+                removalMark.addLine(to: CGPoint(x: center.x + 7, y: center.y + 7))
+                removalMark.move(to: CGPoint(x: center.x + 7, y: center.y - 7))
+                removalMark.addLine(to: CGPoint(x: center.x - 7, y: center.y + 7))
+                context.stroke(
+                    removalMark,
+                    with: .color(fadedInk),
+                    style: StrokeStyle(lineWidth: 1.5, lineCap: .round)
+                )
+            }
+        }
+    }
+}
+
+struct NotebookShapePreview: View {
+    let shape: NoteCanvasShape
+
+    var body: some View {
+        Canvas { context, size in
+            let lineWidth = CGFloat(shape.lineWidth)
+            let bounds = CGRect(
+                x: 42,
+                y: 13,
+                width: max(size.width - 84, 1),
+                height: max(size.height - 26, 1)
+            )
+            let path = Path(
+                NotebookShapePath.make(
+                    kind: shape.kind,
+                    in: bounds,
+                    lineWidth: lineWidth
+                )
+            )
+            if let fillColor = shape.fillColor {
+                context.fill(
+                    path,
+                    with: .color(Color(uiColor: fillColor.uiColor).opacity(0.18))
+                )
+            }
+            context.stroke(
+                path,
+                with: .color(Color(uiColor: shape.strokeColor.uiColor)),
+                style: StrokeStyle(
+                    lineWidth: lineWidth,
+                    lineCap: .round,
+                    lineJoin: .round
+                )
+            )
+        }
+    }
+}

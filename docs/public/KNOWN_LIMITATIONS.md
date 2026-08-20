@@ -23,6 +23,8 @@ Epistoria remains in personal beta. The following limits apply to the current pr
 - Fixed notes scroll continuously and support page jump and append. They do not yet have
   thumbnails, insertion, duplication, deletion, or reordering.
 - Very large Pencil documents have a current per-page ink limit.
+- The pixel eraser has a round adjustable footprint. Square, angled, and custom eraser tips are
+  not available. Whole-stroke erasing remains a separate mode.
 - Image crop, masks, handwriting recognition, handwritten-math recognition, and direct printing
   are not available.
 - Shapes support placement, movement, resizing, rotation, outline, optional fill, and PDF output.

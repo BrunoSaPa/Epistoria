@@ -825,6 +825,16 @@ struct NoteEditorView: View {
                     .font(.subheadline)
                     .foregroundStyle(EpistoriaDesign.mutedInk)
             }
+            NotebookModifierPreview(
+                name: title,
+                value: "\(inkColor.label) · \(Int(inkWidth)) pt"
+            ) {
+                NotebookInkPreview(
+                    color: inkColor,
+                    width: inkWidth,
+                    isMarker: title == "Marker"
+                )
+            }
             Text("Width")
                 .font(.subheadline.weight(.medium))
             HStack(spacing: 10) {
@@ -861,6 +871,19 @@ struct NoteEditorView: View {
                 Text("Choose a shape, then tap the page to place it.")
                     .font(.subheadline)
                     .foregroundStyle(EpistoriaDesign.mutedInk)
+            }
+            NotebookModifierPreview(
+                name: "Shape",
+                value: "\(selectedShapeKind.label) · \(Int(shapeLineWidth)) pt"
+            ) {
+                NotebookShapePreview(
+                    shape: NoteCanvasShape(
+                        kind: selectedShapeKind,
+                        strokeColor: shapeStrokeColor,
+                        fillColor: shapeFillColor,
+                        lineWidth: shapeLineWidth
+                    )
+                )
             }
             LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 4), spacing: 10) {
                 ForEach(NoteCanvasShapeKind.allCases, id: \.self) { kind in
@@ -917,6 +940,12 @@ struct NoteEditorView: View {
                 Text("Choose a symbol, then tap the page to place an editable equation item.")
                     .font(.subheadline)
                     .foregroundStyle(EpistoriaDesign.mutedInk)
+            }
+            NotebookModifierPreview(name: "Math symbol", value: selectedMathSymbol) {
+                Text(selectedMathSymbol)
+                    .font(.system(size: 36, weight: .regular, design: .rounded))
+                    .foregroundStyle(EpistoriaDesign.ink)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             ScrollView {
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 6), spacing: 8) {
@@ -987,6 +1016,15 @@ struct NoteEditorView: View {
                 Text("Choose how Pencil marks are removed.")
                     .font(.subheadline)
                     .foregroundStyle(EpistoriaDesign.mutedInk)
+            }
+
+            NotebookModifierPreview(
+                name: "Eraser",
+                value: eraserMode == .pixel
+                    ? "Round · \(Int(eraserWidth)) pt"
+                    : "Whole stroke"
+            ) {
+                NotebookEraserPreview(mode: eraserMode, width: eraserWidth)
             }
 
             eraserModeButton(

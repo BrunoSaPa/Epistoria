@@ -16,6 +16,7 @@ the current personal beta.
 - Choose a pixel eraser with an adjustable circular width or a stroke eraser that removes a
   complete Pencil stroke.
 - Tap a selected Pen or Marker again to change its width and color.
+- See a live sample of Pen, Marker, Eraser, Shape, and Symbol settings before using them.
 - Place rectangles, rounded rectangles, ellipses, triangles, diamonds, lines, and arrows. Choose
   outline color, fill, and line width before placement.
 - Place editable algebra, calculus, Greek, set, logic, and comparison symbols.

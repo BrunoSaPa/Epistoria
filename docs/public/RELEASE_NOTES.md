@@ -13,6 +13,8 @@ Release date: Not published.
   and ink history controls.
 - Added a pixel eraser with an adjustable circular width and a whole-stroke eraser.
 - Added repeated-tap options for the selected Pen, Marker, Eraser, Shape, and Symbol tools.
+- Added live rectangular previews for ink width and color, eraser footprint or behavior, shape
+  style, and the selected math symbol.
 - Added neutral page colors, adjustable pattern spacing, and isometric paper.
 - Added durable vector shapes with outline, fill, and line-width options.
 - Added an editable math-symbol palette for algebra, calculus, Greek, sets, logic, and comparisons.

@@ -53,18 +53,20 @@ numbered-page controls.
 ## Write and arrange content
 
 - Select **Pen** or **Marker** to write with Apple Pencil. Tap the selected tool again to change
-  width and color.
+  width and color. The preview updates as you change either setting.
 - Select **Eraser** once to activate it. Tap the selected Eraser again to open its options. Use
   **Pixel eraser** to remove only the area under the adjustable circle. Use **Stroke eraser** to
-  remove the complete Pencil stroke you touch.
+  remove the complete Pencil stroke you touch. The preview shows the current round footprint or
+  whole-stroke behavior.
 - Select **Size** to choose a Pen or Marker stroke width.
 - Select **Text** to add typed text at the current view center.
 - Select **Image** to add an image.
 - Select **Shape**, then tap the page to place the current shape. Tap the selected Shape tool
   again to choose rectangle, rounded rectangle, ellipse, triangle, diamond, line, or arrow and
-  set its outline, fill, and line width.
+  set its outline, fill, and line width. The preview updates before placement.
 - Select **Symbol**, then tap the page to place the current math symbol. Tap the selected Symbol
-  tool again to choose from algebra, calculus, Greek, set, logic, and comparison symbols.
+  tool again to choose from algebra, calculus, Greek, set, logic, and comparison symbols. The
+  selected symbol appears in the preview.
 - Select **Select** to move, resize, rotate, or reorder text, images, shapes, and symbols.
 - Use the notebook actions to bring an item forward or send it backward.
 - Select **Undo** or **Redo** in the rail for current-page ink changes.
