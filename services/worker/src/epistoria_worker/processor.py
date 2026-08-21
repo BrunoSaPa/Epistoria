@@ -16,6 +16,8 @@ from .cost_ledger import CostLedger
 from .crypto import EncryptedEnvelope, EnvelopeError, decrypt_job, encrypt_entity
 from .models import (
     AIJobLease,
+    LearningGenerationArtifactV1,
+    LearningGenerationRequestV1,
     NoteQueryArtifactV1,
     NoteQueryRequestV1,
     PDFExtractionChunkV1,
@@ -102,6 +104,20 @@ class WorkerProcessor:
             return self._pdf_extraction(lease, plaintext)
         if lease.job_type == "NOTE_QUERY":
             return self._note_query(lease, plaintext)
+        if lease.job_type in {
+            "SOURCE_EXTRACTION",
+            "TRANSCRIPTION",
+            "TOPIC_SYNTHESIS",
+            "FLASHCARD_DRAFTS",
+            "TEST_BLUEPRINT",
+            "TEST_GENERATION",
+            "FREE_RESPONSE_FEEDBACK",
+            "CONCEPT_SUGGESTIONS",
+            "SOURCE_DISCOVERY",
+            "SESSION_REVIEW",
+            "WEEKLY_REVIEW",
+        }:
+            return self._learning_generation(lease, plaintext)
         raise ProcessingFailure(code="UNSUPPORTED_JOB_TYPE", retryable=False)
 
     def _decrypt_lease(self, lease: AIJobLease) -> bytes:
@@ -246,6 +262,66 @@ class WorkerProcessor:
             entity_id=artifact_id,
             parent_id=request.note_id,
             relation_ids=list(query_response.cited_source_ids)[:64],
+            plaintext=json_bytes(artifact),
+        )
+        return CachedCompletion(
+            job_id=lease.id,
+            artifact_entity_id=artifact_id,
+            mutations=[mutation],
+        )
+
+    def _learning_generation(self, lease: AIJobLease, plaintext: bytes) -> CachedCompletion:
+        if self._digest_provider is None:
+            raise ProcessingFailure(code="AI_NOT_CONFIGURED", retryable=False)
+        try:
+            request = LearningGenerationRequestV1.model_validate_json(plaintext)
+        except ValidationError as error:
+            raise ProcessingFailure(code="INVALID_JOB_PAYLOAD", retryable=False) from error
+        if (
+            request.account_id != self._account_id
+            or request.job_id != lease.id
+            or request.job_type != lease.job_type
+        ):
+            raise ProcessingFailure(code="JOB_IDENTITY_MISMATCH", retryable=False)
+        response, trace = self._digest_provider.generate_learning(request)
+        allowed_ids = {source.source_id for source in request.sources}
+        cited: list[UUID] = []
+        seen: set[UUID] = set()
+        for item in response.items:
+            for source_id in item.cited_source_ids:
+                if source_id not in allowed_ids:
+                    raise ProcessingFailure(code="PROVIDER_CITATION_INVALID", retryable=True)
+                if source_id not in seen:
+                    cited.append(source_id)
+                    seen.add(source_id)
+        if not cited:
+            raise ProcessingFailure(code="PROVIDER_CITATION_INVALID", retryable=True)
+        if self._cost_ledger is not None:
+            self._cost_ledger.record(
+                job_id=lease.id,
+                provider=trace.provider,
+                model=trace.model,
+                prompt_version=trace.prompt_version,
+                input_tokens=trace.input_tokens,
+                output_tokens=trace.output_tokens,
+                estimated_cost_usd=trace.estimated_cost_usd,
+                provider_request_id=trace.provider_request_id,
+            )
+        artifact_id = uuid5(lease.id, "ai-artifact/v1")
+        artifact = LearningGenerationArtifactV1(
+            job_id=lease.id,
+            job_type=request.job_type,
+            topic_id=request.topic_id,
+            include_connected_knowledge=request.include_connected_knowledge,
+            generated_at=datetime.now(UTC),
+            source_ids=cited,
+            trace=trace,
+            response=response,
+        )
+        mutation = self._encrypted_mutation(
+            entity_id=artifact_id,
+            parent_id=request.topic_id,
+            relation_ids=[request.topic_id, *cited[:63]],
             plaintext=json_bytes(artifact),
         )
         return CachedCompletion(

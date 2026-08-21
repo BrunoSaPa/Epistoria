@@ -46,6 +46,64 @@ public struct StoredEntity: Equatable, Sendable {
     }
 }
 
+public struct LocalEntityWrite: Equatable, Sendable {
+    public var id: UUID
+    public var entityType: EntityType
+    public var parentId: UUID?
+    public var relationIds: [UUID]
+    public var content: Data
+    public var search: SearchDocument?
+    public var modifiedAt: Date
+
+    public init(
+        id: UUID,
+        entityType: EntityType,
+        parentId: UUID? = nil,
+        relationIds: [UUID] = [],
+        content: Data,
+        search: SearchDocument? = nil,
+        modifiedAt: Date = .now
+    ) {
+        self.id = id
+        self.entityType = entityType
+        self.parentId = parentId
+        self.relationIds = relationIds
+        self.content = content
+        self.search = search
+        self.modifiedAt = modifiedAt
+    }
+}
+
+public struct LocalMigrationBatch: Equatable, Sendable {
+    public var id: UUID
+    public var name: String
+    public var backupEntityId: UUID
+    public var backupContent: Data
+    public var startedAt: Date
+
+    public init(
+        id: UUID = UUID(),
+        name: String,
+        backupEntityId: UUID,
+        backupContent: Data,
+        startedAt: Date = .now
+    ) {
+        self.id = id
+        self.name = name
+        self.backupEntityId = backupEntityId
+        self.backupContent = backupContent
+        self.startedAt = startedAt
+    }
+}
+
+public struct LocalMigrationJournalEntry: Equatable, Sendable {
+    public var id: UUID
+    public var name: String
+    public var startedAt: Date
+    public var completedAt: Date?
+    public var failureCode: String?
+}
+
 public struct PendingMutation: Equatable, Sendable {
     public var mutationId: UUID
     public var entityId: UUID
@@ -307,6 +365,195 @@ public actor SQLCipherDatabase {
             clientModifiedAt: modifiedAt,
             syncState: .pending
         )
+    }
+
+    /// Saves a related set of encrypted records and their outbox mutations as one transaction.
+    /// Any malformed or oversized write rejects the complete batch.
+    public func saveLocalBatch(
+        _ writes: [LocalEntityWrite],
+        migration: LocalMigrationBatch? = nil
+    ) throws {
+        guard !writes.isEmpty else { return }
+        guard Set(writes.map(\.id)).count == writes.count else {
+            throw LocalDatabaseError.queryFailed("duplicate entity in atomic write")
+        }
+        guard writes.allSatisfy({ $0.content.count <= 2_097_152 }) else {
+            throw LocalDatabaseError.payloadTooLarge
+        }
+        let prepared = try writes.map { write in
+            (
+                write: write,
+                revision: try entity(id: write.id)?.revision ?? 0,
+                relationJSON: try encodeUUIDs(write.relationIds),
+                mutationId: UUID()
+            )
+        }
+        do {
+            try transaction {
+                if let migration {
+                    try run(
+                        "INSERT INTO migration_journal(id, name, started_at) VALUES (?, ?, ?)",
+                        [
+                            .text(canonical(migration.id)), .text(migration.name),
+                            .real(migration.startedAt.timeIntervalSince1970),
+                        ]
+                    )
+                    try run(
+                        """
+                        INSERT OR IGNORE INTO migration_backups(entity_id, migration_name, content, created_at)
+                        VALUES (?, ?, ?, ?)
+                        """,
+                        [
+                            .text(canonical(migration.backupEntityId)), .text(migration.name),
+                            .blob(migration.backupContent), .real(migration.startedAt.timeIntervalSince1970),
+                        ]
+                    )
+                }
+                for item in prepared {
+                let write = item.write
+                try run(
+                    """
+                    INSERT INTO entities
+                        (id, entity_type, parent_id, relation_ids, content, revision, tombstone,
+                         client_modified_at, sync_state)
+                    VALUES (?, ?, ?, ?, ?, ?, 0, ?, 'PENDING')
+                    ON CONFLICT(id) DO UPDATE SET
+                        entity_type=excluded.entity_type,
+                        parent_id=excluded.parent_id,
+                        relation_ids=excluded.relation_ids,
+                        content=excluded.content,
+                        tombstone=0,
+                        client_modified_at=excluded.client_modified_at,
+                        sync_state='PENDING'
+                    """,
+                    [
+                        .text(canonical(write.id)),
+                        .text(write.entityType.rawValue),
+                        write.parentId.map { .text(canonical($0)) } ?? .null,
+                        .text(item.relationJSON),
+                        .blob(write.content),
+                        .integer(Int64(item.revision)),
+                        .real(write.modifiedAt.timeIntervalSince1970),
+                    ]
+                )
+                try run("DELETE FROM outbox WHERE entity_id = ?", [.text(canonical(write.id))])
+                try run(
+                    """
+                    INSERT INTO outbox
+                        (mutation_id, entity_id, entity_type, operation, base_revision, parent_id,
+                         relation_ids, content, client_modified_at, attempt_count, created_at)
+                    VALUES (?, ?, ?, 'UPSERT', ?, ?, ?, ?, ?, 0, ?)
+                    """,
+                    [
+                        .text(canonical(item.mutationId)),
+                        .text(canonical(write.id)),
+                        .text(write.entityType.rawValue),
+                        .integer(Int64(item.revision)),
+                        write.parentId.map { .text(canonical($0)) } ?? .null,
+                        .text(item.relationJSON),
+                        .blob(write.content),
+                        .real(write.modifiedAt.timeIntervalSince1970),
+                        .real(Date.now.timeIntervalSince1970),
+                    ]
+                )
+                    try updateSearch(id: write.id, document: write.search)
+                }
+                if let migration {
+                    try run(
+                        "UPDATE migration_journal SET completed_at=?, failure_code=NULL WHERE id=?",
+                        [.real(Date.now.timeIntervalSince1970), .text(canonical(migration.id))]
+                    )
+                }
+            }
+        } catch {
+            if let migration {
+                try? run(
+                    """
+                    INSERT OR REPLACE INTO migration_journal(id, name, started_at, completed_at, failure_code)
+                    VALUES (?, ?, ?, NULL, ?)
+                    """,
+                    [
+                        .text(canonical(migration.id)), .text(migration.name),
+                        .real(migration.startedAt.timeIntervalSince1970),
+                        .text(String(String(describing: type(of: error)).prefix(128))),
+                    ]
+                )
+            }
+            throw error
+        }
+    }
+
+    public func recordMigrationStarted(name: String, id: UUID = UUID(), at date: Date = .now) throws -> UUID {
+        try run(
+            "INSERT INTO migration_journal(id, name, started_at) VALUES (?, ?, ?)",
+            [.text(canonical(id)), .text(name), .real(date.timeIntervalSince1970)]
+        )
+        return id
+    }
+
+    public func recordMigrationCompleted(id: UUID, at date: Date = .now) throws {
+        try run(
+            "UPDATE migration_journal SET completed_at=?, failure_code=NULL WHERE id=?",
+            [.real(date.timeIntervalSince1970), .text(canonical(id))]
+        )
+    }
+
+    public func recordMigrationFailed(id: UUID, failureCode: String) throws {
+        try run(
+            "UPDATE migration_journal SET failure_code=? WHERE id=?",
+            [.text(String(failureCode.prefix(128))), .text(canonical(id))]
+        )
+    }
+
+    public func migrationJournal() throws -> [LocalMigrationJournalEntry] {
+        try query("SELECT * FROM migration_journal ORDER BY started_at DESC").compactMap { row in
+            guard case let .text(idText) = row["id"],
+                  let id = UUID(uuidString: idText),
+                  case let .text(name) = row["name"],
+                  case let .real(started) = row["started_at"]
+            else { throw LocalDatabaseError.invalidRow }
+            let completed: Date?
+            if case let .real(value)? = row["completed_at"] { completed = Date(timeIntervalSince1970: value) }
+            else { completed = nil }
+            let failure: String?
+            if case let .text(value)? = row["failure_code"] { failure = value }
+            else { failure = nil }
+            return LocalMigrationJournalEntry(
+                id: id,
+                name: name,
+                startedAt: Date(timeIntervalSince1970: started),
+                completedAt: completed,
+                failureCode: failure
+            )
+        }
+    }
+
+    public func preserveMigrationBackup(
+        entityId: UUID,
+        migrationName: String,
+        content: Data,
+        at date: Date = .now
+    ) throws {
+        try run(
+            """
+            INSERT OR IGNORE INTO migration_backups(entity_id, migration_name, content, created_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            [
+                .text(canonical(entityId)), .text(migrationName), .blob(content),
+                .real(date.timeIntervalSince1970),
+            ]
+        )
+    }
+
+    public func migrationBackup(entityId: UUID, migrationName: String) throws -> Data? {
+        let rows = try query(
+            "SELECT content FROM migration_backups WHERE entity_id=? AND migration_name=? LIMIT 1",
+            [.text(canonical(entityId)), .text(migrationName)]
+        )
+        guard let row = rows.first else { return nil }
+        guard case let .blob(content)? = row["content"] else { throw LocalDatabaseError.invalidRow }
+        return content
     }
 
     public func deleteLocal(id: UUID, modifiedAt: Date = .now) throws {
@@ -769,6 +1016,21 @@ public actor SQLCipherDatabase {
             title,
             body,
             tokenize='unicode61 remove_diacritics 2'
+        );
+
+        CREATE TABLE IF NOT EXISTS migration_journal (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            started_at REAL NOT NULL,
+            completed_at REAL,
+            failure_code TEXT
+        );
+        CREATE TABLE IF NOT EXISTS migration_backups (
+            entity_id TEXT NOT NULL,
+            migration_name TEXT NOT NULL,
+            content BLOB NOT NULL,
+            created_at REAL NOT NULL,
+            PRIMARY KEY(entity_id, migration_name)
         );
         """
         try execute(database, migrations)

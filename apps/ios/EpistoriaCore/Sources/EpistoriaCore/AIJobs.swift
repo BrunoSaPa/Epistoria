@@ -6,6 +6,128 @@ public enum DigestSourceKind: String, Codable, Sendable {
     case pdfPage = "PDF_PAGE"
 }
 
+public enum LearningAIJobType: String, Codable, CaseIterable, Sendable {
+    case sourceExtraction = "SOURCE_EXTRACTION"
+    case transcription = "TRANSCRIPTION"
+    case topicSynthesis = "TOPIC_SYNTHESIS"
+    case flashcardDrafts = "FLASHCARD_DRAFTS"
+    case testBlueprint = "TEST_BLUEPRINT"
+    case testGeneration = "TEST_GENERATION"
+    case freeResponseFeedback = "FREE_RESPONSE_FEEDBACK"
+    case conceptSuggestions = "CONCEPT_SUGGESTIONS"
+    case sourceDiscovery = "SOURCE_DISCOVERY"
+    case sessionReview = "SESSION_REVIEW"
+    case weeklyReview = "WEEKLY_REVIEW"
+}
+
+public struct LearningGenerationRequest: Codable, Equatable, Sendable {
+    public var schemaVersion = "learning-generation-request/v1"
+    public var accountId: UUID
+    public var jobId: UUID
+    public var jobType: LearningAIJobType
+    public var topicId: UUID
+    public var includeConnectedKnowledge: Bool
+    public var userInstructions: String?
+    public var sources: [DigestSourceExcerpt]
+    public var objectiveTitles: [String]
+    public var disclosureAcknowledged: Bool
+}
+
+public struct LearningDraftItem: Codable, Equatable, Sendable, Identifiable {
+    public var id: UUID
+    public var kind: String
+    public var title: String
+    public var body: String
+    public var answer: String?
+    public var choices: [String]
+    public var objectiveTitles: [String]
+    public var citedSourceIds: [UUID]
+
+    public init(
+        id: UUID = UUID(),
+        kind: String,
+        title: String,
+        body: String,
+        answer: String? = nil,
+        choices: [String] = [],
+        objectiveTitles: [String] = [],
+        citedSourceIds: [UUID]
+    ) {
+        self.id = id
+        self.kind = kind
+        self.title = title
+        self.body = body
+        self.answer = answer
+        self.choices = choices
+        self.objectiveTitles = objectiveTitles
+        self.citedSourceIds = citedSourceIds
+    }
+}
+
+public struct LearningGenerationResponse: Codable, Equatable, Sendable {
+    public var schemaVersion: String
+    public var summary: String
+    public var items: [LearningDraftItem]
+    public var coverageGaps: [String]
+
+    public init(schemaVersion: String = "learning-generation-response/v1", summary: String, items: [LearningDraftItem], coverageGaps: [String] = []) {
+        self.schemaVersion = schemaVersion
+        self.summary = summary
+        self.items = items
+        self.coverageGaps = coverageGaps
+    }
+}
+
+public struct LearningGenerationArtifact: EntityPayload, Equatable {
+    public static let entityType = EntityType.aiArtifact
+    public var schemaVersion: String
+    public var jobId: UUID
+    public var jobType: LearningAIJobType
+    public var topicId: UUID
+    public var includeConnectedKnowledge: Bool
+    public var generatedAt: Date
+    public var sourceIds: [UUID]
+    public var trace: ProviderTrace
+    public var response: LearningGenerationResponse
+    public var reviewState: AIArtifactReviewState?
+    public var reviewedAt: Date?
+    public var editedResponse: LearningGenerationResponse?
+
+    public var createdAt: Date { generatedAt }
+    public var updatedAt: Date { reviewedAt ?? generatedAt }
+
+    public init(
+        schemaVersion: String = "ai-artifact/learning-generation/v1",
+        jobId: UUID,
+        jobType: LearningAIJobType,
+        topicId: UUID,
+        includeConnectedKnowledge: Bool,
+        generatedAt: Date,
+        sourceIds: [UUID],
+        trace: ProviderTrace,
+        response: LearningGenerationResponse
+    ) {
+        self.schemaVersion = schemaVersion
+        self.jobId = jobId
+        self.jobType = jobType
+        self.topicId = topicId
+        self.includeConnectedKnowledge = includeConnectedKnowledge
+        self.generatedAt = generatedAt
+        self.sourceIds = sourceIds
+        self.trace = trace
+        self.response = response
+        reviewState = nil
+        reviewedAt = nil
+        editedResponse = nil
+    }
+}
+
+public struct PreparedLearningGenerationRequest: Equatable, Sendable {
+    public var request: LearningGenerationRequest
+    public var sourceCount: Int
+    public var approximateTokens: Int
+}
+
 // MARK: - Note Query types
 
 public enum NoteQuerySourceKind: String, Codable, Sendable {
@@ -147,6 +269,24 @@ public struct ProviderTrace: Codable, Equatable, Sendable {
     public var outputTokens: Int?
     public var estimatedCostUsd: Double?
     public var providerRequestId: String?
+
+    public init(
+        provider: String,
+        model: String,
+        promptVersion: String,
+        inputTokens: Int? = nil,
+        outputTokens: Int? = nil,
+        estimatedCostUsd: Double? = nil,
+        providerRequestId: String? = nil
+    ) {
+        self.provider = provider
+        self.model = model
+        self.promptVersion = promptVersion
+        self.inputTokens = inputTokens
+        self.outputTokens = outputTokens
+        self.estimatedCostUsd = estimatedCostUsd
+        self.providerRequestId = providerRequestId
+    }
 }
 
 public enum AIArtifactReviewState: String, Codable, Sendable {
@@ -233,6 +373,19 @@ public enum AIJobCoordinatorError: Error, Equatable {
     case noReadableSources
     case disclosureNotAcknowledged
     case resourceHasNoPDF
+    case topicRequired
+}
+
+extension AIJobCoordinatorError: LocalizedError {
+    public var errorDescription: String? {
+        switch self {
+        case .sessionNotEnded: "End the session before requesting its review."
+        case .noReadableSources: "This scope does not contain readable note text or Evidence yet."
+        case .disclosureNotAcknowledged: "Review and approve the disclosure before queueing this request."
+        case .resourceHasNoPDF: "This Source does not contain a PDF that the trusted Mac can extract."
+        case .topicRequired: "Choose a Topic before creating a learning request."
+        }
+    }
 }
 
 public actor AIJobCoordinator {
@@ -265,8 +418,9 @@ public actor AIJobCoordinator {
             throw AIJobCoordinatorError.sessionNotEnded
         }
         var sources: [DigestSourceExcerpt] = []
+        let linkedNoteIds = try await store.noteIdsLinkedToSession(sessionId)
         let notes = try await store.list(NotePayload.self)
-            .filter { $0.payload.studySessionId == sessionId }
+            .filter { linkedNoteIds.contains($0.id) }
         for note in notes {
             let blocks = try await store.list(NoteBlockPayload.self, parentId: note.id)
                 .sorted { $0.payload.orderKey < $1.payload.orderKey }
@@ -551,5 +705,122 @@ public actor AIJobCoordinator {
             )
         }
         .sorted { $0.payload.generatedAt > $1.payload.generatedAt }
+    }
+
+    public func prepareTopicGeneration(
+        topicId: UUID,
+        jobType: LearningAIJobType,
+        objectiveTitles: [String] = [],
+        userInstructions: String? = nil,
+        includeConnectedKnowledge: Bool = false
+    ) async throws -> PreparedLearningGenerationRequest {
+        _ = try await store.topic(id: topicId)
+        var scopedTopicIds: Set<UUID> = [topicId]
+        if includeConnectedKnowledge {
+            let topicRelations = try await store.list(TopicAreaRelationPayload.self)
+            let areas = Set(topicRelations.lazy
+                .filter { $0.payload.topicId == topicId }
+                .map(\.payload.areaId))
+            if !areas.isEmpty {
+                scopedTopicIds.formUnion(topicRelations.lazy
+                    .filter { areas.contains($0.payload.areaId) }
+                    .map(\.payload.topicId))
+            }
+        }
+        var excerpts: [DigestSourceExcerpt] = []
+        let notes = try await store.list(NotePayload.self).filter { note in
+            note.payload.courseId.map(scopedTopicIds.contains) ?? false
+        }
+        for note in notes {
+            let blocks = try await store.list(NoteBlockPayload.self, parentId: note.id)
+                .sorted { $0.payload.orderKey < $1.payload.orderKey }
+            for block in blocks {
+                let text = [block.payload.plainText, block.payload.transcription]
+                    .compactMap(\ .self).joined(separator: "\n")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !text.isEmpty else { continue }
+                excerpts.append(DigestSourceExcerpt(
+                    sourceId: block.id,
+                    sourceKind: .noteBlock,
+                    title: note.payload.title,
+                    locator: "note block \(block.payload.orderKey)",
+                    excerpt: String(text.prefix(12_000))
+                ))
+            }
+        }
+        let evidence = try await store.list(EvidencePayload.self)
+        let topicSources = try await store.list(SourcePayload.self).filter {
+            $0.payload.primaryTopicId.map(scopedTopicIds.contains) == true
+                || !$0.payload.relatedTopicIds.filter(scopedTopicIds.contains).isEmpty
+        }
+        let sourceIds = Set(topicSources.map(\.id))
+        for item in evidence where sourceIds.contains(item.payload.sourceId) {
+            excerpts.append(DigestSourceExcerpt(
+                sourceId: item.id,
+                sourceKind: .annotation,
+                title: "Evidence",
+                locator: item.payload.locator.kind.rawValue,
+                excerpt: String(item.payload.excerpt.prefix(12_000))
+            ))
+        }
+        guard !excerpts.isEmpty else { throw AIJobCoordinatorError.noReadableSources }
+        excerpts = Array(excerpts.prefix(200))
+        let jobId = UUID()
+        let request = LearningGenerationRequest(
+            accountId: accountId,
+            jobId: jobId,
+            jobType: jobType,
+            topicId: topicId,
+            includeConnectedKnowledge: includeConnectedKnowledge,
+            userInstructions: userInstructions,
+            sources: excerpts,
+            objectiveTitles: objectiveTitles,
+            disclosureAcknowledged: false
+        )
+        let characters = excerpts.reduce(0) { $0 + $1.excerpt.count }
+        return PreparedLearningGenerationRequest(
+            request: request,
+            sourceCount: excerpts.count,
+            approximateTokens: max(1, characters / 4)
+        )
+    }
+
+    public func submitTopicGeneration(
+        _ prepared: PreparedLearningGenerationRequest
+    ) async throws -> AIJobSummary {
+        var request = prepared.request
+        guard !request.sources.isEmpty else { throw AIJobCoordinatorError.noReadableSources }
+        request.disclosureAcknowledged = true
+        let type = request.jobType.rawValue
+        let envelope = try crypto.encryptJob(
+            CanonicalJSON.encode(request),
+            accountKey: accountKey,
+            accountId: accountId,
+            jobType: type,
+            jobId: request.jobId
+        )
+        return try await api.createAIJob(id: request.jobId, type: type, envelope: envelope)
+    }
+
+    public func latestTopicGeneration(
+        topicId: UUID,
+        jobType: LearningAIJobType? = nil
+    ) async throws -> IdentifiedPayload<LearningGenerationArtifact>? {
+        let entities = try await database.entities(type: .aiArtifact, parentId: topicId)
+        for entity in entities {
+            guard let artifact = try? CanonicalJSON.decode(
+                LearningGenerationArtifact.self,
+                from: entity.content
+            ) else { continue }
+            if jobType == nil || artifact.jobType == jobType {
+                return IdentifiedPayload(
+                    id: entity.id,
+                    payload: artifact,
+                    revision: entity.revision,
+                    syncState: entity.syncState
+                )
+            }
+        }
+        return nil
     }
 }

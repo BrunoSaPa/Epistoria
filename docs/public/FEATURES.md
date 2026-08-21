@@ -29,28 +29,39 @@ the current personal beta.
 - Export one note as a readable PDF that includes its paper, typed text, math symbols, vector
   shapes, images, and Pencil ink.
 
-## PDF study
+## Sources
 
-- Import one or more PDFs.
+- Keep an Inbox for Sources that have not been assigned to a Topic.
+- Import PDFs, images, plain text, Markdown, and HTML files.
+- Filter the Library by Source type and Topic.
 - Keep the original PDF unchanged.
+- Refresh a Source by creating a new version. Older citations continue to use the earlier version.
 - Add separate page annotations.
+- Keep annotations as reusable Evidence linked to the exact Source Version.
 - Navigate directly to an annotated or searched page.
 - Optional: extract PDF text on a paired Mac without using an AI provider.
 
 ## Organization
 
 - Keep subjects in one connected private notebook.
-- Group material in collections.
-- Organize academic work by institution, term, and course.
-- Link notes, PDFs, and study sessions to a course.
-- Archive and restore notes and courses.
+- Use Areas to group Topics such as Mathematics, Politics, or Design.
+- Use Topics for any subject, whether or not it belongs to a school.
+- Add optional institution, term, official class name, code, professor, and dates to a Topic.
+- Use Lists as reusable cross-Topic groups. A note can appear in more than one List without
+  being copied.
+- Create a Quick Note without assigning it, then add it to Lists or sessions later.
+- Review notes with a page miniature, content excerpt, page count, and save state.
+- Link notes, Sources, Concepts, cards, tests, and study sessions to a Topic.
+- Archive and restore notes and Topics.
 - Return to recent notes and resources from Today.
 
 ## Study sessions
 
-- Start a session with an intention.
-- Keep an active timer.
-- Link notes and resources to the session.
+- Plan, start, pause, resume, end, or abandon a Topic study period.
+- Keep only one active timer.
+- Add new or existing notes and resources to the session. A session references the original note
+  and preserves which material was used together.
+- Review a removable activity timeline without deleting the underlying notes or Sources.
 - Optional: request a cited session digest after the session.
 - Review, edit, accept, or reject a generated digest.
 
@@ -69,6 +80,23 @@ the current personal beta.
 - Accept, edit, reject, or insert the answer as new note text.
 
 This feature requires a paired Mac and a configured AI provider. It is optional.
+
+## Learning
+
+- Create durable manual flashcards in eight card formats.
+- Review due cards with a deterministic offline schedule and append-only history.
+- Create coverage-first tests from an explicit objective list.
+- Store test questions, frozen attempts, autosaved responses, confidence, timing, scores, and
+  score overrides.
+- Review all, incorrect, skipped, or low-confidence responses after a test.
+- Use Study Next offline to rank due cards, goals, unresolved questions, paused sessions, and
+  unfinished tests with a visible reason.
+- Pin, snooze, dismiss, or mark a Study Next recommendation as irrelevant.
+- Use Topic Studio to review the exact Topic scope before requesting cited synthesis, flashcard
+  drafts, test work, Concept suggestions, or a weekly review.
+- Accept a flashcard, test, or Concept draft to create first-class encrypted learning records in
+  one transaction while retaining the cited generation record.
+- Keep the current Topic as the default AI scope. Include connected Topics only when selected.
 
 ## Offline use and synchronization
 

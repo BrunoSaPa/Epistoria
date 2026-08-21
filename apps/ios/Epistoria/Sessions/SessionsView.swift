@@ -2,10 +2,51 @@ import EpistoriaCore
 import SwiftUI
 import UniformTypeIdentifiers
 
+private extension StudySessionState {
+    var displayName: String {
+        switch self {
+        case .planned: "Planned"
+        case .active: "Active"
+        case .paused: "Paused"
+        case .ended: "Ended"
+        case .abandoned: "Abandoned"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .planned: "calendar"
+        case .active: "circle.fill"
+        case .paused: "pause.circle.fill"
+        case .ended: "checkmark.circle"
+        case .abandoned: "xmark.circle"
+        }
+    }
+}
+
+private extension SessionActivityKind {
+    var displayName: String {
+        switch self {
+        case .noteOpened: "Note opened"
+        case .noteCreated: "Note created"
+        case .sourceOpened: "Source opened"
+        case .sourceAdded: "Source added"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .noteOpened, .noteCreated: "note.text"
+        case .sourceOpened, .sourceAdded: "doc.text"
+        }
+    }
+}
+
 struct SessionsView: View {
     @Bindable var model: AppModel
     @State private var sessions: [IdentifiedPayload<StudySessionPayload>] = []
     @State private var courses: [IdentifiedPayload<CoursePayload>] = []
+    @State private var noteCountBySessionId: [UUID: Int] = [:]
     @State private var showNewSession = false
     @State private var createdSessionId: UUID?
     @State private var errorMessage: String?
@@ -25,13 +66,18 @@ struct SessionsView: View {
                     }
                 } else {
                     List {
-                        let active = sessions.filter { $0.payload.state == .active }
-                        let ended = sessions.filter { $0.payload.state == .ended }
-                        if !active.isEmpty {
-                            Section("In progress") { sessionRows(active) }
+                        Section {
+                            Label("A session is a focused study period. It collects the notes and readings used together, then preserves that study history when it ends.", systemImage: "timer")
+                                .font(.subheadline)
+                                .foregroundStyle(EpistoriaDesign.mutedInk)
                         }
-                        if !ended.isEmpty {
-                            Section("History") { sessionRows(ended) }
+                        let upcoming = sessions.filter { [.planned, .active, .paused].contains($0.payload.state) }
+                        let history = sessions.filter { [.ended, .abandoned].contains($0.payload.state) }
+                        if !upcoming.isEmpty {
+                            Section("In progress") { sessionRows(upcoming) }
+                        }
+                        if !history.isEmpty {
+                            Section("History") { sessionRows(history) }
                         }
                     }
                 }
@@ -72,11 +118,9 @@ struct SessionsView: View {
                     HStack {
                         Text(session.payload.title).font(.headline)
                         Spacer()
-                        if session.payload.state == .active {
-                            Label("Live", systemImage: "circle.fill")
-                                .font(.caption)
-                                .foregroundStyle(EpistoriaDesign.positive)
-                        }
+                        Text(session.payload.state.displayName)
+                            .font(.caption.bold())
+                            .foregroundStyle(session.payload.state == .active ? EpistoriaDesign.positive : EpistoriaDesign.mutedInk)
                     }
                     Text(session.payload.startedAt.formatted(date: .abbreviated, time: .shortened))
                         .font(.caption)
@@ -86,6 +130,12 @@ struct SessionsView: View {
                             .font(.caption)
                             .lineLimit(2)
                     }
+                    Label(
+                        "\(noteCountBySessionId[session.id, default: 0]) note\(noteCountBySessionId[session.id, default: 0] == 1 ? "" : "s")",
+                        systemImage: "note.text"
+                    )
+                    .font(.caption)
+                    .foregroundStyle(EpistoriaDesign.mutedInk)
                 }
                 .padding(.vertical, 3)
             }
@@ -101,6 +151,11 @@ struct SessionsView: View {
             let result = try await (loadedSessions, loadedCourses)
             sessions = result.0.sorted { $0.payload.startedAt > $1.payload.startedAt }
             courses = result.1.filter { !$0.payload.archived }
+            var counts: [UUID: Int] = [:]
+            for session in result.0 {
+                counts[session.id] = try await store.noteIdsLinkedToSession(session.id).count
+            }
+            noteCountBySessionId = counts
         } catch { errorMessage = error.localizedDescription }
     }
 }
@@ -115,6 +170,7 @@ struct NewSessionView: View {
     @State private var title = ""
     @State private var goals = ""
     @State private var courseId: UUID?
+    @State private var sessionState = StudySessionState.active
     @State private var errorMessage: String?
 
     init(
@@ -133,19 +189,28 @@ struct NewSessionView: View {
     var body: some View {
         NavigationStack {
             Form {
-                TextField("What are you studying?", text: $title)
+                Section {
+                    TextField("What are you studying?", text: $title)
+                } footer: {
+                    Text("A session is one focused study period. Notes and Sources stay connected to their Topic after the session ends.")
+                }
                 if let fixedCourseId,
                    let course = courses.first(where: { $0.id == fixedCourseId })
                 {
-                    LabeledContent("Course", value: course.payload.name)
+                    LabeledContent("Topic", value: course.payload.name)
                 } else {
-                    Picker("Course", selection: $courseId) {
-                        Text("No course").tag(UUID?.none)
+                    Picker("Topic", selection: $courseId) {
+                        Text("Choose a Topic").tag(UUID?.none)
                         ForEach(courses, id: \.id) { course in
                             Text(course.payload.name).tag(Optional(course.id))
                         }
                     }
                 }
+                Picker("When", selection: $sessionState) {
+                    Text("Start now").tag(StudySessionState.active)
+                    Text("Plan for later").tag(StudySessionState.planned)
+                }
+                .pickerStyle(.segmented)
                 Section("Goals") {
                     TextEditor(text: $goals)
                         .frame(minHeight: 120)
@@ -159,8 +224,10 @@ struct NewSessionView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Start") { Task { await create() } }
-                        .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    Button(sessionState == .planned ? "Plan" : "Start") { Task { await create() } }
+                        .disabled(
+                            title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || courseId == nil
+                        )
                 }
             }
         }
@@ -176,7 +243,9 @@ struct NewSessionView: View {
             let id = try await store.startSession(
                 title: title.trimmingCharacters(in: .whitespacesAndNewlines),
                 courseId: courseId,
-                goals: parsedGoals
+                goals: parsedGoals,
+                state: sessionState,
+                requireTopic: true
             )
             model.noteLocalMutation()
             onCreated(id)
@@ -192,6 +261,8 @@ struct SessionDetailView: View {
     @State private var session: IdentifiedPayload<StudySessionPayload>?
     @State private var notes: [IdentifiedPayload<NotePayload>] = []
     @State private var resources: [IdentifiedPayload<ResourcePayload>] = []
+    @State private var activities: [IdentifiedPayload<SessionActivityPayload>] = []
+    @State private var activityTitles: [UUID: String] = [:]
     @State private var digestArtifact: IdentifiedPayload<SessionDigestArtifact>?
     @State private var preparedDigest: PreparedDigestRequest?
     @State private var submittedJob: AIJobSummary?
@@ -199,6 +270,7 @@ struct SessionDetailView: View {
     @State private var isWorking = false
     @State private var showDisclosure = false
     @State private var showDigestEditor = false
+    @State private var showAddExistingNotes = false
     @State private var createdNoteId: UUID?
     @State private var errorMessage: String?
 
@@ -221,6 +293,10 @@ struct SessionDetailView: View {
                             Text("\(session.payload.startedAt.formatted(date: .abbreviated, time: .shortened)) – \(ended.formatted(date: .omitted, time: .shortened))")
                                 .foregroundStyle(.secondary)
                         }
+                        if let objective = session.payload.objective, !objective.isEmpty {
+                            LabeledContent("Objective", value: objective)
+                                .font(.subheadline)
+                        }
                     }
                     .padding(.vertical, 6)
                 }
@@ -233,15 +309,37 @@ struct SessionDetailView: View {
                     }
                 }
 
-                Section("Notes") {
+                Section {
+                    if notes.isEmpty {
+                        Text("No notes in this session yet")
+                            .foregroundStyle(EpistoriaDesign.mutedInk)
+                    }
                     ForEach(notes, id: \.id) { note in
-                        NavigationLink(note.payload.title) {
-                            NoteEditorView(model: model, noteId: note.id)
+                        NavigationLink {
+                            NoteEditorView(
+                                model: model,
+                                noteId: note.id,
+                                onLifecycleChanged: { Task { await load() } }
+                            )
+                            .task { await recordActivity(itemId: note.id, kind: .noteOpened) }
+                        } label: {
+                            NoteReviewPreview(
+                                model: model,
+                                note: note,
+                                context: "Session · \(session.payload.title)"
+                            )
                         }
                     }
-                    Button("New session note", systemImage: "square.and.pencil") {
+                    Button("Add existing notes", systemImage: "plus.rectangle.on.rectangle") {
+                        showAddExistingNotes = true
+                    }
+                    Button("Create a note in this session", systemImage: "square.and.pencil") {
                         Task { await createNote() }
                     }
+                } header: {
+                    Text("Session notes")
+                } footer: {
+                    Text("A session references the notes used during this focused period. The same note can remain in collections and appear in another session without being copied.")
                 }
 
                 Section("Resources") {
@@ -255,15 +353,62 @@ struct SessionDetailView: View {
                     }
                 }
 
-                if session.payload.state == .active {
+                if !activities.isEmpty {
                     Section {
+                        ForEach(activities, id: \.id) { activity in
+                            HStack(spacing: 12) {
+                                Image(systemName: activity.payload.kind.symbol)
+                                    .foregroundStyle(EpistoriaDesign.mutedInk)
+                                    .frame(width: 22)
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(activityTitles[activity.payload.itemId] ?? activity.payload.kind.displayName)
+                                    Text("\(activity.payload.kind.displayName) · \(activity.payload.occurredAt.formatted(date: .omitted, time: .shortened))")
+                                        .font(.caption)
+                                        .foregroundStyle(EpistoriaDesign.mutedInk)
+                                }
+                            }
+                            .swipeActions {
+                                Button("Remove", systemImage: "xmark", role: .destructive) {
+                                    Task { await removeActivity(activity.id) }
+                                }
+                            }
+                        }
+                    } header: {
+                        Text("Activity")
+                    } footer: {
+                        Text("Removing an activity entry does not delete the note or Source.")
+                    }
+                }
+
+                if [.planned, .active, .paused].contains(session.payload.state) {
+                    Section {
+                        if session.payload.state == .planned {
+                            Button("Start session", systemImage: "play.circle.fill") {
+                                Task { await setState(.active) }
+                            }
+                        }
+                        if session.payload.state == .active {
+                            Button("Pause session", systemImage: "pause.circle") {
+                                Task { await setState(.paused) }
+                            }
+                        }
+                        if session.payload.state == .paused {
+                            Button("Resume session", systemImage: "play.circle") {
+                                Task { await setState(.active) }
+                            }
+                        }
                         Button("End session", systemImage: "stop.circle", role: .destructive) {
                             Task { await endSession() }
                         }
+                        Button("Abandon session", systemImage: "xmark.circle", role: .destructive) {
+                            Task { await setState(.abandoned) }
+                        }
+                    } header: {
+                        Text("Session controls")
                     } footer: {
-                        Text("Ending freezes the elapsed time. Your notes remain editable.")
+                        Text("Ending or abandoning preserves the complete activity history. Notes and Sources remain editable.")
                     }
-                } else {
+                } else if session.payload.state == .ended {
                     digestSection
                 }
             } else {
@@ -299,6 +444,11 @@ struct SessionDetailView: View {
                 DigestEditorView(artifact: digestArtifact.payload) { edited in
                     Task { await review(.edited, editedDigest: edited) }
                 }
+            }
+        }
+        .sheet(isPresented: $showAddExistingNotes) {
+            AddNotesToSessionView(model: model, sessionId: sessionId) {
+                Task { await load() }
             }
         }
         .task { await load() }
@@ -381,15 +531,9 @@ struct SessionDetailView: View {
 
     @ViewBuilder
     private func stateBadge(_ state: StudySessionState) -> some View {
-        if state == .active {
-            Label("Active", systemImage: "circle.fill")
-                .font(.caption.bold())
-                .foregroundStyle(EpistoriaDesign.positive)
-        } else {
-            Label("Ended", systemImage: "checkmark.circle")
-                .font(.caption.bold())
-                .foregroundStyle(.secondary)
-        }
+        Label(state.displayName, systemImage: state.symbol)
+            .font(.caption.bold())
+            .foregroundStyle(state == .active ? EpistoriaDesign.positive : .secondary)
     }
 
     private func load() async {
@@ -397,11 +541,13 @@ struct SessionDetailView: View {
         do {
             let loadedSession = try await store.payload(StudySessionPayload.self, id: sessionId)
             let allNotes = try await store.list(NotePayload.self)
+            let linkedNoteIds = try await store.noteIdsLinkedToSession(sessionId)
             let relations = try await store.list(
                 RelationPayload.self,
                 parentId: sessionId,
                 entityTypeOverride: .sessionResource
             )
+            let loadedActivities = try await store.list(SessionActivityPayload.self, parentId: sessionId)
             var linkedResources: [IdentifiedPayload<ResourcePayload>] = []
             for relation in relations where relation.payload.leftId == sessionId {
                 if let resource = try? await store.payload(ResourcePayload.self, id: relation.payload.rightId) {
@@ -409,10 +555,22 @@ struct SessionDetailView: View {
                 }
             }
             session = loadedSession
-            notes = allNotes.filter {
-                $0.payload.studySessionId == sessionId && $0.payload.archivedAt == nil
-            }
+            notes = allNotes
+                .filter { linkedNoteIds.contains($0.id) && $0.payload.archivedAt == nil }
+                .sorted { $0.payload.updatedAt > $1.payload.updatedAt }
             resources = linkedResources
+            activities = loadedActivities
+                .filter { $0.payload.removedAt == nil }
+                .sorted { $0.payload.occurredAt > $1.payload.occurredAt }
+            var titles: [UUID: String] = [:]
+            for activity in activities {
+                if let note = try? await store.payload(NotePayload.self, id: activity.payload.itemId) {
+                    titles[activity.payload.itemId] = note.payload.title
+                } else if let source = try? await store.payload(ResourcePayload.self, id: activity.payload.itemId) {
+                    titles[activity.payload.itemId] = source.payload.title
+                }
+            }
+            activityTitles = titles
             digestArtifact = try await model.aiJobs?.latestDigest(sessionId: sessionId)
         } catch { errorMessage = error.localizedDescription }
     }
@@ -449,6 +607,36 @@ struct SessionDetailView: View {
         guard let store = model.store else { return }
         do {
             try await store.endSession(id: sessionId)
+            model.noteLocalMutation()
+            await load()
+        } catch { errorMessage = error.localizedDescription }
+    }
+
+    private func setState(_ state: StudySessionState) async {
+        guard let store = model.store else { return }
+        do {
+            try await store.setSessionState(id: sessionId, state: state)
+            model.noteLocalMutation()
+            await load()
+        } catch { errorMessage = error.localizedDescription }
+    }
+
+    private func removeActivity(_ id: UUID) async {
+        guard let store = model.store else { return }
+        do {
+            try await store.removeSessionActivity(id: id)
+            model.noteLocalMutation()
+            await load()
+        } catch { errorMessage = error.localizedDescription }
+    }
+
+    private func recordActivity(itemId: UUID, kind: SessionActivityKind) async {
+        guard let store = model.store,
+              let state = session?.payload.state,
+              state == .active || state == .paused
+        else { return }
+        do {
+            _ = try await store.recordSessionActivity(sessionId: sessionId, itemId: itemId, kind: kind)
             model.noteLocalMutation()
             await load()
         } catch { errorMessage = error.localizedDescription }

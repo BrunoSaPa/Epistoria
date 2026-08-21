@@ -28,13 +28,27 @@ struct CollectionDetailView: View {
                 }
             }
 
-            Section("Notes") {
+            Section {
                 if notes.isEmpty { Text("No notes linked").foregroundStyle(.secondary) }
                 ForEach(notes, id: \.id) { note in
-                    NavigationLink(note.payload.title) {
-                        NoteEditorView(model: model, noteId: note.id)
+                    NavigationLink {
+                        NoteEditorView(
+                            model: model,
+                            noteId: note.id,
+                            onLifecycleChanged: { Task { await load() } }
+                        )
+                    } label: {
+                        NoteReviewPreview(
+                            model: model,
+                            note: note,
+                            context: "Collection · \(collection?.payload.name ?? "Topic")"
+                        )
                     }
                 }
+            } header: {
+                Text("Notes")
+            } footer: {
+                Text("A collection groups reusable material by topic. Linking a note does not move or duplicate it.")
             }
 
             Section("Resources") {
@@ -90,7 +104,7 @@ struct CollectionDetailView: View {
                     loadedResources.append(resource)
                 }
             }
-            notes = loadedNotes
+            notes = loadedNotes.sorted { $0.payload.updatedAt > $1.payload.updatedAt }
             resources = loadedResources
         } catch { errorMessage = error.localizedDescription }
     }
@@ -167,17 +181,21 @@ private struct AddCollectionItemView: View {
     private func add() async {
         guard let store = model.store, let selection else { return }
         do {
-            let relation = RelationPayload(
-                kind: .collectionItem,
-                leftId: collectionId,
-                rightId: selection
-            )
-            _ = try await store.save(
-                payload: relation,
-                parentId: collectionId,
-                relationIds: [collectionId, selection],
-                entityTypeOverride: .collectionItem
-            )
+            if kind == .note {
+                _ = try await store.linkNote(selection, toCollection: collectionId)
+            } else {
+                let relation = RelationPayload(
+                    kind: .collectionItem,
+                    leftId: collectionId,
+                    rightId: selection
+                )
+                _ = try await store.save(
+                    payload: relation,
+                    parentId: collectionId,
+                    relationIds: [collectionId, selection],
+                    entityTypeOverride: .collectionItem
+                )
+            }
             model.noteLocalMutation()
             onAdded()
             dismiss()

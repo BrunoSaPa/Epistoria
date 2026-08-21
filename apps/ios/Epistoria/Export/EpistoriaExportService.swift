@@ -1,6 +1,7 @@
 import CryptoKit
 import EpistoriaCore
 import Foundation
+import UniformTypeIdentifiers
 
 struct EpistoriaExportResult: Identifiable, Sendable {
     let id = UUID()
@@ -50,7 +51,7 @@ actor EpistoriaExportService {
     }
 
     private struct Metadata: Codable {
-        var formatVersion = "epistoria-export/2"
+        var formatVersion = "epistoria-export/3"
         var exportedAt: Date
         var accountId: UUID
         var mode = "DECRYPTED"
@@ -67,6 +68,39 @@ actor EpistoriaExportService {
         var institutions: [Record<InstitutionPayload>]
         var academicTerms: [Record<AcademicTermPayload>]
         var courses: [Record<CoursePayload>]
+    }
+
+    private struct TaxonomyRecords: Codable {
+        var areas: [Record<AreaPayload>]
+        var topics: [Record<TopicPayload>]
+        var topicAreaRelations: [Record<TopicAreaRelationPayload>]
+    }
+
+    private struct KnowledgeRecords: Codable {
+        var sourceVersions: [Record<SourceVersionPayload>]
+        var evidence: [Record<EvidencePayload>]
+        var concepts: [Record<ConceptPayload>]
+        var conceptEvidence: [Record<ConceptEvidenceRelationPayload>]
+        var conceptLinks: [Record<ConceptLinkPayload>]
+    }
+
+    private struct LearningRecords: Codable {
+        var goals: [Record<StudyGoalPayload>]
+        var unresolvedQuestions: [Record<UnresolvedQuestionPayload>]
+        var sessionActivity: [Record<SessionActivityPayload>]
+        var decks: [Record<FlashcardDeckPayload>]
+        var cards: [Record<FlashcardPayload>]
+        var cardRevisions: [Record<FlashcardRevisionPayload>]
+        var cardReviews: [Record<FlashcardReviewPayload>]
+        var scopeSnapshots: [Record<TopicScopeSnapshotPayload>]
+        var testBlueprints: [Record<TestBlueprintPayload>]
+        var tests: [Record<PracticeTestPayload>]
+        var testQuestions: [Record<TestQuestionPayload>]
+        var testAttempts: [Record<TestAttemptPayload>]
+        var testResponses: [Record<TestResponsePayload>]
+        var recommendations: [Record<StudyRecommendationPayload>]
+        var recommendationResponses: [Record<RecommendationResponsePayload>]
+        var automationGrants: [Record<AutomationGrantPayload>]
     }
 
     private struct CollectionRecords: Codable {
@@ -236,6 +270,7 @@ actor EpistoriaExportService {
             try await exportCollections(to: package)
             try Task.checkCancellation()
             try await exportUniversity(to: package)
+            try await exportTaxonomy(to: package)
             try Task.checkCancellation()
             try await exportSessions(to: package)
             try Task.checkCancellation()
@@ -244,6 +279,8 @@ actor EpistoriaExportService {
             try await exportResources(to: package)
             try Task.checkCancellation()
             try await exportAnnotations(to: package)
+            try await exportKnowledge(to: package)
+            try await exportLearning(to: package)
             try Task.checkCancellation()
             try await exportConflicts(to: package)
             try Task.checkCancellation()
@@ -301,6 +338,18 @@ actor EpistoriaExportService {
             courses: resolvedCourses.map { Record(id: $0.id, payload: $0.payload) }
         )
         try write(payload, to: root.appendingPathComponent("university.json"))
+    }
+
+    private func exportTaxonomy(to root: URL) async throws {
+        async let areas = store.list(AreaPayload.self)
+        async let topics = store.topics()
+        async let relations = store.list(TopicAreaRelationPayload.self)
+        let value = try await TaxonomyRecords(
+            areas: areas.map { Record(id: $0.id, payload: $0.payload) },
+            topics: topics.map { Record(id: $0.id, payload: $0.payload) },
+            topicAreaRelations: relations.map { Record(id: $0.id, payload: $0.payload) }
+        )
+        try write(value, to: root.appendingPathComponent("taxonomy.json"))
     }
 
     private func exportSessions(to root: URL) async throws {
@@ -400,7 +449,9 @@ actor EpistoriaExportService {
         for resource in resources {
             var originalPath: String?
             if let assetId = resource.payload.originalAssetId {
-                let filename = "\(assetId.uuidString.lowercased()).pdf"
+                let metadata = try await store.payload(AssetPayload.self, id: assetId).payload
+                let extensionName = UTType(mimeType: metadata.mimeType)?.preferredFilenameExtension ?? "bin"
+                let filename = "\(assetId.uuidString.lowercased()).\(extensionName)"
                 let relativePath = "resources/originals/\(filename)"
                 let plaintext = try await assetManager.decryptedData(assetId: assetId)
                 try protectedWrite(plaintext, to: originalsDirectory.appendingPathComponent(filename))
@@ -432,6 +483,60 @@ actor EpistoriaExportService {
             values.map { Record(id: $0.id, payload: $0.payload) },
             to: root.appendingPathComponent("annotations.json")
         )
+    }
+
+    private func exportKnowledge(to root: URL) async throws {
+        async let versions = store.list(SourceVersionPayload.self)
+        async let evidence = store.list(EvidencePayload.self)
+        async let concepts = store.list(ConceptPayload.self)
+        async let conceptEvidence = store.list(ConceptEvidenceRelationPayload.self)
+        async let links = store.list(ConceptLinkPayload.self)
+        let value = try await KnowledgeRecords(
+            sourceVersions: versions.map { Record(id: $0.id, payload: $0.payload) },
+            evidence: evidence.map { Record(id: $0.id, payload: $0.payload) },
+            concepts: concepts.map { Record(id: $0.id, payload: $0.payload) },
+            conceptEvidence: conceptEvidence.map { Record(id: $0.id, payload: $0.payload) },
+            conceptLinks: links.map { Record(id: $0.id, payload: $0.payload) }
+        )
+        try write(value, to: root.appendingPathComponent("knowledge.json"))
+    }
+
+    private func exportLearning(to root: URL) async throws {
+        async let goals = store.list(StudyGoalPayload.self)
+        async let unresolved = store.list(UnresolvedQuestionPayload.self)
+        async let activity = store.list(SessionActivityPayload.self)
+        async let decks = store.list(FlashcardDeckPayload.self)
+        async let cards = store.list(FlashcardPayload.self)
+        async let revisions = store.list(FlashcardRevisionPayload.self)
+        async let reviews = store.list(FlashcardReviewPayload.self)
+        async let scopes = store.list(TopicScopeSnapshotPayload.self)
+        async let blueprints = store.list(TestBlueprintPayload.self)
+        async let tests = store.list(PracticeTestPayload.self)
+        async let questions = store.list(TestQuestionPayload.self)
+        async let attempts = store.list(TestAttemptPayload.self)
+        async let responses = store.list(TestResponsePayload.self)
+        async let recommendations = store.list(StudyRecommendationPayload.self)
+        async let recommendationResponses = store.list(RecommendationResponsePayload.self)
+        async let grants = store.list(AutomationGrantPayload.self)
+        let value = try await LearningRecords(
+            goals: goals.map { Record(id: $0.id, payload: $0.payload) },
+            unresolvedQuestions: unresolved.map { Record(id: $0.id, payload: $0.payload) },
+            sessionActivity: activity.map { Record(id: $0.id, payload: $0.payload) },
+            decks: decks.map { Record(id: $0.id, payload: $0.payload) },
+            cards: cards.map { Record(id: $0.id, payload: $0.payload) },
+            cardRevisions: revisions.map { Record(id: $0.id, payload: $0.payload) },
+            cardReviews: reviews.map { Record(id: $0.id, payload: $0.payload) },
+            scopeSnapshots: scopes.map { Record(id: $0.id, payload: $0.payload) },
+            testBlueprints: blueprints.map { Record(id: $0.id, payload: $0.payload) },
+            tests: tests.map { Record(id: $0.id, payload: $0.payload) },
+            testQuestions: questions.map { Record(id: $0.id, payload: $0.payload) },
+            testAttempts: attempts.map { Record(id: $0.id, payload: $0.payload) },
+            testResponses: responses.map { Record(id: $0.id, payload: $0.payload) },
+            recommendations: recommendations.map { Record(id: $0.id, payload: $0.payload) },
+            recommendationResponses: recommendationResponses.map { Record(id: $0.id, payload: $0.payload) },
+            automationGrants: grants.map { Record(id: $0.id, payload: $0.payload) }
+        )
+        try write(value, to: root.appendingPathComponent("learning.json"))
     }
 
     private func exportConflicts(to root: URL) async throws {
@@ -477,12 +582,12 @@ actor EpistoriaExportService {
         }
         let entities = try await database.entities(type: .aiArtifact)
         let records: [[String: Any]] = try entities.compactMap { entity in
-            guard let artifact = try? CanonicalJSON.decode(
-                SessionDigestArtifact.self,
-                from: entity.content
-            ),
-                artifact.reviewState == .accepted || artifact.reviewState == .edited
-            else { return nil }
+            let digest = try? CanonicalJSON.decode(SessionDigestArtifact.self, from: entity.content)
+            let learning = try? CanonicalJSON.decode(LearningGenerationArtifact.self, from: entity.content)
+            let accepted = digest.map { $0.reviewState == .accepted || $0.reviewState == .edited }
+                ?? learning.map { $0.reviewState == .accepted || $0.reviewState == .edited }
+                ?? false
+            guard accepted else { return nil }
             guard let content = try JSONSerialization.jsonObject(with: entity.content) as? [String: Any]
             else { throw EpistoriaExportError.invalidJSON("ai-artifacts.json") }
             return [
@@ -555,14 +660,17 @@ actor EpistoriaExportService {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         let metadata = try decoder.decode(Metadata.self, from: metadataData)
-        guard ["epistoria-export/1", "epistoria-export/2"].contains(metadata.formatVersion),
+        guard ["epistoria-export/1", "epistoria-export/2", "epistoria-export/3"].contains(metadata.formatVersion),
               metadata.mode == "DECRYPTED",
               metadata.accountId == accountId
         else {
             throw EpistoriaExportError.validationFailed("unsupported metadata version or mode")
         }
-        if metadata.formatVersion == "epistoria-export/2" {
+        if metadata.formatVersion == "epistoria-export/2" || metadata.formatVersion == "epistoria-export/3" {
             required.append("notes/canvas-assets.json")
+        }
+        if metadata.formatVersion == "epistoria-export/3" {
+            required.append(contentsOf: ["taxonomy.json", "knowledge.json", "learning.json"])
         }
         for path in required where !fileManager.fileExists(
             atPath: directory.appendingPathComponent(path).path

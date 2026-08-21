@@ -170,6 +170,101 @@ public actor AssetManager {
         )
     }
 
+    public func importPhaseOneSource(
+        from sourceURL: URL,
+        topicId: UUID? = nil,
+        sessionId: UUID? = nil
+    ) async throws -> ImportedResource {
+        if sourceURL.pathExtension.lowercased() == "pdf" {
+            return try await importPDF(from: sourceURL, courseId: topicId, sessionId: sessionId)
+        }
+        if let type = UTType(filenameExtension: sourceURL.pathExtension), type.conforms(to: .image) {
+            let image = try await importImage(from: sourceURL)
+            let sourceId = try await store.createSource(
+                type: .image,
+                title: sourceURL.deletingPathExtension().lastPathComponent,
+                originalAssetId: image.assetId,
+                primaryTopicId: topicId,
+                sessionId: sessionId
+            )
+            return ImportedResource(
+                resourceId: sourceId,
+                assetId: image.assetId,
+                reusedExistingAsset: image.reusedExistingAsset
+            )
+        }
+        let accessed = sourceURL.startAccessingSecurityScopedResource()
+        defer { if accessed { sourceURL.stopAccessingSecurityScopedResource() } }
+        let adapter = try PhaseOneSourceAdapterRegistry().adapter(for: sourceURL.lastPathComponent)
+        let values = try sourceURL.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
+        guard values.isRegularFile == true else { throw SourceAdapterError.malformed }
+        if let size = values.fileSize, size > adapter.maximumBytes { throw SourceAdapterError.tooLarge }
+        let plaintext = try Data(contentsOf: sourceURL, options: .mappedIfSafe)
+        let mimeType = UTType(filenameExtension: sourceURL.pathExtension)?.preferredMIMEType
+            ?? "application/octet-stream"
+        try adapter.validate(data: plaintext, filename: sourceURL.lastPathComponent, mimeType: mimeType)
+        let imported = try await importAsset(
+            plaintext: plaintext,
+            mimeType: mimeType,
+            originalFilename: sourceURL.lastPathComponent
+        )
+        let sourceId = try await store.createSource(
+            type: adapter.sourceType,
+            title: sourceURL.deletingPathExtension().lastPathComponent,
+            originalAssetId: imported.assetId,
+            primaryTopicId: topicId,
+            sessionId: sessionId
+        )
+        return ImportedResource(
+            resourceId: sourceId,
+            assetId: imported.assetId,
+            reusedExistingAsset: imported.reusedExistingAsset
+        )
+    }
+
+    @discardableResult
+    public func refreshPhaseOneSource(id sourceId: UUID, from sourceURL: URL) async throws -> UUID {
+        let source = try await store.payload(SourcePayload.self, id: sourceId).payload
+        let ext = sourceURL.pathExtension.lowercased()
+        if ext == "pdf" {
+            guard source.sourceType == .pdf else { throw SourceAdapterError.unsupportedType }
+            let accessed = sourceURL.startAccessingSecurityScopedResource()
+            defer { if accessed { sourceURL.stopAccessingSecurityScopedResource() } }
+            let values = try sourceURL.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
+            guard values.isRegularFile == true else { throw AssetManagerError.notPDF }
+            if let size = values.fileSize, size > 512 * 1_024 * 1_024 { throw AssetManagerError.fileTooLarge }
+            let data = try Data(contentsOf: sourceURL, options: .mappedIfSafe)
+            guard data.starts(with: Data("%PDF-".utf8)) else { throw AssetManagerError.notPDF }
+            let imported = try await importAsset(
+                plaintext: data,
+                mimeType: "application/pdf",
+                originalFilename: sourceURL.lastPathComponent
+            )
+            return try await store.refreshSource(id: sourceId, originalAssetId: imported.assetId)
+        }
+        if let type = UTType(filenameExtension: ext), type.conforms(to: .image) {
+            guard source.sourceType == .image else { throw SourceAdapterError.unsupportedType }
+            let imported = try await importImage(from: sourceURL)
+            return try await store.refreshSource(id: sourceId, originalAssetId: imported.assetId)
+        }
+        let accessed = sourceURL.startAccessingSecurityScopedResource()
+        defer { if accessed { sourceURL.stopAccessingSecurityScopedResource() } }
+        let adapter = try PhaseOneSourceAdapterRegistry().adapter(for: sourceURL.lastPathComponent)
+        guard adapter.sourceType == source.sourceType else { throw SourceAdapterError.unsupportedType }
+        let values = try sourceURL.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
+        guard values.isRegularFile == true else { throw SourceAdapterError.malformed }
+        if let size = values.fileSize, size > adapter.maximumBytes { throw SourceAdapterError.tooLarge }
+        let data = try Data(contentsOf: sourceURL, options: .mappedIfSafe)
+        let mimeType = UTType(filenameExtension: ext)?.preferredMIMEType ?? "application/octet-stream"
+        try adapter.validate(data: data, filename: sourceURL.lastPathComponent, mimeType: mimeType)
+        let imported = try await importAsset(
+            plaintext: data,
+            mimeType: mimeType,
+            originalFilename: sourceURL.lastPathComponent
+        )
+        return try await store.refreshSource(id: sourceId, originalAssetId: imported.assetId)
+    }
+
     public func decryptedData(assetId: UUID) async throws -> Data {
         let metadata = try await assetMetadata(id: assetId)
         let local: LocalAsset
@@ -348,28 +443,12 @@ public actor AssetManager {
         courseId: UUID?,
         sessionId: UUID?
     ) async throws -> UUID {
-        let resourceId = try await store.save(
-            payload: ResourcePayload(
-                resourceType: .pdf,
-                title: title.isEmpty ? "Imported PDF" : title,
-                originalAssetId: assetId
-            ),
-            parentId: courseId,
-            relationIds: [assetId, courseId, sessionId].compactMap(\.self)
+        try await store.createSource(
+            type: .pdf,
+            title: title.isEmpty ? "Imported PDF" : title,
+            originalAssetId: assetId,
+            primaryTopicId: courseId,
+            sessionId: sessionId
         )
-        if let sessionId {
-            let relation = RelationPayload(
-                kind: .sessionResource,
-                leftId: sessionId,
-                rightId: resourceId
-            )
-            _ = try await store.save(
-                payload: relation,
-                parentId: sessionId,
-                relationIds: [sessionId, resourceId],
-                entityTypeOverride: .sessionResource
-            )
-        }
-        return resourceId
     }
 }

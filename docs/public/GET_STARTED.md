@@ -30,21 +30,25 @@ the account ID and recovery words can access a recovered copy of the notebook da
 
 The note saves on the iPad without requiring a server.
 
+A Quick Note starts unassigned. Open **Notebook actions → Organize note…** to add it to a
+List or a study session. This creates a reference to the note. It does not move or copy the
+note.
+
 Epistoria will not replace a notebook that is already configured on the iPad. If setup reports an
 existing notebook, open or recover it with its account ID and 24 words. Existing local information
 remains unchanged. If setup finds older encrypted data without an active configuration, it asks
 you to recover that notebook.
 
-Epistoria intentionally uses one notebook for all subjects. Organize material with collections,
-institutions, terms, and courses.
+Epistoria intentionally uses one notebook for all subjects. Organize material with Areas, Topics,
+and optional cross-Topic Lists.
 
-## Import a PDF
+## Add a Source
 
-1. Open **Today** or a course.
-2. Select **Import PDF**.
-3. Choose one or more PDF files.
+1. Open **Today**, **Library**, or a Topic.
+2. Select **Add Source**.
+3. Choose one or more PDFs, images, plain-text, Markdown, or HTML files.
 4. Wait for the import to finish.
-5. Open a PDF to read it and add page annotations.
+5. Open a Source to read it. PDFs support page annotations.
 
 Epistoria keeps the imported original unchanged.
 
@@ -52,9 +56,12 @@ Epistoria keeps the imported original unchanged.
 
 1. Open **Today**.
 2. Select **Start a session**.
-3. Enter the study intention.
-4. Add or open notes and resources during the session.
+3. Choose a Topic and enter the study intention.
+4. Select **Add existing notes** or create a note in the session.
 5. End the session when finished.
+
+A List is a reusable cross-Topic group. A session is the record of one focused study period. A
+note can appear in both, and it can appear in more than one session.
 
 If trusted processing is configured, you can request a cited digest after the session.
 

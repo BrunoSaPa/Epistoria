@@ -4,8 +4,9 @@ This guide describes the product workflow in the current personal beta.
 
 ## Use one connected notebook
 
-Epistoria keeps subjects, courses, sources, notes, and study history in one private notebook. Use
-collections and courses to organize different areas of knowledge.
+Epistoria keeps Areas, Topics, Sources, notes, and study history in one private notebook. An Area
+contains broad knowledge such as Mathematics. A Topic contains a subject such as Factorization.
+Use Lists for optional groups that cross Topic boundaries.
 
 If the iPad already has a configured notebook, Epistoria opens or recovers that notebook instead
 of creating another one. Save its account ID and 24 recovery words offline.
@@ -14,10 +15,10 @@ of creating another one. Save its account ID and 24 recovery words offline.
 
 Today provides the main actions and recent work:
 
-- **Quick note** creates and opens a note.
-- **Start a session** starts a focused study session.
+- **Quick note** creates and opens an unassigned note. You can organize it later.
+- **Start a session** asks for a Topic and starts a focused study session.
 - **Continue session** returns to an active session.
-- **Import PDF** adds one or more PDFs.
+- **Add Source** imports PDFs, images, plain text, Markdown, or HTML.
 - **Recent** opens recently used notes and resources.
 
 The status row reports whether work is saved on the iPad, waiting to sync, syncing, synced, or in
@@ -99,21 +100,74 @@ imported into the app.
 
 Notebook contains:
 
-- **Notes** for active notes.
-- **Collections** for flexible groups.
+- **Notes** for active notes. Each row includes a page preview and the first available text or a
+  content label for handwriting and images.
+- **Lists** for reusable cross-Topic groups, such as Exam Material or Research Methods.
 - **Archived** for notes that can be restored.
 
-Archiving a note does not erase it. A note linked to a collection can remain visible in that
-collection after archive.
+A session is different from a List. A session records the notes and Sources used during
+one focused study period. It has a start time, an optional end time, goals, and optional digest.
+A List has no timer and can group material from several Topics.
 
-University organizes study material by institution, academic term, and course. A course can link
-notes, PDFs, and sessions. Archiving a course preserves its linked material.
+To organize an active note:
 
-## Read and annotate PDFs
+1. Open the note.
+2. Open **Notebook actions**.
+3. Select **Organize note…**.
+4. Add the note to one or more Lists or sessions.
+
+To add an existing note from a session, open the session and select **Add existing notes**. Links
+do not duplicate the note. Edits appear everywhere that references it.
+
+Archiving a note does not erase it. A note linked to a List can remain visible in that List after
+archive.
+
+Topics organizes subjects under Areas. A Topic can contain notes, Sources, Concepts, sessions,
+cards, and tests. Academic details are optional. Archiving a Topic preserves linked material.
+
+## Use Topics
+
+1. Open **Topics**.
+2. Create an Area or open an existing Area.
+3. Create a Topic and add optional academic details when they apply.
+4. Open the Topic dashboard.
+5. Continue a note or session, add a Source, create a Concept, create cards, create a test, or open
+   Topic Studio.
+
+Topic Studio uses the current Topic by default. Turn on **Include connected knowledge** only when
+the request should also use Topics connected through the same Areas. Review the excerpt and token
+estimate before approving a paid request.
+
+## Use Study
+
+Study contains Study Next, Sessions, Flashcards, Tests, and History.
+
+- Study Next runs on the iPad and explains why an item is recommended.
+- Flashcard reviews remain available offline. Each rating adds a history event and updates the
+  versioned schedule.
+- Tests start from an objective list. Enter manual questions as `question | correct answer`.
+- Starting a test freezes the question, correct answer, rubric, and scope for that attempt.
+- Responses autosave. Add a confidence level before moving to the next question.
+- After submission, filter the review by All, Incorrect, Skipped, or Low Confidence.
+- Use **Retake full test** or **Retake missed objectives** from the test detail. The new attempt
+  keeps a link to the earlier result.
+- Use **Override score** after submission to store a separate corrected score and required reason.
+
+Only one session can have an active timer. Other sessions can remain Planned or Paused. Ending or
+abandoning a session preserves its notes, Sources, and activity history. Removing an activity row
+does not delete the underlying item.
+
+## Read and annotate Sources
+
+Library contains Inbox, All Sources, Recent, type filters, and Topic filters. Inbox contains
+Sources that do not yet have a Topic.
 
 - Use the page controls to navigate.
 - Open the inspector for extraction and annotation details.
 - Add or edit an annotation without changing the original PDF.
+- A saved annotation also creates reusable Evidence linked to the current Source Version.
+- Select **Refresh Source** to import a replacement file as a new immutable version. Existing
+  citations, cards, tests, and attempts continue to use the earlier version.
 - Use temporary undo before leaving the PDF.
 
 If a restored PDF is not yet on the iPad, the app needs a connection the first time you open it.
@@ -146,7 +200,7 @@ answer as new note text. The operation does not replace the selected content.
 
 ## Review conflicts
 
-Open **Data Health → Review preserved versions**.
+Open **Settings → Data Health → Review preserved versions**.
 
 - **Keep synced version** retains the current synchronized version.
 - **Preserve both** creates a separate copy from the other version.
@@ -156,7 +210,7 @@ available for later review.
 
 ## Review devices
 
-Open **Data Health → Trusted devices** to review paired iPads and Macs. You can revoke a device
+Open **Settings → Data Health → Trusted devices** to review paired iPads and Macs. You can revoke a device
 other than the current iPad.
 
 Revocation blocks future synchronization requests from that device. It does not erase data that
@@ -167,7 +221,7 @@ the device already downloaded.
 A readable export contains decrypted personal information. Save it only to a trusted encrypted
 location.
 
-1. Open **Data Health → Portable export**.
+1. Open **Settings → Data Health → Portable export**.
 2. Choose whether to include accepted or edited AI results.
 3. Select **Create portable export**.
 4. Read and confirm the warning.

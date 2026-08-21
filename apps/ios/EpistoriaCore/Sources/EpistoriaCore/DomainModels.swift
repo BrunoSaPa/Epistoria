@@ -1,6 +1,8 @@
 import Foundation
 
 public enum EntityType: String, Codable, CaseIterable, Sendable {
+    case area = "AREA"
+    case topicArea = "TOPIC_AREA"
     case collection = "COLLECTION"
     case collectionItem = "COLLECTION_ITEM"
     case institution = "INSTITUTION"
@@ -15,6 +17,27 @@ public enum EntityType: String, Codable, CaseIterable, Sendable {
     case sessionNote = "SESSION_NOTE"
     case sessionResource = "SESSION_RESOURCE"
     case aiArtifact = "AI_ARTIFACT"
+    case sourceVersion = "SOURCE_VERSION"
+    case evidence = "EVIDENCE"
+    case concept = "CONCEPT"
+    case conceptEvidence = "CONCEPT_EVIDENCE"
+    case conceptLink = "CONCEPT_LINK"
+    case studyGoal = "STUDY_GOAL"
+    case unresolvedQuestion = "UNRESOLVED_QUESTION"
+    case sessionActivity = "SESSION_ACTIVITY"
+    case flashcardDeck = "FLASHCARD_DECK"
+    case flashcard = "FLASHCARD"
+    case flashcardRevision = "FLASHCARD_REVISION"
+    case flashcardReview = "FLASHCARD_REVIEW"
+    case topicScopeSnapshot = "TOPIC_SCOPE_SNAPSHOT"
+    case testBlueprint = "TEST_BLUEPRINT"
+    case practiceTest = "PRACTICE_TEST"
+    case testQuestion = "TEST_QUESTION"
+    case testAttempt = "TEST_ATTEMPT"
+    case testResponse = "TEST_RESPONSE"
+    case studyRecommendation = "STUDY_RECOMMENDATION"
+    case recommendationResponse = "RECOMMENDATION_RESPONSE"
+    case automationGrant = "AUTOMATION_GRANT"
 }
 
 public enum NoteBlockKind: String, Codable, CaseIterable, Sendable {
@@ -233,6 +256,21 @@ public enum ResourceKind: String, Codable, CaseIterable, Sendable {
     case document = "DOCUMENT"
     case courseMaterial = "COURSE_MATERIAL"
     case other = "OTHER"
+    case pastedText = "PASTED_TEXT"
+    case markdown = "MARKDOWN"
+    case html = "HTML"
+    case epub = "EPUB"
+    case docx = "DOCX"
+    case odt = "ODT"
+    case pptx = "PPTX"
+    case odp = "ODP"
+    case csv = "CSV"
+    case xlsx = "XLSX"
+    case audio = "AUDIO"
+    case youtube = "YOUTUBE"
+    case googleDocument = "GOOGLE_DOCUMENT"
+    case googleSlides = "GOOGLE_SLIDES"
+    case googleSheet = "GOOGLE_SHEET"
 }
 
 public enum AnnotationKind: String, Codable, CaseIterable, Sendable {
@@ -248,8 +286,11 @@ public enum AnnotationKind: String, Codable, CaseIterable, Sendable {
 }
 
 public enum StudySessionState: String, Codable, Sendable {
+    case planned = "PLANNED"
     case active = "ACTIVE"
+    case paused = "PAUSED"
     case ended = "ENDED"
+    case abandoned = "ABANDONED"
 }
 
 public protocol EntityPayload: Codable, Sendable {
@@ -361,6 +402,11 @@ public struct StudySessionPayload: EntityPayload, Equatable {
     public var primaryCollectionId: UUID?
     public var state: StudySessionState
     public var goals: [String]
+    public var objective: String?
+    public var startingNotes: String?
+    public var plannedAt: Date?
+    public var pausedAt: Date?
+    public var abandonedAt: Date?
     public var startedAt: Date
     public var endedAt: Date?
     public var createdAt: Date
@@ -377,6 +423,11 @@ public struct StudySessionPayload: EntityPayload, Equatable {
         primaryCollectionId = nil
         state = .active
         self.goals = goals
+        objective = goals.first
+        startingNotes = nil
+        plannedAt = nil
+        pausedAt = nil
+        abandonedAt = nil
         startedAt = now
         endedAt = nil
         createdAt = now
@@ -490,6 +541,45 @@ public struct ResourcePayload: EntityPayload, Equatable {
         importedAt = now
         createdAt = now
         updatedAt = now
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case schemaVersion, resourceType, sourceType, title, authors, url, canonicalURL
+        case externalIdentifier, identifiers, originalAssetId, importedAt, createdAt, updatedAt
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        schemaVersion = try values.decodeIfPresent(String.self, forKey: .schemaVersion) ?? "resource/v1"
+        resourceType = try values.decodeIfPresent(ResourceKind.self, forKey: .resourceType)
+            ?? values.decode(ResourceKind.self, forKey: .sourceType)
+        title = try values.decode(String.self, forKey: .title)
+        authors = try values.decodeIfPresent([String].self, forKey: .authors) ?? []
+        url = try values.decodeIfPresent(URL.self, forKey: .url)
+            ?? values.decodeIfPresent(URL.self, forKey: .canonicalURL)
+        externalIdentifier = try values.decodeIfPresent(String.self, forKey: .externalIdentifier)
+        if externalIdentifier == nil,
+           let identifiers = try values.decodeIfPresent([String].self, forKey: .identifiers) {
+            externalIdentifier = identifiers.first
+        }
+        originalAssetId = try values.decodeIfPresent(UUID.self, forKey: .originalAssetId)
+        importedAt = try values.decode(Date.self, forKey: .importedAt)
+        createdAt = try values.decode(Date.self, forKey: .createdAt)
+        updatedAt = try values.decode(Date.self, forKey: .updatedAt)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode("resource/v1", forKey: .schemaVersion)
+        try values.encode(resourceType, forKey: .resourceType)
+        try values.encode(title, forKey: .title)
+        try values.encode(authors, forKey: .authors)
+        try values.encodeIfPresent(url, forKey: .url)
+        try values.encodeIfPresent(externalIdentifier, forKey: .externalIdentifier)
+        try values.encodeIfPresent(originalAssetId, forKey: .originalAssetId)
+        try values.encode(importedAt, forKey: .importedAt)
+        try values.encode(createdAt, forKey: .createdAt)
+        try values.encode(updatedAt, forKey: .updatedAt)
     }
 }
 

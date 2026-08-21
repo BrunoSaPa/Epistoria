@@ -4,7 +4,7 @@ import SwiftUI
 struct NotebookView: View {
     private enum Mode: String, CaseIterable, Identifiable {
         case notes = "Notes"
-        case collections = "Collections"
+        case collections = "Lists"
         case archived = "Archived"
         var id: Self { self }
     }
@@ -17,6 +17,8 @@ struct NotebookView: View {
     @State private var notes: [IdentifiedPayload<NotePayload>] = []
     @State private var archivedNotes: [IdentifiedPayload<NotePayload>] = []
     @State private var collections: [IdentifiedPayload<CollectionPayload>] = []
+    @State private var sessions: [IdentifiedPayload<StudySessionPayload>] = []
+    @State private var organizationByNoteId: [UUID: NoteOrganizationSummary] = [:]
     @State private var mode = Mode.notes
     @State private var showNewNote = false
     @State private var showNewCollection = false
@@ -47,16 +49,12 @@ struct NotebookView: View {
                                 onLifecycleChanged: { Task { await load() } }
                             )
                         } label: {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(note.payload.title).font(.headline)
-                                HStack {
-                                    Text(note.payload.updatedAt, style: .relative)
-                                    if note.syncState != .synced {
-                                        Label(note.syncState.rawValue.capitalized, systemImage: "arrow.triangle.2.circlepath")
-                                    }
-                                }
-                                .font(.caption).foregroundStyle(.secondary)
-                            }
+                            NoteReviewPreview(
+                                model: model,
+                                note: note,
+                                context: organizationByNoteId[note.id]?.label
+                                    ?? "Unassigned · Organize later"
+                            )
                         }
                         .accessibilityIdentifier("notebook.note.\(note.id.uuidString)")
                         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
@@ -81,18 +79,11 @@ struct NotebookView: View {
                                 onLifecycleChanged: { Task { await load() } }
                             )
                         } label: {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(note.payload.title)
-                                    .font(.headline)
-                                HStack(spacing: 6) {
-                                    Label("Archived", systemImage: "archivebox")
-                                    if let archivedAt = note.payload.archivedAt {
-                                        Text(archivedAt, style: .relative)
-                                    }
-                                }
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            }
+                            NoteReviewPreview(
+                                model: model,
+                                note: note,
+                                context: "Archived · \(organizationByNoteId[note.id]?.label ?? "Unassigned")"
+                            )
                         }
                         .accessibilityIdentifier("notebook.archived-note.\(note.id.uuidString)")
                         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
@@ -104,20 +95,29 @@ struct NotebookView: View {
                     }
                 } else if collections.isEmpty {
                     ContentUnavailableView {
-                        Label("No collections yet", systemImage: "folder")
+                        Label("No lists yet", systemImage: "folder")
                     } description: {
-                        Text("Collections are flexible views. A note or resource can belong to several without being duplicated.")
+                        Text("Lists are optional cross-topic groups. An item can belong to several lists without being duplicated.")
                     } actions: {
-                        Button("Create a collection") { showNewCollection = true }
+                        Button("Create a list") { showNewCollection = true }
                             .buttonStyle(.borderedProminent)
                             .tint(EpistoriaDesign.ink)
                     }
                 } else {
-                    List(collections.filter { $0.payload.parentCollectionId == nil }, id: \.id) { collection in
-                        NavigationLink {
-                            CollectionDetailView(model: model, collectionId: collection.id)
-                        } label: {
-                            Label(collection.payload.name, systemImage: "folder")
+                    List {
+                        Section {
+                            Label("Lists group notes and sources across Topics. They are optional and never duplicate the underlying item.", systemImage: "folder")
+                                .font(.subheadline)
+                                .foregroundStyle(EpistoriaDesign.mutedInk)
+                        }
+                        Section("Lists") {
+                            ForEach(collections.filter { $0.payload.parentCollectionId == nil }, id: \.id) { collection in
+                                NavigationLink {
+                                    CollectionDetailView(model: model, collectionId: collection.id)
+                                } label: {
+                                    Label(collection.payload.name, systemImage: "folder")
+                                }
+                            }
                         }
                     }
                 }
@@ -135,7 +135,7 @@ struct NotebookView: View {
                 ToolbarItem(placement: .primaryAction) {
                     Menu {
                         Button("Note", systemImage: "square.and.pencil") { showNewNote = true }
-                        Button("Collection", systemImage: "folder.badge.plus") { showNewCollection = true }
+                        Button("List", systemImage: "folder.badge.plus") { showNewCollection = true }
                     } label: { Label("New", systemImage: "plus") }
                 }
             }
@@ -188,7 +188,8 @@ struct NotebookView: View {
         do {
             async let loadedNotes = store.list(NotePayload.self)
             async let loadedCollections = store.list(CollectionPayload.self)
-            let result = try await (loadedNotes, loadedCollections)
+            async let loadedSessions = store.list(StudySessionPayload.self)
+            let result = try await (loadedNotes, loadedCollections, loadedSessions)
             notes = result.0
                 .filter { $0.payload.archivedAt == nil }
                 .sorted { $0.payload.updatedAt > $1.payload.updatedAt }
@@ -196,6 +197,13 @@ struct NotebookView: View {
                 .filter { $0.payload.archivedAt != nil }
                 .sorted { ($0.payload.archivedAt ?? .distantPast) > ($1.payload.archivedAt ?? .distantPast) }
             collections = result.1.sorted { $0.payload.name.localizedCaseInsensitiveCompare($1.payload.name) == .orderedAscending }
+            sessions = result.2.sorted { $0.payload.startedAt > $1.payload.startedAt }
+            organizationByNoteId = try await NoteOrganizationIndex.load(
+                store: store,
+                notes: result.0,
+                collections: result.1,
+                sessions: result.2
+            )
         }
         catch { errorMessage = error.localizedDescription }
     }
@@ -251,8 +259,12 @@ struct NewNoteView: View {
     var body: some View {
         NavigationStack {
             Form {
-                TextField("Note title", text: $title)
-                    .font(.title3)
+                Section {
+                    TextField("Note title", text: $title)
+                        .font(.title3)
+                } footer: {
+                    Text("This note starts unassigned. Add it to a Topic, List, or study session later.")
+                }
                 if let errorMessage { Text(errorMessage).foregroundStyle(.red) }
             }
             .navigationTitle("New note")
@@ -307,7 +319,7 @@ struct NewCollectionView: View {
     var body: some View {
         NavigationStack {
             Form {
-                TextField("Collection name", text: $name)
+                TextField("List name", text: $name)
                 if fixedParentId == nil {
                     Picker("Inside", selection: $parentId) {
                         Text("Top level").tag(UUID?.none)
@@ -316,12 +328,12 @@ struct NewCollectionView: View {
                         }
                     }
                 }
-                Text("Collections do not move or duplicate the underlying record; they add another encrypted relationship.")
+                Text("Lists do not move or duplicate the underlying record; they add another encrypted relationship.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 if let errorMessage { Text(errorMessage).foregroundStyle(.red) }
             }
-            .navigationTitle("New collection")
+            .navigationTitle("New list")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {

@@ -24,10 +24,24 @@ No. Epistoria can operate as a local-only notebook. Private synchronization is o
 ## Can I keep more than one notebook on an iPad?
 
 No. Epistoria intentionally uses one private notebook so subjects, sources, notes, sessions, and
-learning history can remain connected. Use collections and courses to organize different areas.
+learning history can remain connected. Use Areas, Topics, and Lists to organize it.
 
 If the iPad already has a configured notebook, setup opens or recovers it instead of creating a
 second notebook.
+
+## What is the difference between a List and a session?
+
+A List is a reusable cross-Topic group. For example, one List can contain material for an exam
+from Algebra and Geometry.
+
+A session is the record of one focused study period. It stores the intention, time, notes, and
+Sources used together. Ending the session preserves that study history. The same note can appear
+in a List and in multiple sessions without being copied.
+
+## Where does a Quick Note go?
+
+A Quick Note starts unassigned. It remains in **Notebook → Notes** and can be added to a
+List or session later from **Notebook actions → Organize note…**.
 
 ## Can the synchronization service read my notes?
 
@@ -46,22 +60,20 @@ A planned proactive mode will allow the user to approve selected material, task 
 expiration, and a spending limit in advance. It will be optional, pausable, and limited to that
 approved scope. Opening the app will not itself approve or send notebook content.
 
-## Will Epistoria create flashcards and practice tests?
+## Can Epistoria create flashcards and practice tests?
 
-This is planned but is not available in the current beta. Generated cards, questions, answer
-keys, and grading guides will link to supporting notebook material. They will remain drafts until
-the user reviews them.
+Yes. The current beta creates durable manual cards and coverage-first tests. Topic Studio can
+request cited card and test drafts. Generated output remains a draft until the user reviews it.
 
 Accepted cards and tests will remain available for offline practice. Previous attempts will not be
 rewritten when a card or question changes.
 
 ## Will cards and tests be saved?
 
-Yes. This is a requirement for the planned learning system. Accepted decks, cards, tests, answers,
-scores, and review history will be stored as protected notebook data. They will not exist only in
-a temporary AI conversation.
+Yes. Cards, revisions, reviews, test outlines, questions, attempts, responses, scores, and review
+history are stored as protected notebook data. They do not exist only in an AI conversation.
 
-When private synchronization is enabled, the learning records will be included with the rest of
+When private synchronization is enabled, learning records are included with the rest of
 the encrypted notebook. They will also be included in recovery and readable export work.
 
 Starting a test will preserve the exact version used for that attempt. Editing or regenerating the
@@ -69,34 +81,30 @@ test later will not change the old result.
 
 ## Can I create a test for one subject inside a notebook?
 
-This is planned. You will be able to select a notebook or another material range and enter a
-subject such as **factorization**.
+Yes. Open the Topic, select **Create test**, list the supported objectives, and add questions. You
+can also use Topic Studio to request a cited test draft for the current Topic.
 
-A Quick check will sample the subject. A Comprehensive test will first show the topics supported by
-the selected material, then cover each one and include broader questions that test method choice,
-execution, checking, and combined use when appropriate. A Custom test will let you choose the
-topics, question types, difficulty, weighting, and duration.
+The current manual interface creates a Comprehensive test and reports uncovered objectives. Quick
+Check and Custom creation interfaces remain on the roadmap.
 
 If the notebook or requested duration cannot support full coverage, Epistoria will show what is
 missing. It will not silently omit those topics or claim the test is comprehensive.
 
 ## Can I review an old test and see what I got wrong?
 
-This is planned. Test history will preserve the exact questions, your responses, the score,
-incorrect or skipped answers, feedback, confidence, time, and links to the supporting notebook
-material.
+Yes. Test history preserves the frozen questions, responses, score, incorrect or skipped answers,
+confidence, and timing. Use the All, Incorrect, Skipped, or Low Confidence filters.
 
-You will be able to review only incorrect or low-confidence answers and start a new test for the
-missed material. The new attempt will not replace the original result.
+Use **Retake full test** or **Retake missed objectives** from the test detail. A new attempt keeps a
+link to the original result and never replaces it.
 
 ## How will Epistoria recommend what to study next?
 
-The planned **Study next** queue will consider user goals, deadlines, due reviews, test and
+The **Study Next** queue considers user goals, deadlines, due reviews, test and
 flashcard results, confidence, unresolved questions, source coverage, and recent unfinished work.
 
-Each recommendation will state its reason. The user will be able to start it, pin it, snooze it,
-dismiss it, or mark it as irrelevant. The base queue will work on the iPad without a paid AI
-request.
+Each recommendation states its reason. The base queue works on the iPad without a paid AI request.
+You can pin it, snooze it for one day, dismiss it, or mark it as irrelevant.
 
 ## What information is sent for an AI question?
 

@@ -110,6 +110,44 @@ final class LocalDatabaseTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(pending.count, 7)
     }
 
+    func testUnassignedQuickNoteCanJoinCollectionAndSessionWithoutDuplication() async throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let database = try SQLCipherDatabase(
+            url: directory.appendingPathComponent("organization.sqlite"),
+            key: Data(repeating: 31, count: 32)
+        )
+        let store = EpistoriaStore(database: database)
+        let noteId = try await store.createNote(title: "Unassigned quick note")
+        let collectionId = try await store.save(payload: CollectionPayload(name: "Algebra"))
+        let sessionId = try await store.startSession(title: "Factoring practice")
+
+        let firstCollectionLink = try await store.linkNote(noteId, toCollection: collectionId)
+        let repeatedCollectionLink = try await store.linkNote(noteId, toCollection: collectionId)
+        let firstSessionLink = try await store.linkNote(noteId, toSession: sessionId)
+        let repeatedSessionLink = try await store.linkNote(noteId, toSession: sessionId)
+
+        let note = try await store.payload(NotePayload.self, id: noteId)
+        let collectionLinks = try await store.list(
+            RelationPayload.self,
+            parentId: collectionId,
+            entityTypeOverride: .collectionItem
+        )
+        let sessionLinks = try await store.list(
+            RelationPayload.self,
+            parentId: sessionId,
+            entityTypeOverride: .sessionNote
+        )
+        let linkedSessionNoteIds = try await store.noteIdsLinkedToSession(sessionId)
+
+        XCTAssertNil(note.payload.studySessionId)
+        XCTAssertEqual(firstCollectionLink, repeatedCollectionLink)
+        XCTAssertEqual(firstSessionLink, repeatedSessionLink)
+        XCTAssertEqual(collectionLinks.map(\.payload.rightId), [noteId])
+        XCTAssertEqual(sessionLinks.map(\.payload.rightId), [noteId])
+        XCTAssertEqual(linkedSessionNoteIds, [noteId])
+    }
+
     func testPDFImportStoresEncryptedOriginalAndReusesDedupe() async throws {
         let directory = try temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -505,5 +543,282 @@ final class LocalDatabaseTests: XCTestCase {
         }
         let sequenceAfterRejection = try await database.serverSequence()
         XCTAssertEqual(sequenceAfterRejection, "12")
+    }
+
+    func testLegacyCourseBecomesTopicOnlyOnMutationAndKeepsRecoveryBackup() async throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let database = try SQLCipherDatabase(
+            url: directory.appendingPathComponent("topic-migration.sqlite"),
+            key: Data(repeating: 41, count: 32)
+        )
+        let store = EpistoriaStore(database: database)
+        let id = try await store.save(payload: CoursePayload(name: "Topology", code: "MATH-401"))
+        let storedLegacy = try await database.entity(id: id)
+        let legacyContent = try XCTUnwrap(storedLegacy?.content)
+
+        var topic = try await store.topic(id: id).payload
+        XCTAssertEqual(topic.schemaVersion, "course/v1")
+        XCTAssertEqual(topic.name, "Topology")
+        topic.topicDescription = "Open and closed sets"
+        topic.updatedAt = .now
+        _ = try await store.saveTopic(id: id, payload: topic)
+
+        let upgraded = try await store.topic(id: id).payload
+        let backup = try await database.migrationBackup(
+            entityId: id,
+            migrationName: "course-to-topic/v1"
+        )
+        XCTAssertEqual(upgraded.schemaVersion, "topic/v1")
+        XCTAssertEqual(upgraded.topicDescription, "Open and closed sets")
+        XCTAssertEqual(backup, legacyContent)
+        let storedUpgraded = try await database.entity(id: id)
+        let journal = try await database.migrationJournal()
+        XCTAssertEqual(storedUpgraded?.entityType, .course)
+        XCTAssertEqual(journal.count, 1)
+        XCTAssertEqual(journal.first?.name, "course-to-topic/v1")
+        XCTAssertNotNil(journal.first?.completedAt)
+        XCTAssertNil(journal.first?.failureCode)
+    }
+
+    func testSourceCreationFreezesInitialVersionAtomically() async throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let database = try SQLCipherDatabase(
+            url: directory.appendingPathComponent("source.sqlite"),
+            key: Data(repeating: 42, count: 32)
+        )
+        let store = EpistoriaStore(database: database)
+        let areaId = try await store.createArea(name: "Mathematics")
+        let topicId = try await store.createTopic(name: "Algebra", primaryAreaId: areaId)
+        let assetId = try await store.save(
+            payload: AssetPayload(
+                mimeType: "text/plain",
+                plaintextByteSize: 12,
+                encryptedByteSize: 64,
+                dedupeTag: String(repeating: "a", count: 64),
+                assetKey: String(repeating: "A", count: 43),
+                originalFilename: "factoring.txt"
+            )
+        )
+        let sourceId = try await store.createSource(
+            type: .pastedText,
+            title: "Factoring",
+            originalAssetId: assetId,
+            primaryTopicId: topicId
+        )
+        let source = try await store.payload(SourcePayload.self, id: sourceId)
+        let versionId = try XCTUnwrap(source.payload.currentVersionId)
+        let version = try await store.payload(SourceVersionPayload.self, id: versionId)
+        XCTAssertEqual(source.payload.schemaVersion, "source/v1")
+        XCTAssertEqual(source.payload.primaryTopicId, topicId)
+        XCTAssertEqual(version.payload.sourceId, sourceId)
+        XCTAssertEqual(version.payload.originalAssetId, assetId)
+    }
+
+    func testFlashcardReviewsAreAppendOnlyAndSchedulerIsDeterministic() async throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let database = try SQLCipherDatabase(
+            url: directory.appendingPathComponent("cards.sqlite"),
+            key: Data(repeating: 43, count: 32)
+        )
+        let store = EpistoriaStore(database: database)
+        let topicId = try await store.createTopic(name: "Factorization")
+        let cardId = try await store.createFlashcard(
+            topicId: topicId,
+            prompt: "Factor x² - 9",
+            answer: "(x - 3)(x + 3)"
+        )
+        let date = Date(timeIntervalSince1970: 1_800_000_000)
+        let previous = FlashcardScheduleState(dueAt: date)
+        let expected = FlashcardScheduler.next(after: previous, rating: .good, reviewedAt: date)
+        _ = try await store.reviewFlashcard(cardId: cardId, rating: .good, previousState: previous, at: date)
+        _ = try await store.reviewFlashcard(cardId: cardId, rating: .hard, previousState: expected, at: date)
+        let reviews = try await store.list(FlashcardReviewPayload.self, parentId: cardId)
+        XCTAssertEqual(reviews.count, 2)
+        XCTAssertTrue(reviews.contains { $0.payload.resultingState == expected })
+        XCTAssertEqual(FlashcardScheduler.next(after: previous, rating: .good, reviewedAt: date), expected)
+    }
+
+    func testPracticeAttemptKeepsFrozenQuestionAfterTestChanges() async throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let database = try SQLCipherDatabase(
+            url: directory.appendingPathComponent("tests.sqlite"),
+            key: Data(repeating: 44, count: 32)
+        )
+        let store = EpistoriaStore(database: database)
+        let topicId = try await store.createTopic(name: "Factoring")
+        let objective = TestObjective(title: "Difference of squares", dimensions: TestCoverageDimension.allCases)
+        let testId = try await store.createPracticeTest(
+            topicId: topicId,
+            title: "Coverage test",
+            objectives: [objective],
+            questions: [ManualTestQuestion(
+                objectiveIds: [objective.id],
+                prompt: "Factor x² - 16",
+                correctAnswer: "(x - 4)(x + 4)"
+            )]
+        )
+        let attemptId = try await store.beginTestAttempt(testId: testId)
+        let loadedQuestions = try await store.list(TestQuestionPayload.self, parentId: testId)
+        var question = try XCTUnwrap(loadedQuestions.first)
+        question.payload.prompt = "Changed after attempt"
+        question.payload.updatedAt = .now
+        _ = try await store.save(id: question.id, payload: question.payload, parentId: testId, relationIds: [testId, topicId])
+        let attempt = try await store.payload(TestAttemptPayload.self, id: attemptId)
+        XCTAssertEqual(attempt.payload.frozenQuestions.first?.prompt, "Factor x² - 16")
+        XCTAssertEqual(attempt.payload.frozenQuestions.first?.correctAnswer, "(x - 4)(x + 4)")
+    }
+
+    func testOnlyOneSessionCanBeActivelyTimed() async throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let database = try SQLCipherDatabase(
+            url: directory.appendingPathComponent("session-state.sqlite"),
+            key: Data(repeating: 45, count: 32)
+        )
+        let store = EpistoriaStore(database: database)
+        let topicId = try await store.createTopic(name: "Topology")
+        let activeId = try await store.startSession(
+            title: "Open sets",
+            courseId: topicId,
+            requireTopic: true
+        )
+        let plannedId = try await store.startSession(
+            title: "Compactness",
+            courseId: topicId,
+            state: .planned,
+            requireTopic: true
+        )
+        await XCTAssertThrowsErrorAsync(
+            try await store.setSessionState(id: plannedId, state: .active)
+        ) { error in
+            XCTAssertEqual(error as? StoreError, .activeSessionExists)
+        }
+        try await store.setSessionState(id: activeId, state: .paused)
+        try await store.setSessionState(id: plannedId, state: .active)
+        let planned = try await store.payload(StudySessionPayload.self, id: plannedId)
+        XCTAssertEqual(planned.payload.state, .active)
+    }
+
+    func testSourceRefreshKeepsOldVersionAndEvidenceLocator() async throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let database = try SQLCipherDatabase(
+            url: directory.appendingPathComponent("source-refresh.sqlite"),
+            key: Data(repeating: 46, count: 32)
+        )
+        let store = EpistoriaStore(database: database)
+        func asset(_ character: Character, filename: String) async throws -> UUID {
+            try await store.save(payload: AssetPayload(
+                mimeType: "application/pdf",
+                plaintextByteSize: 12,
+                encryptedByteSize: 64,
+                dedupeTag: String(repeating: character, count: 64),
+                assetKey: String(repeating: "A", count: 43),
+                originalFilename: filename
+            ))
+        }
+        let firstAssetId = try await asset("a", filename: "first.pdf")
+        let sourceId = try await store.createSource(
+            type: .pdf,
+            title: "Topology",
+            originalAssetId: firstAssetId
+        )
+        let firstSource = try await store.payload(SourcePayload.self, id: sourceId)
+        let firstVersionId = try XCTUnwrap(firstSource.payload.currentVersionId)
+        var annotation = AnnotationPayload(
+            resourceId: sourceId,
+            annotationType: .important,
+            pageNumber: 3,
+            comment: "A compact subset is closed in a Hausdorff space."
+        )
+        annotation.selectedText = "compact subsets are closed"
+        let evidence = try await store.createAnnotationEvidence(
+            annotation: annotation,
+            sourceVersionId: firstVersionId
+        )
+        let secondAssetId = try await asset("b", filename: "second.pdf")
+        let secondVersionId = try await store.refreshSource(
+            id: sourceId,
+            originalAssetId: secondAssetId
+        )
+        let versions = try await store.list(SourceVersionPayload.self, parentId: sourceId)
+        let storedEvidence = try await store.payload(EvidencePayload.self, id: evidence.evidenceId)
+        XCTAssertEqual(versions.count, 2)
+        XCTAssertNotEqual(firstVersionId, secondVersionId)
+        XCTAssertEqual(storedEvidence.payload.sourceVersionId, firstVersionId)
+        XCTAssertEqual(storedEvidence.payload.locator.page, 3)
+    }
+
+    func testAcceptingFlashcardDraftsCreatesDurableRecordsOnce() async throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let database = try SQLCipherDatabase(
+            url: directory.appendingPathComponent("learning-acceptance.sqlite"),
+            key: Data(repeating: 47, count: 32)
+        )
+        let store = EpistoriaStore(database: database)
+        let topicId = try await store.createTopic(name: "Algebra")
+        let sourceId = UUID()
+        let artifact = LearningGenerationArtifact(
+            schemaVersion: "ai-artifact/learning-generation/v1",
+            jobId: UUID(),
+            jobType: .flashcardDrafts,
+            topicId: topicId,
+            includeConnectedKnowledge: false,
+            generatedAt: .now,
+            sourceIds: [sourceId],
+            trace: ProviderTrace(
+                provider: "deterministic-test",
+                model: "fixture-v1",
+                promptVersion: "learning-generation/v1"
+            ),
+            response: LearningGenerationResponse(
+                schemaVersion: "learning-generation-response/v1",
+                summary: "One card",
+                items: [LearningDraftItem(
+                    id: UUID(),
+                    kind: "BASIC",
+                    title: "Factor x² - 9",
+                    body: "Difference of squares",
+                    answer: "(x - 3)(x + 3)",
+                    choices: [],
+                    objectiveTitles: ["Difference of squares"],
+                    citedSourceIds: [sourceId]
+                )],
+                coverageGaps: []
+            )
+        )
+        let artifactId = try await store.save(
+            payload: artifact,
+            parentId: topicId,
+            relationIds: [topicId, sourceId]
+        )
+        let first = try await store.acceptLearningArtifact(id: artifactId)
+        let second = try await store.acceptLearningArtifact(id: artifactId)
+        let cards = try await store.list(FlashcardPayload.self)
+        let revisions = try await store.list(FlashcardRevisionPayload.self)
+        let accepted = try await store.payload(LearningGenerationArtifact.self, id: artifactId)
+        XCTAssertEqual(first.flashcards, 1)
+        XCTAssertEqual(second.flashcards, 0)
+        XCTAssertEqual(cards.count, 1)
+        XCTAssertEqual(revisions.count, 1)
+        XCTAssertEqual(revisions.first?.payload.generatorArtifactId, artifactId)
+        XCTAssertEqual(accepted.payload.reviewState, .accepted)
+    }
+}
+
+private func XCTAssertThrowsErrorAsync<T>(
+    _ expression: @autoclosure () async throws -> T,
+    _ errorHandler: (Error) -> Void = { _ in }
+) async {
+    do {
+        _ = try await expression()
+        XCTFail("Expected expression to throw")
+    } catch {
+        errorHandler(error)
     }
 }

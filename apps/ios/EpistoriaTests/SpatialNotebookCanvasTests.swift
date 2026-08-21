@@ -5,6 +5,25 @@ import XCTest
 
 @MainActor
 final class SpatialNotebookCanvasTests: XCTestCase {
+    func testOrganizationLabelsDistinguishUnassignedTopicAndStudyPeriod() {
+        XCTAssertEqual(NoteOrganizationSummary().label, "Unassigned · Organize later")
+        XCTAssertEqual(
+            NoteOrganizationSummary(collectionNames: ["Algebra"]).label,
+            "Collection · Algebra"
+        )
+        XCTAssertEqual(
+            NoteOrganizationSummary(sessionTitles: ["Factoring practice"]).label,
+            "Session · Factoring practice"
+        )
+        XCTAssertEqual(
+            NoteOrganizationSummary(
+                collectionNames: ["Algebra"],
+                sessionTitles: ["Factoring practice"]
+            ).label,
+            "Collection · Algebra · Session · Factoring practice"
+        )
+    }
+
     func testSimulatorAcceptsPointerInkForDevelopment() {
         let host = SpatialNotebookHostView(frame: CGRect(x: 0, y: 0, width: 1_024, height: 768))
 

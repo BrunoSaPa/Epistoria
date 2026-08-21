@@ -22,6 +22,8 @@ from epistoria_worker.crypto import (
 )
 from epistoria_worker.models import (
     AIJobLease,
+    LearningGenerationArtifactV1,
+    LearningGenerationRequestV1,
     PDFExtractionManifestV1,
     PDFExtractionRequestV1,
     SessionDigestArtifactV1,
@@ -38,7 +40,9 @@ ACCOUNT_KEY = bytes(range(32))
 
 
 def lease_for(
-    job_type: Literal["SESSION_DIGEST", "PDF_EXTRACTION"],
+    job_type: Literal[
+        "SESSION_DIGEST", "PDF_EXTRACTION", "FLASHCARD_DRAFTS", "TEST_GENERATION"
+    ],
     payload: bytes,
     job_id: UUID | None = None,
 ) -> AIJobLease:
@@ -166,6 +170,43 @@ def test_session_digest_is_cited_encrypted_and_completed(tmp_path) -> None:
     assert artifact.digest.key_points[0].source_ids == [request.sources[0].source_id]
     assert api.completed == [(job_id, artifact_id(api.pushed[0]))]
     assert not api.failed
+
+
+def test_learning_draft_is_cited_encrypted_and_reviewable(tmp_path) -> None:
+    job_id = uuid4()
+    source_id = uuid4()
+    topic_id = uuid4()
+    request = LearningGenerationRequestV1(
+        account_id=ACCOUNT_ID,
+        job_id=job_id,
+        job_type="FLASHCARD_DRAFTS",
+        topic_id=topic_id,
+        include_connected_knowledge=False,
+        sources=[
+            SourceExcerptV1(
+                source_id=source_id,
+                source_kind=SourceKind.NOTE_BLOCK,
+                title="Synthetic algebra",
+                locator="block 1",
+                excerpt="A difference of squares factors as (a-b)(a+b).",
+            )
+        ],
+        objective_titles=["Difference of squares"],
+        disclosure_acknowledged=True,
+    )
+    api = FakeAPI([lease_for("FLASHCARD_DRAFTS", json_bytes(request), job_id)])
+    worker = processor(api, tmp_path / "outbox", DeterministicDigestProvider())
+
+    assert worker.process_once()
+    artifact = LearningGenerationArtifactV1.model_validate_json(
+        decrypt_artifact(api.pushed[0])
+    )
+    assert artifact.topic_id == topic_id
+    assert artifact.job_type == "FLASHCARD_DRAFTS"
+    assert artifact.source_ids == [source_id]
+    assert artifact.response.items
+    assert artifact.response.items[0].cited_source_ids == [source_id]
+    assert api.completed == [(job_id, artifact_id(api.pushed[0]))]
 
 
 def artifact_id(mutation: dict[str, Any]) -> UUID:

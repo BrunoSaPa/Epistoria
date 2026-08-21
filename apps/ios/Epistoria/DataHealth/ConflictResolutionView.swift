@@ -232,8 +232,31 @@ struct ConflictResolutionView: View {
             if let digest = try? CanonicalJSON.decode(SessionDigestArtifact.self, from: content) {
                 value = digest.editedDigest?.summary ?? digest.digest.summary
             } else { value = "Derived processing artifact" }
-        case .collectionItem, .sessionNote, .sessionResource:
+        case .collectionItem, .sessionNote, .sessionResource, .topicArea,
+             .conceptEvidence, .conceptLink:
             value = "Relationship record"
+        case .area:
+            value = (try? CanonicalJSON.decode(AreaPayload.self, from: content).name) ?? "Area"
+        case .evidence:
+            value = (try? CanonicalJSON.decode(EvidencePayload.self, from: content).excerpt) ?? "Evidence"
+        case .concept:
+            value = (try? CanonicalJSON.decode(ConceptPayload.self, from: content).name) ?? "Concept"
+        case .studyGoal:
+            value = (try? CanonicalJSON.decode(StudyGoalPayload.self, from: content).title) ?? "Study goal"
+        case .unresolvedQuestion:
+            value = (try? CanonicalJSON.decode(UnresolvedQuestionPayload.self, from: content).question) ?? "Unresolved question"
+        case .flashcardRevision:
+            value = (try? CanonicalJSON.decode(FlashcardRevisionPayload.self, from: content).prompt) ?? "Flashcard revision"
+        case .practiceTest:
+            value = (try? CanonicalJSON.decode(PracticeTestPayload.self, from: content).title) ?? "Practice test"
+        case .testQuestion:
+            value = (try? CanonicalJSON.decode(TestQuestionPayload.self, from: content).prompt) ?? "Test question"
+        case .studyRecommendation:
+            value = (try? CanonicalJSON.decode(StudyRecommendationPayload.self, from: content).title) ?? "Study recommendation"
+        case .sourceVersion, .sessionActivity, .flashcardDeck, .flashcard, .flashcardReview,
+             .topicScopeSnapshot, .testBlueprint, .testAttempt, .testResponse,
+             .recommendationResponse, .automationGrant:
+            value = typeLabel(type)
         }
         return String(value.prefix(1_000))
     }

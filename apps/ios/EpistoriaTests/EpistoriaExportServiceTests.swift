@@ -22,6 +22,18 @@ final class EpistoriaExportServiceTests: XCTestCase {
             title: "A durable thought",
             canvas: NoteCanvasConfiguration(pageCount: 2)
         )
+        let areaId = try await fixture.store.createArea(name: "Mathematics")
+        let topicId = try await fixture.store.createTopic(name: "Algebra", primaryAreaId: areaId)
+        _ = try await fixture.store.createFlashcard(
+            topicId: topicId,
+            prompt: "Factor x² - 9",
+            answer: "(x - 3)(x + 3)"
+        )
+        _ = try await fixture.store.save(
+            payload: StudyGoalPayload(topicId: topicId, title: "Review factoring"),
+            parentId: topicId,
+            relationIds: [topicId]
+        )
         _ = try await fixture.store.appendTextBlock(
             noteId: noteId,
             text: "Evidence stays portable."
@@ -71,11 +83,12 @@ final class EpistoriaExportServiceTests: XCTestCase {
         )
         let annotationDrawing = Data([0x41, 0x4e, 0x4e, 0x4f, 0x54])
         annotation.drawingData = annotationDrawing
-        let annotationId = try await fixture.store.save(
-            payload: annotation,
-            parentId: imported.resourceId,
-            relationIds: [imported.resourceId]
+        let importedSource = try await fixture.store.payload(SourcePayload.self, id: imported.resourceId)
+        let annotationResult = try await fixture.store.createAnnotationEvidence(
+            annotation: annotation,
+            sourceVersionId: try XCTUnwrap(importedSource.payload.currentVersionId)
         )
+        let annotationId = annotationResult.annotationId
 
         let package = try await fixture.service.prepareDecryptedDirectoryForTesting(
             includingDerivedAI: false
@@ -130,6 +143,14 @@ final class EpistoriaExportServiceTests: XCTestCase {
         )
         XCTAssertTrue(noteRecord.contains("\"pageCount\" : 2"))
         XCTAssertTrue(noteRecord.contains("\"canvasPageIndex\" : 1"))
+        let metadata = try String(contentsOf: package.appendingPathComponent("metadata.json"), encoding: .utf8)
+        let taxonomy = try String(contentsOf: package.appendingPathComponent("taxonomy.json"), encoding: .utf8)
+        let knowledge = try String(contentsOf: package.appendingPathComponent("knowledge.json"), encoding: .utf8)
+        let learning = try String(contentsOf: package.appendingPathComponent("learning.json"), encoding: .utf8)
+        XCTAssertTrue(metadata.contains("epistoria-export/3"))
+        XCTAssertTrue(taxonomy.lowercased().contains(topicId.uuidString.lowercased()))
+        XCTAssertTrue(knowledge.lowercased().contains(annotationResult.evidenceId.uuidString.lowercased()))
+        XCTAssertTrue(learning.contains("Review factoring"))
 
         let exportedBytes = try recursiveFileData(in: package)
         XCTAssertFalse(exportedBytes.contains { $0.range(of: fixture.accountKey) != nil })

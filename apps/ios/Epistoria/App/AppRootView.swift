@@ -3,11 +3,11 @@ import SwiftUI
 enum AppSection: String, CaseIterable, Identifiable {
     case today = "Today"
     case notebook = "Notebook"
-    case university = "University"
+    case topics = "Topics"
     case library = "Library"
-    case sessions = "Sessions"
+    case study = "Study"
     case search = "Search"
-    case dataHealth = "Data Health"
+    case settings = "Settings"
 
     var id: Self { self }
 
@@ -15,17 +15,18 @@ enum AppSection: String, CaseIterable, Identifiable {
         switch self {
         case .today: "sun.max"
         case .notebook: "book.pages"
-        case .university: "building.columns"
+        case .topics: "square.grid.2x2"
         case .library: "books.vertical"
-        case .sessions: "timer"
+        case .study: "graduationcap"
         case .search: "magnifyingglass"
-        case .dataHealth: "lock.shield"
+        case .settings: "gearshape"
         }
     }
 }
 
 private enum AppSectionGroup: String, CaseIterable, Identifiable {
     case daily = "Daily"
+    case knowledge = "Knowledge"
     case learning = "Learning"
     case utilities = "Utilities"
 
@@ -33,9 +34,10 @@ private enum AppSectionGroup: String, CaseIterable, Identifiable {
 
     var sections: [AppSection] {
         switch self {
-        case .daily: [.today, .notebook, .library]
-        case .learning: [.sessions, .university]
-        case .utilities: [.search, .dataHealth]
+        case .daily: [.today, .notebook]
+        case .knowledge: [.topics, .library]
+        case .learning: [.study]
+        case .utilities: [.search, .settings]
         }
     }
 }
@@ -85,7 +87,7 @@ struct AppRootView: View {
                             ForEach(group.sections) { section in
                                 Label(section.rawValue, systemImage: section.symbol)
                                     .tag(section)
-                                    .disabled(model.isCreatingPortableExport && section != .dataHealth)
+                                    .disabled(model.isCreatingPortableExport && section != .settings)
                                     .accessibilityIdentifier("navigation.\(section.rawValue.lowercased().replacingOccurrences(of: " ", with: "-"))")
                             }
                         }
@@ -113,7 +115,7 @@ struct AppRootView: View {
             }
             .onChange(of: model.isCreatingPortableExport) { _, isCreating in
                 if isCreating {
-                    model.selectedSection = .dataHealth
+                    model.selectedSection = .settings
                 }
             }
         }
@@ -129,7 +131,7 @@ struct AppRootView: View {
         Binding(
             get: { model.selectedSection },
             set: { selection in
-                guard !model.isCreatingPortableExport || selection == .dataHealth else { return }
+                guard !model.isCreatingPortableExport || selection == .settings else { return }
                 model.selectedSection = selection
             }
         )
@@ -140,11 +142,11 @@ struct AppRootView: View {
         switch section {
         case .today: TodayView(model: model)
         case .notebook: NotebookView(model: model)
-        case .university: UniversityView(model: model)
+        case .topics: TopicsView(model: model)
         case .library: LibraryView(model: model)
-        case .sessions: SessionsView(model: model)
+        case .study: StudyView(model: model)
         case .search: KnowledgeSearchView(model: model)
-        case .dataHealth: DataHealthView(model: model)
+        case .settings: SettingsView(model: model)
         }
     }
 }
@@ -193,7 +195,7 @@ private struct SidebarSyncStatus: View {
                 .accessibilityIdentifier("sidebar.sync")
             } else {
                 Button("Set up private sync") {
-                    model.selectedSection = .dataHealth
+                    model.selectedSection = .settings
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)

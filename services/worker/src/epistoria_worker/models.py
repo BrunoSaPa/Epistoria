@@ -211,9 +211,95 @@ class NoteQueryArtifactV1(ContractModel):
     response: NoteQueryResponseV1
 
 
+LearningJobType = Literal[
+    "SOURCE_EXTRACTION",
+    "TRANSCRIPTION",
+    "TOPIC_SYNTHESIS",
+    "FLASHCARD_DRAFTS",
+    "TEST_BLUEPRINT",
+    "TEST_GENERATION",
+    "FREE_RESPONSE_FEEDBACK",
+    "CONCEPT_SUGGESTIONS",
+    "SOURCE_DISCOVERY",
+    "SESSION_REVIEW",
+    "WEEKLY_REVIEW",
+]
+
+
+class LearningGenerationRequestV1(ContractModel):
+    schema_version: Literal["learning-generation-request/v1"] = "learning-generation-request/v1"
+    account_id: UUID
+    job_id: UUID
+    job_type: LearningJobType
+    topic_id: UUID
+    include_connected_knowledge: bool = False
+    user_instructions: Annotated[
+        str | None, StringConstraints(strip_whitespace=True, max_length=2_000)
+    ] = None
+    sources: list[SourceExcerptV1] = Field(min_length=1, max_length=200)
+    objective_titles: list[ShortText] = Field(default_factory=list, max_length=100)
+    disclosure_acknowledged: Literal[True]
+
+    @model_validator(mode="after")
+    def validate_source_ids_unique(self) -> LearningGenerationRequestV1:
+        ids = [source.source_id for source in self.sources]
+        if len(ids) != len(set(ids)):
+            raise ValueError("source IDs must be unique")
+        return self
+
+
+class LearningDraftItemV1(ContractModel):
+    id: UUID
+    kind: ShortText
+    title: ShortText
+    body: BodyText
+    answer: BodyText | None = None
+    choices: list[ShortText] = Field(default_factory=list, max_length=20)
+    objective_titles: list[ShortText] = Field(default_factory=list, max_length=20)
+    cited_source_ids: list[UUID] = Field(min_length=1, max_length=32)
+
+
+class LearningGenerationResponseV1(ContractModel):
+    schema_version: Literal["learning-generation-response/v1"] = (
+        "learning-generation-response/v1"
+    )
+    summary: BodyText
+    items: list[LearningDraftItemV1] = Field(min_length=1, max_length=100)
+    coverage_gaps: list[ShortText] = Field(default_factory=list, max_length=100)
+
+
+class LearningGenerationArtifactV1(ContractModel):
+    schema_version: Literal["ai-artifact/learning-generation/v1"] = (
+        "ai-artifact/learning-generation/v1"
+    )
+    job_id: UUID
+    job_type: LearningJobType
+    topic_id: UUID
+    include_connected_knowledge: bool
+    generated_at: AwareDatetime
+    source_ids: list[UUID] = Field(min_length=1, max_length=200)
+    trace: ProviderTraceV1
+    response: LearningGenerationResponseV1
+
+
 class AIJobLease(ContractModel):
     id: UUID
-    job_type: Literal["SESSION_DIGEST", "PDF_EXTRACTION", "NOTE_QUERY"]
+    job_type: Literal[
+        "SESSION_DIGEST",
+        "PDF_EXTRACTION",
+        "NOTE_QUERY",
+        "SOURCE_EXTRACTION",
+        "TRANSCRIPTION",
+        "TOPIC_SYNTHESIS",
+        "FLASHCARD_DRAFTS",
+        "TEST_BLUEPRINT",
+        "TEST_GENERATION",
+        "FREE_RESPONSE_FEEDBACK",
+        "CONCEPT_SUGGESTIONS",
+        "SOURCE_DISCOVERY",
+        "SESSION_REVIEW",
+        "WEEKLY_REVIEW",
+    ]
     crypto_version: int = Field(ge=1, le=255)
     content_version: int = Field(ge=1, le=65_535)
     sealed_dek: str

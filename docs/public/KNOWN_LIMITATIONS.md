@@ -34,8 +34,10 @@ Epistoria remains in personal beta. The following limits apply to the current pr
 
 ## Organization and removal
 
-- Notes and courses support archive and restore.
-- Resources, collections, institutions, and academic terms do not yet have complete lifecycle
+- Notes and Topics support archive and restore.
+- Notes can be added to Lists and sessions, but the current organizer does not remove an
+  existing List or session link.
+- Sources, Lists, institutions, and academic terms do not yet have complete lifecycle
   controls.
 - There is no persistent cross-record Trash.
 - Some undo actions remain available only while the current screen is open.
@@ -52,11 +54,11 @@ Epistoria remains in personal beta. The following limits apply to the current pr
 - PDF extraction and AI features require a paired Mac.
 - AI features require a separately configured provider account and can incur provider charges.
 - A live paid AI evaluation is not part of the current release evidence.
-- The current beta does not create flashcards or practice tests.
-- The current beta does not store card reviews, saved tests, test answers, scores, or mistake
-  history.
-- The current beta does not create subject-scoped or comprehensive test outlines.
-- The current beta does not recommend what to study next.
+- Manual cards and tests are available. Individual AI draft items cannot yet be edited or excluded
+  before accepting the complete draft.
+- Study Next does not yet provide pin, snooze, dismiss, or irrelevant controls.
+- Office documents, EPUB, spreadsheets, web capture, audio, video, and YouTube Sources are not
+  available yet.
 - The current beta does not run proactive AI tasks. Each current AI request starts with a user
   action and a review of what will be processed.
 

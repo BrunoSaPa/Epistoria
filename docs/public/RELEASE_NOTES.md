@@ -33,15 +33,21 @@ Release date: Not published.
 ### Study and organization
 
 - Added Today actions and recent work.
-- Added study sessions and course-linked material.
-- Added collections and academic organization.
-- Added note and course archive and restore.
+- Added Areas, Topics, and reusable cross-Topic Lists.
+- Added existing notes to sessions through durable references instead of copies.
+- Kept Quick Notes unassigned until the user organizes them.
+- Added note page miniatures and content excerpts to review lists.
+- Added Planned, Active, Paused, Ended, and Abandoned session states with one active timer.
+- Added removable session activity history for notes and Sources.
+- Added note and Topic archive and restore.
 - Added local search with direct note and PDF destinations.
 
-### PDFs
+### Sources
 
-- Added encrypted PDF import.
+- Added encrypted PDF, image, plain-text, Markdown, and HTML import.
+- Added Library Inbox, type filters, Topic filters, and immutable Source refresh versions.
 - Added page navigation and separate annotations.
+- Added reusable Evidence linked to the exact Source Version.
 - Added optional local text extraction on a paired Mac.
 
 ### Optional assistance
@@ -50,13 +56,25 @@ Release date: Not published.
 - Added selected-region questions for text, images, and handwriting.
 - Added disclosure before a question is queued.
 - Added review, edit, accept, reject, and insert actions for generated answers.
+- Added Topic Studio for reviewed Topic synthesis, card drafts, test work, Concept suggestions,
+  and weekly review requests.
+
+### Learning
+
+- Added durable manual flashcards, card revisions, append-only reviews, and an offline scheduler.
+- Added coverage-first tests, frozen attempts, autosaved responses, confidence, scoring, and
+  attempt review filters.
+- Added local Study Next recommendations with explanations.
+- Added manual Concepts, goals, unresolved-question records, recommendation records, and scoped
+  automation grants.
 
 ### Privacy and portability
 
 - Added optional encrypted synchronization.
 - Added concurrent-version review and device revocation.
 - Added account recovery with 24 words and setup verification.
-- Added readable exports with original files and checksums.
+- Added readable export version 3 with taxonomy, Source Versions, Evidence, Concepts, learning
+  records, original files, and checksums.
 
 ### Setup and recovery
 

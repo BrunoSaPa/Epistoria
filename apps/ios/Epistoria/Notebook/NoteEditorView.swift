@@ -118,6 +118,7 @@ struct NoteEditorView: View {
     @State private var lassoSelection = LassoSelection()
     @State private var showNoteQuerySheet = false
     @State private var showNoteQueryArtifacts = false
+    @State private var showOrganization = false
     @State private var immersiveEditorID = UUID()
 
     init(
@@ -212,6 +213,11 @@ struct NoteEditorView: View {
                 blocks: blocks,
                 onInsertBlock: { text in Task { await addText(content: text) } }
             )
+        }
+        .sheet(isPresented: $showOrganization) {
+            NoteOrganizationView(model: model, noteId: noteId) {
+                onLifecycleChanged?()
+            }
         }
         .confirmationDialog(
             "Remove this canvas item?",
@@ -416,6 +422,10 @@ struct NoteEditorView: View {
                     }
                 }
                 Divider()
+                Button("Organize note…", systemImage: "folder.badge.plus") {
+                    showOrganization = true
+                }
+                .disabled(isArchived)
                 Button("Export note as PDF…", systemImage: "doc.richtext") {
                     showPDFExportConfirmation = true
                 }

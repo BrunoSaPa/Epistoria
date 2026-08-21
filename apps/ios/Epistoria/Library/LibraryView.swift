@@ -4,8 +4,19 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct LibraryView: View {
+    private enum LibrarySection: String, CaseIterable, Identifiable {
+        case inbox = "Inbox"
+        case all = "All Sources"
+        case recent = "Recent"
+        var id: Self { self }
+    }
+
     @Bindable var model: AppModel
-    @State private var resources: [IdentifiedPayload<ResourcePayload>] = []
+    @State private var resources: [IdentifiedPayload<SourcePayload>] = []
+    @State private var topics: [IdentifiedPayload<TopicPayload>] = []
+    @State private var section = LibrarySection.inbox
+    @State private var selectedType: ResourceKind?
+    @State private var selectedTopicId: UUID?
     @State private var isImporting = false
     @State private var importProgress: String?
     @State private var errorMessage: String?
@@ -13,28 +24,28 @@ struct LibraryView: View {
     var body: some View {
         NavigationStack {
             Group {
-                if resources.isEmpty {
+                if visibleResources.isEmpty {
                     ContentUnavailableView {
                         Label("Your private library", systemImage: "books.vertical")
                     } description: {
-                        Text("Import a PDF. Epistoria encrypts the original locally before it can sync.")
+                        Text(emptyDescription)
                     } actions: {
-                        Button("Import your first PDF") { isImporting = true }
+                        Button("Import your first Source") { isImporting = true }
                             .buttonStyle(.borderedProminent)
                             .tint(EpistoriaDesign.ink)
                     }
                 } else {
-                    List(resources, id: \.id) { resource in
+                    List(visibleResources, id: \.id) { resource in
                         NavigationLink {
                             ResourceDetailView(model: model, resourceId: resource.id)
                         } label: {
                             HStack(spacing: 14) {
-                                Image(systemName: resource.payload.resourceType == .pdf ? "doc.richtext" : "link")
+                                Image(systemName: resource.payload.sourceType == .pdf ? "doc.richtext" : "doc.text")
                                     .font(.title2)
                                     .foregroundStyle(.tint)
                                 VStack(alignment: .leading, spacing: 4) {
                                     Text(resource.payload.title).font(.headline)
-                                    Text("\(resource.payload.resourceType.rawValue.capitalized) · imported \(resource.payload.importedAt.formatted(.relative(presentation: .named)))")
+                                    Text("\(resource.payload.sourceType.rawValue.replacingOccurrences(of: "_", with: " ").capitalized) · imported \(resource.payload.importedAt.formatted(.relative(presentation: .named)))")
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                 }
@@ -47,8 +58,26 @@ struct LibraryView: View {
             .navigationTitle("Library")
             .epistoriaPageBackground()
             .toolbar {
-                Button { isImporting = true } label: {
-                    Label("Import PDF", systemImage: "square.and.arrow.down")
+                ToolbarItem(placement: .principal) {
+                    Picker("Library section", selection: $section) {
+                        ForEach(LibrarySection.allCases) { Text($0.rawValue).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(width: 390)
+                }
+                ToolbarItemGroup(placement: .primaryAction) {
+                    Menu {
+                        Button("Any type") { selectedType = nil }
+                        ForEach(ResourceKind.allCases, id: \.self) { kind in
+                            Button(kind.rawValue.replacingOccurrences(of: "_", with: " ").capitalized) { selectedType = kind }
+                        }
+                        Divider()
+                        Button("Any Topic") { selectedTopicId = nil }
+                        ForEach(topics, id: \.id) { topic in Button(topic.payload.name) { selectedTopicId = topic.id } }
+                    } label: { Label("Filter", systemImage: "line.3.horizontal.decrease.circle") }
+                    Button { isImporting = true } label: {
+                        Label("Import Source", systemImage: "square.and.arrow.down")
+                    }
                 }
             }
             .safeAreaInset(edge: .bottom) {
@@ -64,7 +93,7 @@ struct LibraryView: View {
             }
             .fileImporter(
                 isPresented: $isImporting,
-                allowedContentTypes: [.pdf],
+                allowedContentTypes: [.pdf, .image, .plainText, .html, UTType(filenameExtension: "md") ?? .plainText],
                 allowsMultipleSelection: true
             ) { result in
                 Task { await importFiles(result) }
@@ -81,10 +110,37 @@ struct LibraryView: View {
     private func load() async {
         guard let store = model.store else { return }
         do {
-            resources = try await store.list(ResourcePayload.self)
-                .sorted { $0.payload.importedAt > $1.payload.importedAt }
+            async let loadedResources = store.list(SourcePayload.self)
+            async let loadedTopics = store.topics()
+            let result = try await (loadedResources, loadedTopics)
+            resources = result.0.sorted { $0.payload.importedAt > $1.payload.importedAt }
+            topics = result.1.filter { !$0.payload.archived }
         }
         catch { errorMessage = error.localizedDescription }
+    }
+
+    private var visibleResources: [IdentifiedPayload<SourcePayload>] {
+        resources.filter { resource in
+            guard resource.payload.archivedAt == nil else { return false }
+            let sectionMatches = switch section {
+            case .inbox: resource.payload.primaryTopicId == nil
+            case .all, .recent: true
+            }
+            let typeMatches = selectedType.map { resource.payload.sourceType == $0 } ?? true
+            let topicMatches = selectedTopicId.map {
+                resource.payload.primaryTopicId == $0 || resource.payload.relatedTopicIds.contains($0)
+            } ?? true
+            return sectionMatches && typeMatches && topicMatches
+        }
+        .prefix(section == .recent ? 20 : Int.max)
+        .map { $0 }
+    }
+
+    private var emptyDescription: String {
+        if !resources.isEmpty && section == .inbox {
+            return "Source Inbox is clear. Unassigned imports appear here until you choose a Topic."
+        }
+        return "Import PDFs, images, text, Markdown, or HTML. Epistoria encrypts the original locally before it can sync."
     }
 
     private func importFiles(_ result: Result<[URL], Error>) async {
@@ -93,7 +149,7 @@ struct LibraryView: View {
             let urls = try result.get()
             for (index, url) in urls.enumerated() {
                 importProgress = "Encrypting \(index + 1) of \(urls.count): \(url.lastPathComponent)"
-                _ = try await assetManager.importPDF(from: url)
+                _ = try await assetManager.importPhaseOneSource(from: url)
             }
             model.noteLocalMutation()
             importProgress = nil
@@ -114,6 +170,11 @@ struct ResourceDetailView: View {
     var highlightText: String?
 
     @State private var resource: IdentifiedPayload<ResourcePayload>?
+    @State private var source: IdentifiedPayload<SourcePayload>?
+    @State private var topics: [IdentifiedPayload<TopicPayload>] = []
+    @State private var versions: [IdentifiedPayload<SourceVersionPayload>] = []
+    @State private var isOrganizing = false
+    @State private var isRefreshingSource = false
     @State private var pdfData: Data?
     @State private var pageNumber = 1
     @State private var pageCount = 0
@@ -127,6 +188,7 @@ struct ResourceDetailView: View {
     @State private var editingAnnotation: IdentifiedPayload<AnnotationPayload>?
     @State private var pendingDeletion: IdentifiedPayload<AnnotationPayload>?
     @State private var recentlyDeleted: IdentifiedPayload<AnnotationPayload>?
+    @State private var hasRecordedSessionOpen = false
     @State private var errorMessage: String?
     @FocusState private var annotationEditorFocused: Bool
 
@@ -152,13 +214,23 @@ struct ResourceDetailView: View {
             if isLoading {
                 ProgressView("Decrypting locally…")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if let pdfData {
-                PDFDocumentView(
-                    data: pdfData,
-                    pageNumber: $pageNumber,
-                    pageCount: $pageCount,
-                    highlightText: highlightText
-                )
+            } else if let pdfData, resource?.payload.resourceType == .pdf {
+                PDFDocumentView(data: pdfData, pageNumber: $pageNumber, pageCount: $pageCount, highlightText: highlightText)
+            } else if let pdfData, resource?.payload.resourceType == .image,
+                      let image = UIImage(data: pdfData) {
+                ScrollView([.horizontal, .vertical]) {
+                    Image(uiImage: image).resizable().scaledToFit().padding(24)
+                }
+            } else if let pdfData,
+                      let text = String(data: pdfData, encoding: .utf8) {
+                ScrollView {
+                    Text(text)
+                        .font(resource?.payload.resourceType == .markdown ? .body.monospaced() : .body)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: EpistoriaDesign.Layout.readingWidth, alignment: .leading)
+                        .padding(EpistoriaDesign.Spacing.page)
+                        .frame(maxWidth: .infinity, alignment: .top)
+                }
             } else {
                 ContentUnavailableView {
                     Label("File unavailable", systemImage: "doc.questionmark")
@@ -175,6 +247,12 @@ struct ResourceDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
+                Button { isOrganizing = true } label: {
+                    Label("Organize Source", systemImage: "folder")
+                }
+                Button { isRefreshingSource = true } label: {
+                    Label("Refresh Source", systemImage: "arrow.clockwise")
+                }
                 if pageCount > 0 {
                     Button {
                         pageNumber = max(1, pageNumber - 1)
@@ -195,7 +273,7 @@ struct ResourceDetailView: View {
                     }
                     .disabled(pageNumber >= pageCount)
                 }
-                Button {
+                if resource?.payload.resourceType == .pdf { Button {
                     comment = ""
                     isInspectorPresented = true
                     annotationEditorFocused = true
@@ -213,6 +291,7 @@ struct ResourceDetailView: View {
                     )
                 }
                 .accessibilityIdentifier("resource.toggle-inspector")
+                }
             }
         }
         .inspector(isPresented: $isInspectorPresented) {
@@ -220,6 +299,22 @@ struct ResourceDetailView: View {
                 .inspectorColumnWidth(min: 280, ideal: 340, max: 440)
         }
         .task { await load() }
+        .fileImporter(
+            isPresented: $isRefreshingSource,
+            allowedContentTypes: [.pdf, .image, .plainText, .html]
+        ) { result in
+            Task { await refreshSource(result) }
+        }
+        .sheet(isPresented: $isOrganizing) {
+            SourceOrganizationView(
+                model: model,
+                source: source,
+                topics: topics
+            ) {
+                isOrganizing = false
+                Task { await load() }
+            }
+        }
         .sheet(
             isPresented: Binding(
                 get: { editingAnnotation != nil },
@@ -313,6 +408,21 @@ struct ResourceDetailView: View {
                     }
                 }
 
+                Section("Versions") {
+                    ForEach(versions, id: \.id) { version in
+                        HStack {
+                            Text("Version \(version.payload.versionNumber)")
+                            Spacer()
+                            if version.id == source?.payload.currentVersionId {
+                                Text("Current").font(.caption.bold())
+                            }
+                        }
+                    }
+                    Text("Refresh creates a new immutable version. Existing citations and study records keep their original version.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
                 Section("Add to page \(pageNumber)") {
                     Picker("Kind", selection: $annotationKind) {
                         ForEach(AnnotationKind.allCases, id: \.self) { kind in
@@ -329,6 +439,9 @@ struct ResourceDetailView: View {
                         .tint(EpistoriaDesign.ink)
                         .disabled(comment.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                         .accessibilityIdentifier("resource.save-annotation")
+                    Text("Saved annotations also become reusable Evidence bound to this exact Source Version.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
 
                 Section("Annotations") {
@@ -406,7 +519,13 @@ struct ResourceDetailView: View {
         guard let store = model.store else { return }
         do {
             let loaded = try await store.payload(ResourcePayload.self, id: resourceId)
+            async let loadedSource = store.payload(SourcePayload.self, id: resourceId)
+            async let loadedTopics = store.topics()
             resource = loaded
+            source = try await loadedSource
+            topics = try await loadedTopics.filter { !$0.payload.archived }
+            versions = try await store.list(SourceVersionPayload.self, parentId: resourceId)
+                .sorted { $0.payload.versionNumber > $1.payload.versionNumber }
             annotations = try await store.list(AnnotationPayload.self)
                 .filter { $0.payload.resourceId == resourceId }
                 .sorted {
@@ -426,11 +545,32 @@ struct ResourceDetailView: View {
             if let assetId = loaded.payload.originalAssetId, let assetManager = model.assetManager {
                 pdfData = try await assetManager.decryptedData(assetId: assetId)
             }
+            if let sessionId, !hasRecordedSessionOpen,
+               let session = try? await store.payload(StudySessionPayload.self, id: sessionId),
+               session.payload.state == .active || session.payload.state == .paused
+            {
+                _ = try await store.recordSessionActivity(
+                    sessionId: sessionId,
+                    itemId: resourceId,
+                    kind: .sourceOpened
+                )
+                hasRecordedSessionOpen = true
+                model.noteLocalMutation()
+            }
             isLoading = false
         } catch {
             isLoading = false
             errorMessage = error.localizedDescription
         }
+    }
+
+    private func refreshSource(_ result: Result<URL, Error>) async {
+        guard let manager = model.assetManager else { return }
+        do {
+            _ = try await manager.refreshPhaseOneSource(id: resourceId, from: result.get())
+            model.noteLocalMutation()
+            await load()
+        } catch { errorMessage = error.localizedDescription }
     }
 
     private func saveAnnotation() async {
@@ -445,11 +585,18 @@ struct ResourceDetailView: View {
                 comment: clean
             )
             payload.studySessionId = sessionId
-            _ = try await store.save(
-                payload: payload,
-                parentId: resourceId,
-                relationIds: [resourceId, sessionId].compactMap(\.self)
-            )
+            if let sourceVersionId = source?.payload.currentVersionId {
+                _ = try await store.createAnnotationEvidence(
+                    annotation: payload,
+                    sourceVersionId: sourceVersionId
+                )
+            } else {
+                _ = try await store.save(
+                    payload: payload,
+                    parentId: resourceId,
+                    relationIds: [resourceId, sessionId].compactMap(\.self)
+                )
+            }
             comment = ""
             model.noteLocalMutation()
             await load()
@@ -515,6 +662,63 @@ struct ResourceDetailView: View {
         case .bookmark: "bookmark"
         case .drawing: "pencil.tip"
         }
+    }
+}
+
+private struct SourceOrganizationView: View {
+    @Bindable var model: AppModel
+    let source: IdentifiedPayload<SourcePayload>?
+    let topics: [IdentifiedPayload<TopicPayload>]
+    let onSaved: () -> Void
+    @State private var primaryTopicId: UUID?
+    @State private var errorMessage: String?
+
+    init(
+        model: AppModel,
+        source: IdentifiedPayload<SourcePayload>?,
+        topics: [IdentifiedPayload<TopicPayload>],
+        onSaved: @escaping () -> Void
+    ) {
+        self.model = model
+        self.source = source
+        self.topics = topics
+        self.onSaved = onSaved
+        _primaryTopicId = State(initialValue: source?.payload.primaryTopicId)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Picker("Primary Topic", selection: $primaryTopicId) {
+                    Text("Source Inbox").tag(UUID?.none)
+                    ForEach(topics, id: \.id) { Text($0.payload.name).tag(Optional($0.id)) }
+                }
+                Text("A Source can remain in Inbox. Assigning it later does not change its immutable versions or citations.")
+                    .font(.caption).foregroundStyle(.secondary)
+                if let errorMessage { Text(errorMessage).foregroundStyle(.red) }
+            }
+            .navigationTitle("Organize Source")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { onSaved() } }
+                ToolbarItem(placement: .confirmationAction) { Button("Save") { Task { await save() } } }
+            }
+        }
+    }
+
+    private func save() async {
+        guard let store = model.store, var source else { return }
+        source.payload.primaryTopicId = primaryTopicId
+        source.payload.updatedAt = .now
+        do {
+            _ = try await store.save(
+                id: source.id,
+                payload: source.payload,
+                parentId: primaryTopicId,
+                relationIds: [primaryTopicId, source.payload.originalAssetId, source.payload.currentVersionId].compactMap(\ .self)
+            )
+            model.noteLocalMutation()
+            onSaved()
+        } catch { errorMessage = error.localizedDescription }
     }
 }
 

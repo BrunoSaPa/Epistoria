@@ -15,6 +15,15 @@ struct TodayView: View {
     @State private var sessions: [IdentifiedPayload<StudySessionPayload>] = []
     @State private var resources: [IdentifiedPayload<ResourcePayload>] = []
     @State private var courses: [IdentifiedPayload<CoursePayload>] = []
+    @State private var topics: [IdentifiedPayload<TopicPayload>] = []
+    @State private var sourceInboxCount = 0
+    @State private var cards: [IdentifiedPayload<FlashcardPayload>] = []
+    @State private var reviews: [IdentifiedPayload<FlashcardReviewPayload>] = []
+    @State private var tests: [IdentifiedPayload<PracticeTestPayload>] = []
+    @State private var attempts: [IdentifiedPayload<TestAttemptPayload>] = []
+    @State private var goals: [IdentifiedPayload<StudyGoalPayload>] = []
+    @State private var unresolved: [IdentifiedPayload<UnresolvedQuestionPayload>] = []
+    @State private var recommendations: [IdentifiedPayload<StudyRecommendationPayload>] = []
     @State private var destination: TodayDestination?
     @State private var showNewSession = false
     @State private var isImporting = false
@@ -30,6 +39,7 @@ struct TodayView: View {
                 LazyVStack(alignment: .leading, spacing: 32) {
                     welcomeHeader
                     syncStatusCard
+                    learningOverview
                     quickActions
                     activeSessionCard
                     recentSection
@@ -89,7 +99,7 @@ struct TodayView: View {
             }
             .fileImporter(
                 isPresented: $isImporting,
-                allowedContentTypes: [.pdf],
+                allowedContentTypes: [.pdf, .image, .plainText, .html, UTType(filenameExtension: "md") ?? .plainText],
                 allowsMultipleSelection: true
             ) { result in
                 Task { await importFiles(result) }
@@ -159,7 +169,7 @@ struct TodayView: View {
                 .buttonStyle(.bordered)
                 .disabled(model.isSyncing)
             } else {
-                Button("Set up") { model.selectedSection = .dataHealth }
+                Button("Set up") { model.selectedSection = .settings }
                     .buttonStyle(.bordered)
             }
         }
@@ -179,7 +189,7 @@ struct TodayView: View {
             LazyVGrid(columns: actionColumns, spacing: 10) {
                 EpistoriaQuickAction(
                     title: "Quick note",
-                    subtitle: "Open a blank page",
+                    subtitle: "Capture now · organize later",
                     symbol: "square.and.pencil",
                     prominent: true
                 ) {
@@ -202,14 +212,40 @@ struct TodayView: View {
                 .accessibilityIdentifier("today.session")
 
                 EpistoriaQuickAction(
-                    title: "Import PDF",
-                    subtitle: "Encrypt it on this iPad",
+                    title: "Add Source",
+                    subtitle: "PDF, image, text, Markdown, or HTML",
                     symbol: "doc.badge.plus"
                 ) {
                     isImporting = true
                 }
                 .accessibilityIdentifier("today.import-pdf")
             }
+        }
+    }
+
+    private var learningOverview: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            EpistoriaSectionHeading(title: "Study Next", subtitle: "A local recommendation based on your saved learning history.")
+            if let nextRecommendation {
+                Button {
+                    model.selectedSection = .study
+                } label: {
+                    recentRow(
+                        title: nextRecommendation.title,
+                        detail: nextRecommendation.explanation,
+                        symbol: nextRecommendation.symbol,
+                        pending: false
+                    )
+                }
+                .buttonStyle(EpistoriaPressButtonStyle())
+            }
+            HStack(spacing: 18) {
+                Button("\(dueCards.count) due") { model.selectedSection = .study }
+                Button("\(unfinishedAttempts.count) unfinished test\(unfinishedAttempts.count == 1 ? "" : "s")") { model.selectedSection = .study }
+                Button("\(sourceInboxCount) in Source Inbox") { model.selectedSection = .library }
+            }
+            .font(.subheadline.weight(.medium))
+            .buttonStyle(.plain)
         }
     }
 
@@ -288,11 +324,10 @@ struct TodayView: View {
                         Button {
                             destination = .note(note.id)
                         } label: {
-                            recentRow(
-                                title: note.payload.title,
-                                detail: "Edited \(note.payload.updatedAt.formatted(.relative(presentation: .named)))",
-                                symbol: "doc.text",
-                                pending: note.syncState != .synced
+                            NoteReviewPreview(
+                                model: model,
+                                note: note,
+                                context: "Edited \(note.payload.updatedAt.formatted(.relative(presentation: .named)))"
                             )
                         }
                         .buttonStyle(EpistoriaPressButtonStyle())
@@ -359,7 +394,33 @@ struct TodayView: View {
     }
 
     private var activeSession: IdentifiedPayload<StudySessionPayload>? {
-        sessions.first { $0.payload.state == .active }
+        sessions.first { $0.payload.state == .active || $0.payload.state == .paused }
+    }
+
+    private var dueCards: [IdentifiedPayload<FlashcardPayload>] {
+        cards.filter { card in
+            guard card.payload.archivedAt == nil, card.payload.suspendedAt == nil else { return false }
+            let latest = reviews.filter { $0.payload.cardId == card.id }.max { $0.payload.reviewedAt < $1.payload.reviewedAt }
+            return (latest?.payload.resultingState.dueAt ?? card.payload.createdAt) <= .now
+        }
+    }
+
+    private var unfinishedAttempts: [IdentifiedPayload<TestAttemptPayload>] {
+        attempts.filter { $0.payload.state == .inProgress }
+    }
+
+    private var nextRecommendation: LocalStudyRecommendation? {
+        StudyNextEngine.rank(
+            topics: topics,
+            goals: goals,
+            unresolvedQuestions: unresolved,
+            sessions: sessions,
+            tests: tests,
+            attempts: attempts,
+            dueCardCounts: Dictionary(grouping: dueCards, by: \.payload.topicId).mapValues(\.count),
+            storedRecommendations: recommendations,
+            now: .now
+        ).first
     }
 
     private var greeting: String {
@@ -406,13 +467,31 @@ struct TodayView: View {
             async let loadedSessions = store.list(StudySessionPayload.self)
             async let loadedResources = store.list(ResourcePayload.self)
             async let loadedCourses = store.list(CoursePayload.self)
-            let result = try await (loadedNotes, loadedSessions, loadedResources, loadedCourses)
+            async let loadedTopics = store.topics()
+            async let loadedSources = store.list(SourcePayload.self)
+            async let loadedCards = store.list(FlashcardPayload.self)
+            async let loadedReviews = store.list(FlashcardReviewPayload.self)
+            async let loadedTests = store.list(PracticeTestPayload.self)
+            async let loadedAttempts = store.list(TestAttemptPayload.self)
+            async let loadedGoals = store.list(StudyGoalPayload.self)
+            async let loadedUnresolved = store.list(UnresolvedQuestionPayload.self)
+            async let loadedRecommendations = store.list(StudyRecommendationPayload.self)
+            let result = try await (loadedNotes, loadedSessions, loadedResources, loadedCourses, loadedTopics, loadedSources, loadedCards, loadedReviews, loadedTests, loadedAttempts, loadedGoals, loadedUnresolved, loadedRecommendations)
             notes = result.0
                 .filter { $0.payload.archivedAt == nil }
                 .sorted { $0.payload.updatedAt > $1.payload.updatedAt }
             sessions = result.1.sorted { $0.payload.startedAt > $1.payload.startedAt }
             resources = result.2.sorted { $0.payload.importedAt > $1.payload.importedAt }
             courses = result.3.filter { !$0.payload.archived }
+            topics = result.4
+            sourceInboxCount = result.5.filter { $0.payload.primaryTopicId == nil && $0.payload.archivedAt == nil }.count
+            cards = result.6
+            reviews = result.7
+            tests = result.8
+            attempts = result.9
+            goals = result.10
+            unresolved = result.11
+            recommendations = result.12
             errorMessage = nil
         } catch {
             errorMessage = error.localizedDescription
@@ -443,7 +522,7 @@ struct TodayView: View {
             var lastResourceId: UUID?
             for (index, url) in urls.enumerated() {
                 importProgress = "Encrypting \(index + 1) of \(urls.count): \(url.lastPathComponent)"
-                let imported = try await assetManager.importPDF(from: url)
+                let imported = try await assetManager.importPhaseOneSource(from: url)
                 lastResourceId = imported.resourceId
             }
             model.noteLocalMutation()
