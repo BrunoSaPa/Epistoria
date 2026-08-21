@@ -38,6 +38,8 @@ the current personal beta.
 - Refresh a Source by creating a new version. Older citations continue to use the earlier version.
 - Add separate page annotations.
 - Keep annotations as reusable Evidence linked to the exact Source Version.
+- Edit a Source title, primary Topic, related Topics, and Lists. Archive and restore a Source
+  without changing its immutable versions or citations.
 - Navigate directly to an annotated or searched page.
 - Optional: extract PDF text on a paired Mac without using an AI provider.
 
@@ -49,6 +51,7 @@ the current personal beta.
 - Add optional institution, term, official class name, code, professor, and dates to a Topic.
 - Use Lists as reusable cross-Topic groups. A note can appear in more than one List without
   being copied.
+- Rename, move, archive, and restore Lists while preserving linked records.
 - Create a Quick Note without assigning it, then add it to Lists or sessions later.
 - Review notes with a page miniature, content excerpt, page count, and save state.
 - Link notes, Sources, Concepts, cards, tests, and study sessions to a Topic.
@@ -82,6 +85,11 @@ the current personal beta.
 This feature requires a paired Mac and a configured AI provider. It is optional.
 
 ## Learning
+
+- Create and manage flashcard decks.
+- Edit cards by creating durable revisions. Suspend or archive cards without deleting reviews.
+- Edit goals and unresolved questions. Mark goals completed and questions resolved or reopen them.
+- Edit and archive Concepts and tests. Archived tests retain attempts and frozen questions.
 
 - Create durable manual flashcards in eight card formats.
 - Review due cards with a deterministic offline schedule and append-only history.

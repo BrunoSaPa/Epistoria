@@ -34,11 +34,13 @@ Epistoria remains in personal beta. The following limits apply to the current pr
 
 ## Organization and removal
 
-- Notes and Topics support archive and restore.
+- Notes, Topics, Sources, Lists, goals, decks, cards, Concepts, and tests support lifecycle
+  controls appropriate to each record.
 - Notes can be added to Lists and sessions, but the current organizer does not remove an
   existing List or session link.
-- Sources, Lists, institutions, and academic terms do not yet have complete lifecycle
-  controls.
+- Institutions and academic terms do not yet have complete lifecycle controls.
+- Archiving a List preserves its links and does not archive linked items.
+- Archiving a deck does not archive its cards. Cards must be suspended or archived separately.
 - There is no persistent cross-record Trash.
 - Some undo actions remain available only while the current screen is open.
 

@@ -5,7 +5,8 @@ struct NotebookView: View {
     private enum Mode: String, CaseIterable, Identifiable {
         case notes = "Notes"
         case collections = "Lists"
-        case archived = "Archived"
+        case archivedNotes = "Archived Notes"
+        case archivedLists = "Archived Lists"
         var id: Self { self }
     }
 
@@ -64,13 +65,13 @@ struct NotebookView: View {
                             .tint(.gray)
                         }
                     }
-                } else if mode == .archived && archivedNotes.isEmpty {
+                } else if mode == .archivedNotes && archivedNotes.isEmpty {
                     ContentUnavailableView {
                         Label("Nothing archived", systemImage: "archivebox")
                     } description: {
                         Text("Archived notes stay encrypted and searchable. Move a note here when you want it out of your active notebook.")
                     }
-                } else if mode == .archived {
+                } else if mode == .archivedNotes {
                     List(archivedNotes, id: \.id) { note in
                         NavigationLink {
                             NoteEditorView(
@@ -93,7 +94,7 @@ struct NotebookView: View {
                             .tint(EpistoriaDesign.accent)
                         }
                     }
-                } else if collections.isEmpty {
+                } else if mode == .collections && activeCollections.isEmpty {
                     ContentUnavailableView {
                         Label("No lists yet", systemImage: "folder")
                     } description: {
@@ -103,7 +104,7 @@ struct NotebookView: View {
                             .buttonStyle(.borderedProminent)
                             .tint(EpistoriaDesign.ink)
                     }
-                } else {
+                } else if mode == .collections {
                     List {
                         Section {
                             Label("Lists group notes and sources across Topics. They are optional and never duplicate the underlying item.", systemImage: "folder")
@@ -111,13 +112,39 @@ struct NotebookView: View {
                                 .foregroundStyle(EpistoriaDesign.mutedInk)
                         }
                         Section("Lists") {
-                            ForEach(collections.filter { $0.payload.parentCollectionId == nil }, id: \.id) { collection in
+                            ForEach(activeCollections.filter { $0.payload.parentCollectionId == nil }, id: \.id) { collection in
                                 NavigationLink {
                                     CollectionDetailView(model: model, collectionId: collection.id)
                                 } label: {
                                     Label(collection.payload.name, systemImage: "folder")
                                 }
+                                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                    Button("Archive", systemImage: "archivebox") {
+                                        Task { await setListArchived(collection, archived: true) }
+                                    }
+                                    .tint(.gray)
+                                }
                             }
+                        }
+                    }
+                } else if archivedCollections.isEmpty {
+                    ContentUnavailableView {
+                        Label("No archived Lists", systemImage: "archivebox")
+                    } description: {
+                        Text("Archived Lists keep their links and can be restored here.")
+                    }
+                } else {
+                    List(archivedCollections, id: \.id) { collection in
+                        NavigationLink {
+                            CollectionDetailView(model: model, collectionId: collection.id)
+                        } label: {
+                            Label(collection.payload.name, systemImage: "folder")
+                        }
+                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                            Button("Restore", systemImage: "arrow.uturn.backward") {
+                                Task { await setListArchived(collection, archived: false) }
+                            }
+                            .tint(EpistoriaDesign.accent)
                         }
                     }
                 }
@@ -225,6 +252,28 @@ struct NotebookView: View {
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    private var activeCollections: [IdentifiedPayload<CollectionPayload>] {
+        collections.filter { $0.payload.archivedAt == nil }
+    }
+
+    private var archivedCollections: [IdentifiedPayload<CollectionPayload>] {
+        collections.filter { $0.payload.archivedAt != nil }
+    }
+
+    private func setListArchived(_ list: IdentifiedPayload<CollectionPayload>, archived: Bool) async {
+        guard let store = model.store else { return }
+        do {
+            try await store.updateList(
+                id: list.id,
+                name: list.payload.name,
+                parentListId: list.payload.parentCollectionId,
+                archived: archived
+            )
+            model.noteLocalMutation()
+            await load()
+        } catch { errorMessage = error.localizedDescription }
     }
 
     private func openCreatedNoteIfNeeded() {

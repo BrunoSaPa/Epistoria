@@ -809,6 +809,148 @@ final class LocalDatabaseTests: XCTestCase {
         XCTAssertEqual(revisions.first?.payload.generatorArtifactId, artifactId)
         XCTAssertEqual(accepted.payload.reviewState, .accepted)
     }
+
+    func testLearningLifecycleEditsPreserveHistoryAndLegacyLists() async throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let database = try SQLCipherDatabase(
+            url: directory.appendingPathComponent("learning-lifecycle.sqlite"),
+            key: Data(repeating: 48, count: 32)
+        )
+        let store = EpistoriaStore(database: database)
+        let topicId = try await store.createTopic(name: "Algebra")
+
+        let legacyListJSON = """
+        {
+          "schemaVersion":"collection/v1",
+          "name":"Legacy list",
+          "parentCollectionId":null,
+          "createdAt":"2026-08-20T12:00:00.000Z",
+          "updatedAt":"2026-08-20T12:00:00.000Z"
+        }
+        """
+        let legacyList = try CanonicalJSON.decode(CollectionPayload.self, from: Data(legacyListJSON.utf8))
+        XCTAssertNil(legacyList.archivedAt)
+        let listId = UUID()
+        _ = try await database.saveLocal(
+            id: listId,
+            entityType: .collection,
+            content: Data(legacyListJSON.utf8),
+            search: SearchDocument(title: "Legacy list", body: "")
+        )
+        try await store.updateList(id: listId, name: "Reference", parentListId: nil, archived: true)
+        let archivedList = try await store.payload(CollectionPayload.self, id: listId)
+        let listBackup = try await database.migrationBackup(
+            entityId: listId,
+            migrationName: "collection-to-list/v2"
+        )
+        XCTAssertEqual(archivedList.payload.name, "Reference")
+        XCTAssertEqual(archivedList.payload.schemaVersion, "collection/v2")
+        XCTAssertNotNil(archivedList.payload.archivedAt)
+        XCTAssertEqual(listBackup, Data(legacyListJSON.utf8))
+
+        let deckId = try await store.createFlashcardDeck(topicId: topicId, name: "Core ideas")
+        let cardId = try await store.createFlashcard(
+            topicId: topicId,
+            deckId: deckId,
+            prompt: "Original prompt",
+            answer: "Original answer"
+        )
+        let firstCard = try await store.payload(FlashcardPayload.self, id: cardId)
+        let firstRevisionId = firstCard.payload.currentRevisionId
+        _ = try await store.reviewFlashcard(
+            cardId: cardId,
+            rating: .good,
+            previousState: FlashcardScheduleState()
+        )
+        let secondRevisionId = try await store.reviseFlashcard(
+            id: cardId,
+            kind: .explanation,
+            prompt: "Revised prompt",
+            answer: "Revised answer",
+            deckId: deckId,
+            evidenceIds: []
+        )
+        try await store.setFlashcardLifecycle(id: cardId, suspended: true)
+        let revisedCard = try await store.payload(FlashcardPayload.self, id: cardId)
+        let reviews = try await store.list(FlashcardReviewPayload.self, parentId: cardId)
+        XCTAssertNotEqual(firstRevisionId, secondRevisionId)
+        XCTAssertEqual(revisedCard.payload.currentRevisionId, secondRevisionId)
+        XCTAssertNotNil(revisedCard.payload.suspendedAt)
+        XCTAssertEqual(reviews.first?.payload.cardRevisionId, firstRevisionId)
+
+        let goalId = try await store.save(
+            payload: StudyGoalPayload(topicId: topicId, title: "Learn factoring"),
+            parentId: topicId,
+            relationIds: [topicId]
+        )
+        try await store.updateStudyGoal(
+            id: goalId,
+            title: "Master factoring",
+            details: "Complete mixed practice",
+            targetDate: nil,
+            priority: 3,
+            state: .completed
+        )
+        let goal = try await store.payload(StudyGoalPayload.self, id: goalId)
+        XCTAssertEqual(goal.payload.state, .completed)
+        XCTAssertEqual(goal.payload.priority, 3)
+
+        let questionId = try await store.save(
+            payload: UnresolvedQuestionPayload(topicId: topicId, question: "Why does grouping work?"),
+            parentId: topicId,
+            relationIds: [topicId]
+        )
+        try await store.updateUnresolvedQuestion(
+            id: questionId,
+            question: "When does grouping work?",
+            resolvedAnswer: "When a shared binomial factor appears.",
+            resolved: true
+        )
+        let question = try await store.payload(UnresolvedQuestionPayload.self, id: questionId)
+        XCTAssertNotNil(question.payload.resolvedAt)
+        XCTAssertEqual(question.payload.resolvedAnswer, "When a shared binomial factor appears.")
+
+        let sourceId = try await store.createSource(type: .pastedText, title: "Draft", primaryTopicId: topicId)
+        try await store.updateSource(
+            id: sourceId,
+            title: "Factoring notes",
+            primaryTopicId: topicId,
+            relatedTopicIds: [],
+            listIds: [listId],
+            archived: true
+        )
+        let archivedSource = try await store.payload(SourcePayload.self, id: sourceId)
+        XCTAssertNotNil(archivedSource.payload.archivedAt)
+
+        let conceptId = try await store.createConcept(name: "Grouping", topicIds: [topicId])
+        try await store.updateConcept(
+            id: conceptId,
+            name: "Factor by grouping",
+            description: "Regroup terms to expose a common binomial.",
+            aliases: ["grouping"],
+            topicIds: [topicId],
+            state: .archived
+        )
+        let archivedConcept = try await store.payload(ConceptPayload.self, id: conceptId)
+        XCTAssertEqual(archivedConcept.payload.state, .archived)
+
+        let objective = TestObjective(title: "Grouping", dimensions: [.conceptual])
+        let testId = try await store.createPracticeTest(
+            topicId: topicId,
+            title: "Grouping check",
+            objectives: [objective],
+            questions: [ManualTestQuestion(
+                objectiveIds: [objective.id],
+                prompt: "Factor by grouping",
+                correctAnswer: "A correct factorization"
+            )]
+        )
+        try await store.updatePracticeTest(id: testId, title: "Grouping review", state: .archived)
+        let test = try await store.payload(PracticeTestPayload.self, id: testId)
+        XCTAssertEqual(test.payload.title, "Grouping review")
+        XCTAssertEqual(test.payload.state, .archived)
+    }
 }
 
 private func XCTAssertThrowsErrorAsync<T>(

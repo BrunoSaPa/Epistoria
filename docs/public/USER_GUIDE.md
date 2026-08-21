@@ -162,6 +162,10 @@ does not delete the underlying item.
 Library contains Inbox, All Sources, Recent, type filters, and Topic filters. Inbox contains
 Sources that do not yet have a Topic.
 
+Use **Archived** to review and restore archived Sources. Open a Source and select **Edit Source**
+to change its title, primary Topic, related Topics, Lists, or archive state. These changes do not
+rewrite Source Versions or existing citations.
+
 - Use the page controls to navigate.
 - Open the inspector for extraction and annotation details.
 - Add or edit an annotation without changing the original PDF.
@@ -172,6 +176,22 @@ Sources that do not yet have a Topic.
 
 If a restored PDF is not yet on the iPad, the app needs a connection the first time you open it.
 After a successful download, the encrypted local copy opens offline.
+
+## Manage learning records
+
+Open **Study**, then select **Manage learning records** in the toolbar.
+
+- Edit goals and set them to Active, Completed, or Archived.
+- Edit unresolved questions, record a resolution, or reopen them.
+- Create, rename, archive, and restore flashcard decks.
+- Edit card content, type, and deck. Each content edit creates a new revision. Earlier reviews
+  remain linked to the revision used during that review.
+- Suspend a card to remove it from due reviews without deleting it. Archive it to remove it from
+  active card lists.
+- Edit and archive Concepts and tests. Test attempts remain available after a test is archived.
+
+In Notebook, use **Archived Lists** to restore a List. Open a List and select **Edit List** to
+rename it, move it under another List, or archive it. Linked notes and Sources are not deleted.
 
 ## Search
 

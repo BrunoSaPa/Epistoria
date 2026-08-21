@@ -21,6 +21,7 @@
 		3EFE1A6A662E4985817B5A07 /* SessionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 506A112DB7A5A7FDA172198B /* SessionsView.swift */; };
 		426067C698D45A2AD8D2CED3 /* DataHealthView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0F3B3FDFBB2BCD218101F2E /* DataHealthView.swift */; };
 		4295FF11D9057AB5501F087E /* CollectionDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE4D8FF2EA33C72A7A980377 /* CollectionDetailView.swift */; };
+		482E7AD95B81D9D2E6FE394C /* LearningManagementView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB7D498397579BAB468C3052 /* LearningManagementView.swift */; };
 		4AB03CD64DBD7DD0C95F2E38 /* PendingSaveRegistryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4A9C2EECA501629A0A6DE66 /* PendingSaveRegistryTests.swift */; };
 		4C3C9122AB20F2632A91F255 /* PendingSaveRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5AB1C23E0019EE50083F7840 /* PendingSaveRegistry.swift */; };
 		4CCD3844DBF0F87D64872215 /* StudyView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08B89468624166AB5B132D9F /* StudyView.swift */; };
@@ -108,6 +109,7 @@
 		B279FE27DE285AD320383789 /* NoteEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteEditorView.swift; sourceTree = "<group>"; };
 		B2ADF9EA8B4CC8ABB172FB42 /* DeveloperNotebookResetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeveloperNotebookResetView.swift; sourceTree = "<group>"; };
 		B4CE73D59B5CC07D158A1310 /* ContinuousNotebookPages.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContinuousNotebookPages.swift; sourceTree = "<group>"; };
+		CB7D498397579BAB468C3052 /* LearningManagementView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LearningManagementView.swift; sourceTree = "<group>"; };
 		D0B720938C61EE02FC5D5A7A /* NotebookVisualStyle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotebookVisualStyle.swift; sourceTree = "<group>"; };
 		D375328611A336119E2F55C0 /* SpatialNotebookCanvas.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpatialNotebookCanvas.swift; sourceTree = "<group>"; };
 		DA3EF4C44B5B4915DB15C54C /* EpistoriaCore */ = {isa = PBXFileReference; lastKnownFileType = folder; name = EpistoriaCore; path = EpistoriaCore; sourceTree = SOURCE_ROOT; };
@@ -164,6 +166,7 @@
 			isa = PBXGroup;
 			children = (
 				9F587C85FB9CDBD4AD20B0D1 /* LearningDetailViews.swift */,
+				CB7D498397579BAB468C3052 /* LearningManagementView.swift */,
 				08B89468624166AB5B132D9F /* StudyView.swift */,
 			);
 			path = Study;
@@ -473,6 +476,7 @@
 				C020D783090ACF29E186284D /* KnowledgeSearchView.swift in Sources */,
 				0C13184662CE5717485E8BC1 /* LassoOverlayView.swift in Sources */,
 				B0BDDE9736A79A9B4EC8FEB0 /* LearningDetailViews.swift in Sources */,
+				482E7AD95B81D9D2E6FE394C /* LearningManagementView.swift in Sources */,
 				C5F82045B47F32CFF46D15CE /* LibraryView.swift in Sources */,
 				E8739243E0E6F49401DB4C3F /* NoteEditorView.swift in Sources */,
 				13A7DC2EA6C84AD2D52D7630 /* NotePDFExportService.swift in Sources */,

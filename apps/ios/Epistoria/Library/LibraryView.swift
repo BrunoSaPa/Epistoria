@@ -8,6 +8,7 @@ struct LibraryView: View {
         case inbox = "Inbox"
         case all = "All Sources"
         case recent = "Recent"
+        case archived = "Archived"
         var id: Self { self }
     }
 
@@ -52,6 +53,12 @@ struct LibraryView: View {
                             }
                         }
                         .accessibilityIdentifier("library.resource.\(resource.id.uuidString)")
+                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                            Button(resource.payload.archivedAt == nil ? "Archive" : "Restore", systemImage: resource.payload.archivedAt == nil ? "archivebox" : "arrow.uturn.backward") {
+                                Task { await setSourceArchived(resource, archived: resource.payload.archivedAt == nil) }
+                            }
+                            .tint(.gray)
+                        }
                     }
                 }
             }
@@ -121,10 +128,10 @@ struct LibraryView: View {
 
     private var visibleResources: [IdentifiedPayload<SourcePayload>] {
         resources.filter { resource in
-            guard resource.payload.archivedAt == nil else { return false }
             let sectionMatches = switch section {
-            case .inbox: resource.payload.primaryTopicId == nil
-            case .all, .recent: true
+            case .inbox: resource.payload.archivedAt == nil && resource.payload.primaryTopicId == nil
+            case .all, .recent: resource.payload.archivedAt == nil
+            case .archived: resource.payload.archivedAt != nil
             }
             let typeMatches = selectedType.map { resource.payload.sourceType == $0 } ?? true
             let topicMatches = selectedTopicId.map {
@@ -159,6 +166,22 @@ struct LibraryView: View {
             errorMessage = error.localizedDescription
         }
     }
+
+    private func setSourceArchived(_ source: IdentifiedPayload<SourcePayload>, archived: Bool) async {
+        guard let store = model.store else { return }
+        do {
+            try await store.updateSource(
+                id: source.id,
+                title: source.payload.title,
+                primaryTopicId: source.payload.primaryTopicId,
+                relatedTopicIds: source.payload.relatedTopicIds,
+                listIds: source.payload.listIds,
+                archived: archived
+            )
+            model.noteLocalMutation()
+            await load()
+        } catch { errorMessage = error.localizedDescription }
+    }
 }
 
 struct ResourceDetailView: View {
@@ -172,6 +195,7 @@ struct ResourceDetailView: View {
     @State private var resource: IdentifiedPayload<ResourcePayload>?
     @State private var source: IdentifiedPayload<SourcePayload>?
     @State private var topics: [IdentifiedPayload<TopicPayload>] = []
+    @State private var lists: [IdentifiedPayload<CollectionPayload>] = []
     @State private var versions: [IdentifiedPayload<SourceVersionPayload>] = []
     @State private var isOrganizing = false
     @State private var isRefreshingSource = false
@@ -248,7 +272,7 @@ struct ResourceDetailView: View {
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
                 Button { isOrganizing = true } label: {
-                    Label("Organize Source", systemImage: "folder")
+                    Label("Edit Source", systemImage: "slider.horizontal.3")
                 }
                 Button { isRefreshingSource = true } label: {
                     Label("Refresh Source", systemImage: "arrow.clockwise")
@@ -309,7 +333,8 @@ struct ResourceDetailView: View {
             SourceOrganizationView(
                 model: model,
                 source: source,
-                topics: topics
+                topics: topics,
+                lists: lists
             ) {
                 isOrganizing = false
                 Task { await load() }
@@ -521,9 +546,11 @@ struct ResourceDetailView: View {
             let loaded = try await store.payload(ResourcePayload.self, id: resourceId)
             async let loadedSource = store.payload(SourcePayload.self, id: resourceId)
             async let loadedTopics = store.topics()
+            async let loadedLists = store.lists()
             resource = loaded
             source = try await loadedSource
             topics = try await loadedTopics.filter { !$0.payload.archived }
+            lists = try await loadedLists.filter { $0.payload.archivedAt == nil }
             versions = try await store.list(SourceVersionPayload.self, parentId: resourceId)
                 .sorted { $0.payload.versionNumber > $1.payload.versionNumber }
             annotations = try await store.list(AnnotationPayload.self)
@@ -669,56 +696,100 @@ private struct SourceOrganizationView: View {
     @Bindable var model: AppModel
     let source: IdentifiedPayload<SourcePayload>?
     let topics: [IdentifiedPayload<TopicPayload>]
+    let lists: [IdentifiedPayload<CollectionPayload>]
     let onSaved: () -> Void
+    @State private var title: String
     @State private var primaryTopicId: UUID?
+    @State private var relatedTopicIds: Set<UUID>
+    @State private var listIds: Set<UUID>
+    @State private var archived: Bool
     @State private var errorMessage: String?
 
     init(
         model: AppModel,
         source: IdentifiedPayload<SourcePayload>?,
         topics: [IdentifiedPayload<TopicPayload>],
+        lists: [IdentifiedPayload<CollectionPayload>],
         onSaved: @escaping () -> Void
     ) {
         self.model = model
         self.source = source
         self.topics = topics
+        self.lists = lists
         self.onSaved = onSaved
+        _title = State(initialValue: source?.payload.title ?? "")
         _primaryTopicId = State(initialValue: source?.payload.primaryTopicId)
+        _relatedTopicIds = State(initialValue: Set(source?.payload.relatedTopicIds ?? []))
+        _listIds = State(initialValue: Set(source?.payload.listIds ?? []))
+        _archived = State(initialValue: source?.payload.archivedAt != nil)
     }
 
     var body: some View {
         NavigationStack {
             Form {
-                Picker("Primary Topic", selection: $primaryTopicId) {
-                    Text("Source Inbox").tag(UUID?.none)
-                    ForEach(topics, id: \.id) { Text($0.payload.name).tag(Optional($0.id)) }
+                Section("Source") {
+                    TextField("Title", text: $title)
+                    Toggle("Archived", isOn: $archived)
                 }
-                Text("A Source can remain in Inbox. Assigning it later does not change its immutable versions or citations.")
-                    .font(.caption).foregroundStyle(.secondary)
+                Section("Primary Topic") {
+                    Picker("Primary Topic", selection: $primaryTopicId) {
+                        Text("Source Inbox").tag(UUID?.none)
+                        ForEach(topics, id: \.id) { Text($0.payload.name).tag(Optional($0.id)) }
+                    }
+                    Text("A Source can remain in Inbox. Assigning it later does not change its immutable versions or citations.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Section("Related Topics") {
+                    ForEach(topics.filter { $0.id != primaryTopicId }, id: \.id) { topic in
+                        Toggle(topic.payload.name, isOn: membership(topic.id, in: $relatedTopicIds))
+                    }
+                    if topics.filter({ $0.id != primaryTopicId }).isEmpty {
+                        Text("No other Topics").foregroundStyle(.secondary)
+                    }
+                }
+                Section("Lists") {
+                    ForEach(lists, id: \.id) { list in
+                        Toggle(list.payload.name, isOn: membership(list.id, in: $listIds))
+                    }
+                    if lists.isEmpty { Text("No active Lists").foregroundStyle(.secondary) }
+                }
                 if let errorMessage { Text(errorMessage).foregroundStyle(.red) }
             }
-            .navigationTitle("Organize Source")
+            .navigationTitle("Edit Source")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { onSaved() } }
-                ToolbarItem(placement: .confirmationAction) { Button("Save") { Task { await save() } } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") { Task { await save() } }
+                        .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
             }
         }
     }
 
     private func save() async {
-        guard let store = model.store, var source else { return }
-        source.payload.primaryTopicId = primaryTopicId
-        source.payload.updatedAt = .now
+        guard let store = model.store, let source else { return }
         do {
-            _ = try await store.save(
+            try await store.updateSource(
                 id: source.id,
-                payload: source.payload,
-                parentId: primaryTopicId,
-                relationIds: [primaryTopicId, source.payload.originalAssetId, source.payload.currentVersionId].compactMap(\ .self)
+                title: title,
+                primaryTopicId: primaryTopicId,
+                relatedTopicIds: Array(relatedTopicIds),
+                listIds: Array(listIds),
+                archived: archived
             )
             model.noteLocalMutation()
             onSaved()
         } catch { errorMessage = error.localizedDescription }
+    }
+
+    private func membership(_ id: UUID, in values: Binding<Set<UUID>>) -> Binding<Bool> {
+        Binding(
+            get: { values.wrappedValue.contains(id) },
+            set: { selected in
+                if selected { values.wrappedValue.insert(id) }
+                else { values.wrappedValue.remove(id) }
+            }
+        )
     }
 }
 

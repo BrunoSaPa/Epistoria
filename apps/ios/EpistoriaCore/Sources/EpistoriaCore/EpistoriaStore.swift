@@ -279,6 +279,139 @@ public actor EpistoriaStore {
         )
     }
 
+    public func updateList(
+        id: UUID,
+        name: String,
+        parentListId: UUID?,
+        archived: Bool,
+        at date: Date = .now
+    ) async throws {
+        if let parentListId {
+            guard parentListId != id else {
+                throw LocalDatabaseError.queryFailed("a List cannot contain itself")
+            }
+            _ = try await payload(CollectionPayload.self, id: parentListId)
+        }
+        var list = try await payload(CollectionPayload.self, id: id)
+        let cleanName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanName.isEmpty else {
+            throw LocalDatabaseError.queryFailed("a List needs a name")
+        }
+        let migration: LocalMigrationBatch? = list.payload.schemaVersion == "collection/v1"
+            ? try await database.entity(id: id).map {
+                LocalMigrationBatch(
+                    name: "collection-to-list/v2",
+                    backupEntityId: id,
+                    backupContent: $0.content
+                )
+            }
+            : nil
+        list.payload.schemaVersion = "collection/v2"
+        list.payload.name = cleanName
+        list.payload.parentCollectionId = parentListId
+        list.payload.archivedAt = archived ? (list.payload.archivedAt ?? date) : nil
+        list.payload.updatedAt = date
+        try await database.saveLocalBatch(
+            try [localWrite(
+                id: id,
+                payload: list.payload,
+                parentId: parentListId,
+                relationIds: [parentListId].compactMap(\ .self)
+            )],
+            migration: migration
+        )
+    }
+
+    @discardableResult
+    public func createFlashcardDeck(topicId: UUID, name: String, at date: Date = .now) async throws -> UUID {
+        _ = try await topic(id: topicId)
+        let cleanName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanName.isEmpty else {
+            throw LocalDatabaseError.queryFailed("a deck needs a name")
+        }
+        return try await save(
+            payload: FlashcardDeckPayload(topicId: topicId, name: cleanName, now: date),
+            parentId: topicId,
+            relationIds: [topicId]
+        )
+    }
+
+    public func updateFlashcardDeck(
+        id: UUID,
+        name: String,
+        archived: Bool,
+        at date: Date = .now
+    ) async throws {
+        var deck = try await payload(FlashcardDeckPayload.self, id: id)
+        let cleanName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanName.isEmpty else {
+            throw LocalDatabaseError.queryFailed("a deck needs a name")
+        }
+        deck.payload.name = cleanName
+        deck.payload.archivedAt = archived ? (deck.payload.archivedAt ?? date) : nil
+        deck.payload.updatedAt = date
+        _ = try await save(
+            id: id,
+            payload: deck.payload,
+            parentId: deck.payload.topicId,
+            relationIds: [deck.payload.topicId]
+        )
+    }
+
+    public func updateStudyGoal(
+        id: UUID,
+        title: String,
+        details: String?,
+        targetDate: Date?,
+        priority: Int,
+        state: LearningRecordState,
+        at date: Date = .now
+    ) async throws {
+        var goal = try await payload(StudyGoalPayload.self, id: id)
+        let cleanTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanTitle.isEmpty else {
+            throw LocalDatabaseError.queryFailed("a goal needs a title")
+        }
+        goal.payload.title = cleanTitle
+        goal.payload.details = details?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+        goal.payload.targetDate = targetDate
+        goal.payload.priority = min(max(priority, 0), 3)
+        goal.payload.state = state
+        goal.payload.updatedAt = date
+        _ = try await save(
+            id: id,
+            payload: goal.payload,
+            parentId: goal.payload.topicId,
+            relationIds: [goal.payload.topicId]
+        )
+    }
+
+    public func updateUnresolvedQuestion(
+        id: UUID,
+        question: String,
+        resolvedAnswer: String?,
+        resolved: Bool,
+        at date: Date = .now
+    ) async throws {
+        var item = try await payload(UnresolvedQuestionPayload.self, id: id)
+        let cleanQuestion = question.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanQuestion.isEmpty else {
+            throw LocalDatabaseError.queryFailed("a question cannot be empty")
+        }
+        item.payload.question = cleanQuestion
+        item.payload.resolvedAnswer = resolved
+            ? resolvedAnswer?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+            : nil
+        item.payload.resolvedAt = resolved ? (item.payload.resolvedAt ?? date) : nil
+        item.payload.updatedAt = date
+        _ = try await save(
+            id: id,
+            payload: item.payload,
+            parentId: item.payload.topicId,
+            relationIds: [item.payload.topicId] + item.payload.sourceEvidenceIds
+        )
+    }
+
     @discardableResult
     public func save<Payload: EntityPayload>(
         id: UUID = UUID(),
@@ -951,6 +1084,85 @@ public actor EpistoriaStore {
         return cardId
     }
 
+    /// Editing a card always appends a revision. Existing reviews continue to reference the
+    /// exact revision that was shown when the review occurred.
+    @discardableResult
+    public func reviseFlashcard(
+        id cardId: UUID,
+        kind: FlashcardKind,
+        prompt: String,
+        answer: String,
+        deckId: UUID?,
+        evidenceIds: [UUID],
+        at date: Date = .now
+    ) async throws -> UUID {
+        var card = try await payload(FlashcardPayload.self, id: cardId)
+        if let deckId {
+            let deck = try await payload(FlashcardDeckPayload.self, id: deckId)
+            guard deck.payload.topicId == card.payload.topicId else {
+                throw LocalDatabaseError.queryFailed("the deck belongs to a different Topic")
+            }
+        }
+        let cleanPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanAnswer = answer.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanPrompt.isEmpty, !cleanAnswer.isEmpty else {
+            throw LocalDatabaseError.queryFailed("a card needs a prompt and answer")
+        }
+        let revisionNumber = (try await list(FlashcardRevisionPayload.self, parentId: cardId))
+            .map(\.payload.revisionNumber).max() ?? 0
+        let revisionId = UUID()
+        let revision = FlashcardRevisionPayload(
+            cardId: cardId,
+            revisionNumber: revisionNumber + 1,
+            prompt: cleanPrompt,
+            answer: cleanAnswer,
+            evidenceIds: Array(Set(evidenceIds)),
+            now: date
+        )
+        card.payload.kind = kind
+        card.payload.deckId = deckId
+        card.payload.currentRevisionId = revisionId
+        card.payload.updatedAt = date
+        try await database.saveLocalBatch(try [
+            localWrite(
+                id: revisionId,
+                payload: revision,
+                parentId: cardId,
+                relationIds: [cardId, card.payload.topicId] + revision.evidenceIds
+            ),
+            localWrite(
+                id: cardId,
+                payload: card.payload,
+                parentId: deckId ?? card.payload.topicId,
+                relationIds: [card.payload.topicId, deckId, revisionId].compactMap(\ .self)
+            ),
+        ])
+        return revisionId
+    }
+
+    public func setFlashcardLifecycle(
+        id: UUID,
+        suspended: Bool? = nil,
+        archived: Bool? = nil,
+        at date: Date = .now
+    ) async throws {
+        var card = try await payload(FlashcardPayload.self, id: id)
+        if let suspended {
+            card.payload.suspendedAt = suspended ? (card.payload.suspendedAt ?? date) : nil
+        }
+        if let archived {
+            card.payload.archivedAt = archived ? (card.payload.archivedAt ?? date) : nil
+        }
+        card.payload.updatedAt = date
+        _ = try await save(
+            id: id,
+            payload: card.payload,
+            parentId: card.payload.deckId ?? card.payload.topicId,
+            relationIds: [card.payload.topicId, card.payload.deckId, card.payload.currentRevisionId]
+                .compactMap(\ .self)
+        )
+    }
+
     @discardableResult
     public func reviewFlashcard(
         cardId: UUID,
@@ -1113,6 +1325,32 @@ public actor EpistoriaStore {
         return testId
     }
 
+    public func updatePracticeTest(
+        id: UUID,
+        title: String,
+        state: PracticeTestState,
+        at date: Date = .now
+    ) async throws {
+        var test = try await payload(PracticeTestPayload.self, id: id)
+        let cleanTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanTitle.isEmpty else {
+            throw LocalDatabaseError.queryFailed("a test needs a title")
+        }
+        test.payload.title = cleanTitle
+        test.payload.state = state
+        test.payload.updatedAt = date
+        _ = try await save(
+            id: id,
+            payload: test.payload,
+            parentId: test.payload.topicId,
+            relationIds: [
+                test.payload.topicId,
+                test.payload.blueprintId,
+                test.payload.scopeSnapshotId,
+            ] + test.payload.questionIds
+        )
+    }
+
     @discardableResult
     public func createSource(
         type: ResourceKind,
@@ -1216,6 +1454,42 @@ public actor EpistoriaStore {
         return versionId
     }
 
+    public func updateSource(
+        id: UUID,
+        title: String,
+        primaryTopicId: UUID?,
+        relatedTopicIds: [UUID],
+        listIds: [UUID],
+        archived: Bool,
+        at date: Date = .now
+    ) async throws {
+        let topicIds = Array(Set(relatedTopicIds).subtracting([primaryTopicId].compactMap(\ .self)))
+        if let primaryTopicId { _ = try await topic(id: primaryTopicId) }
+        for topicId in topicIds { _ = try await topic(id: topicId) }
+        for listId in Set(listIds) { _ = try await payload(CollectionPayload.self, id: listId) }
+        var source = try await payload(SourcePayload.self, id: id)
+        let cleanTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanTitle.isEmpty else {
+            throw LocalDatabaseError.queryFailed("a Source needs a title")
+        }
+        source.payload.title = cleanTitle
+        source.payload.primaryTopicId = primaryTopicId
+        source.payload.relatedTopicIds = topicIds
+        source.payload.listIds = Array(Set(listIds))
+        source.payload.archivedAt = archived ? (source.payload.archivedAt ?? date) : nil
+        source.payload.updatedAt = date
+        _ = try await save(
+            id: id,
+            payload: source.payload,
+            parentId: primaryTopicId,
+            relationIds: [
+                primaryTopicId,
+                source.payload.originalAssetId,
+                source.payload.currentVersionId,
+            ].compactMap(\ .self) + topicIds + source.payload.listIds
+        )
+    }
+
     @discardableResult
     public func createEvidence(
         sourceId: UUID,
@@ -1305,6 +1579,41 @@ public actor EpistoriaStore {
         )
     }
 
+    public func updateConcept(
+        id: UUID,
+        name: String,
+        description: String,
+        aliases: [String],
+        topicIds: [UUID],
+        state: ConceptLifecycleState,
+        at date: Date = .now
+    ) async throws {
+        let uniqueTopicIds = Array(Set(topicIds))
+        guard !uniqueTopicIds.isEmpty else {
+            throw LocalDatabaseError.queryFailed("a Concept needs at least one Topic")
+        }
+        for topicId in uniqueTopicIds { _ = try await topic(id: topicId) }
+        var concept = try await payload(ConceptPayload.self, id: id)
+        let cleanName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanName.isEmpty else {
+            throw LocalDatabaseError.queryFailed("a Concept needs a name")
+        }
+        concept.payload.name = cleanName
+        concept.payload.conceptDescription = description.trimmingCharacters(in: .whitespacesAndNewlines)
+        concept.payload.aliases = Array(Set(aliases.map {
+            $0.trimmingCharacters(in: .whitespacesAndNewlines)
+        }.filter { !$0.isEmpty })).sorted()
+        concept.payload.topicIds = uniqueTopicIds
+        concept.payload.state = state
+        concept.payload.updatedAt = date
+        _ = try await save(
+            id: id,
+            payload: concept.payload,
+            parentId: uniqueTopicIds.first,
+            relationIds: uniqueTopicIds
+        )
+    }
+
     @discardableResult
     public func linkConcept(
         _ conceptId: UUID,
@@ -1349,4 +1658,8 @@ private extension LocalEntityWrite {
         copy.entityType = entityType
         return copy
     }
+}
+
+private extension String {
+    var nilIfEmpty: String? { isEmpty ? nil : self }
 }

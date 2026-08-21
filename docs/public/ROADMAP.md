@@ -34,26 +34,33 @@ change after personal use and beta testing.
 ## Review and learning
 
 The personal beta now includes Areas, Topics, Sources with versions, reusable Evidence, manual
-Concepts, sessions, flashcards, tests, attempt history, local Study Next, and reviewed Topic Studio
-requests. The next stages are:
+Concepts, sessions, flashcards, tests, attempt history, local Study Next, reviewed Topic Studio
+requests, and lifecycle controls for durable learning records.
 
-1. Add complete editing and lifecycle controls for goals, unresolved questions, decks, cards,
-   Concepts, tests, Sources, and Lists.
-2. Add item-by-item edit, selection, and exclusion before converting accepted AI card, test, or
+Completed:
+
+1. Goals, unresolved questions, decks, cards, Concepts, tests, Sources, and Lists can be edited,
+   completed, resolved, suspended, archived, restored, or reorganized as appropriate. Card edits
+   create revisions. Archived tests keep their attempts. Legacy Lists upgrade with a recovery
+   backup when first edited.
+
+Next stages:
+
+1. Add item-by-item edit, selection, and exclusion before converting accepted AI card, test, or
    Concept drafts into first-class records.
-3. Add Quick Check and Custom creation interfaces. Comprehensive tests will show the
+2. Add Quick Check and Custom creation interfaces. Comprehensive tests will show the
    detected topics before generation, cover every supported topic, use broader questions when
    appropriate, and report missing material or time limits instead of silently omitting content.
-4. Add direct start destinations and response history to every Study Next item.
-5. Add optional feedback for written answers. Show the grading guide and allow a score override.
-6. Add a proactive mode for selected material. The user will choose the allowed material, tasks,
+3. Add direct start destinations and response history to every Study Next item.
+4. Add optional feedback for written answers. Show the grading guide and allow a score override.
+5. Add a proactive mode for selected material. The user will choose the allowed material, tasks,
    frequency, expiration, and spending limit, and can pause it at any time.
-7. Add a weekly review for recent study, difficult material, unresolved questions, upcoming work,
+6. Add a weekly review for recent study, difficult material, unresolved questions, upcoming work,
    and recommended next actions.
-8. Add office documents, EPUB, spreadsheets, web capture, audio, video, and YouTube adapters in
+7. Add office documents, EPUB, spreadsheets, web capture, audio, video, and YouTube adapters in
    verified stages.
-9. Add side-by-side Source comparison, Evidence drag-out, backlinks, and reviewed Concept links.
-10. Evaluate optional local semantic search after daily use shows a retrieval gap.
+8. Add side-by-side Source comparison, Evidence drag-out, backlinks, and reviewed Concept links.
+9. Evaluate optional local semantic search after daily use shows a retrieval gap.
 
 Opening the app will not by itself send notebook content for processing. Review scheduling and the
 base daily queue will run on the iPad without paid processing.

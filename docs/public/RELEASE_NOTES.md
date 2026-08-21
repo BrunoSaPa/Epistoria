@@ -1,5 +1,13 @@
 # Release notes
 
+## Learning record lifecycle update
+
+- Added Manage Learning for goals, unresolved questions, decks, cards, Concepts, and tests.
+- Added card revisions, suspension, archive, restore, and deck assignment without erasing review
+  history.
+- Added Source title, Topic, related Topic, List, archive, and restore controls.
+- Added List rename, move, archive, and restore controls with backward-compatible encrypted data.
+
 ## Personal beta candidate
 
 Release date: Not published.

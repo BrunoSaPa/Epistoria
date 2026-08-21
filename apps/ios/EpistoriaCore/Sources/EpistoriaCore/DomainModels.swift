@@ -301,17 +301,53 @@ public protocol EntityPayload: Codable, Sendable {
 
 public struct CollectionPayload: EntityPayload, Equatable {
     public static let entityType = EntityType.collection
-    public var schemaVersion = "collection/v1"
+    public var schemaVersion: String
     public var name: String
     public var parentCollectionId: UUID?
+    public var archivedAt: Date?
     public var createdAt: Date
     public var updatedAt: Date
 
     public init(name: String, parentCollectionId: UUID? = nil, now: Date = .now) {
+        schemaVersion = "collection/v2"
         self.name = name
         self.parentCollectionId = parentCollectionId
+        archivedAt = nil
         createdAt = now
         updatedAt = now
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case schemaVersion, name, parentCollectionId, archivedAt, createdAt, updatedAt
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        let version = try values.decodeIfPresent(String.self, forKey: .schemaVersion)
+            ?? "collection/v1"
+        guard version == "collection/v1" || version == "collection/v2" else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .schemaVersion,
+                in: values,
+                debugDescription: "Unsupported List schema \(version)"
+            )
+        }
+        schemaVersion = version
+        name = try values.decode(String.self, forKey: .name)
+        parentCollectionId = try values.decodeIfPresent(UUID.self, forKey: .parentCollectionId)
+        archivedAt = try values.decodeIfPresent(Date.self, forKey: .archivedAt)
+        createdAt = try values.decode(Date.self, forKey: .createdAt)
+        updatedAt = try values.decode(Date.self, forKey: .updatedAt)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode("collection/v2", forKey: .schemaVersion)
+        try values.encode(name, forKey: .name)
+        try values.encodeIfPresent(parentCollectionId, forKey: .parentCollectionId)
+        try values.encodeIfPresent(archivedAt, forKey: .archivedAt)
+        try values.encode(createdAt, forKey: .createdAt)
+        try values.encode(updatedAt, forKey: .updatedAt)
     }
 }
 

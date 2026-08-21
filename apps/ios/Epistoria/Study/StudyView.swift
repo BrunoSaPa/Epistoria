@@ -49,6 +49,15 @@ struct StudyView: View {
             }
             .navigationTitle("Study")
             .epistoriaPageBackground()
+            .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    NavigationLink {
+                        LearningManagementView(model: model)
+                    } label: {
+                        Label("Manage learning records", systemImage: "slider.horizontal.3")
+                    }
+                }
+            }
             .task { await load() }
             .refreshable { await load() }
             .alert("Study error", isPresented: .constant(errorMessage != nil)) {
@@ -346,6 +355,8 @@ struct NewFlashcardView: View {
     @State private var kind = FlashcardKind.basic
     @State private var prompt = ""
     @State private var answer = ""
+    @State private var decks: [IdentifiedPayload<FlashcardDeckPayload>] = []
+    @State private var deckId: UUID?
     @State private var errorMessage: String?
 
     var body: some View {
@@ -354,11 +365,18 @@ struct NewFlashcardView: View {
                 Picker("Card type", selection: $kind) {
                     ForEach(FlashcardKind.allCases, id: \.self) { Text($0.displayName).tag($0) }
                 }
+                Picker("Deck", selection: $deckId) {
+                    Text("No deck").tag(UUID?.none)
+                    ForEach(decks, id: \.id) { deck in
+                        Text(deck.payload.name).tag(Optional(deck.id))
+                    }
+                }
                 TextField("Prompt", text: $prompt, axis: .vertical)
                 TextField("Answer", text: $answer, axis: .vertical)
                 if let errorMessage { Text(errorMessage).foregroundStyle(.red) }
             }
             .navigationTitle("New flashcard")
+            .task { await loadDecks() }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
@@ -372,10 +390,25 @@ struct NewFlashcardView: View {
     private func create() async {
         guard let store = model.store else { return }
         do {
-            _ = try await store.createFlashcard(topicId: topicId, kind: kind, prompt: prompt.trimmed, answer: answer.trimmed)
+            _ = try await store.createFlashcard(
+                topicId: topicId,
+                deckId: deckId,
+                kind: kind,
+                prompt: prompt.trimmed,
+                answer: answer.trimmed
+            )
             model.noteLocalMutation()
             onCreated()
             dismiss()
+        } catch { errorMessage = error.localizedDescription }
+    }
+
+    private func loadDecks() async {
+        guard let store = model.store else { return }
+        do {
+            decks = try await store.list(FlashcardDeckPayload.self)
+                .filter { $0.payload.topicId == topicId && $0.payload.archivedAt == nil }
+                .sorted { $0.payload.name < $1.payload.name }
         } catch { errorMessage = error.localizedDescription }
     }
 }
