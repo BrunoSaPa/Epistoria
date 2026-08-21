@@ -138,6 +138,17 @@ Topic Studio uses the current Topic by default. Turn on **Include connected know
 the request should also use Topics connected through the same Areas. Review the excerpt and token
 estimate before approving a paid request.
 
+When generated cards, questions, or Concepts return:
+
+1. Review every item and its citation count.
+2. Clear an item to exclude it, or select **Edit** to change its prompt, answer, rubric,
+   objectives, or description.
+3. Keep citations fixed during review. Exclude an item when its evidence does not support it.
+4. Select **Accept selected**. Only selected items become cards, test questions, or Concepts.
+
+The original generated response remains available for provenance. The reviewed selection is
+encrypted and remains available after relaunch. Acceptance cannot be repeated to create duplicates.
+
 ## Use Study
 
 Study contains Study Next, Sessions, Flashcards, Tests, and History.

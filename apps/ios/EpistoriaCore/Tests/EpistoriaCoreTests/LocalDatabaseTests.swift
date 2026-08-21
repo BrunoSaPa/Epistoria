@@ -951,6 +951,157 @@ final class LocalDatabaseTests: XCTestCase {
         XCTAssertEqual(test.payload.title, "Grouping review")
         XCTAssertEqual(test.payload.state, .archived)
     }
+
+    func testReviewedLearningDraftAcceptsOnlySelectedEditedItems() async throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let database = try SQLCipherDatabase(
+            url: directory.appendingPathComponent("draft-review.sqlite"),
+            key: Data(repeating: 49, count: 32)
+        )
+        let store = EpistoriaStore(database: database)
+        let topicId = try await store.createTopic(name: "Algebra")
+        let sourceId = UUID()
+
+        func artifact(
+            type: LearningAIJobType,
+            summary: String,
+            items: [LearningDraftItem]
+        ) -> LearningGenerationArtifact {
+            LearningGenerationArtifact(
+                jobId: UUID(),
+                jobType: type,
+                topicId: topicId,
+                includeConnectedKnowledge: false,
+                generatedAt: .now,
+                sourceIds: [sourceId],
+                trace: ProviderTrace(
+                    provider: "deterministic-test",
+                    model: "fixture-v1",
+                    promptVersion: "learning-generation/v1"
+                ),
+                response: LearningGenerationResponse(summary: summary, items: items)
+            )
+        }
+
+        let keptCard = LearningDraftItem(
+            kind: "BASIC",
+            title: "Original card",
+            body: "Explanation",
+            answer: "Original answer",
+            citedSourceIds: [sourceId]
+        )
+        let excludedCard = LearningDraftItem(
+            kind: "BASIC",
+            title: "Excluded card",
+            body: "Unused",
+            answer: "Excluded answer",
+            citedSourceIds: [sourceId]
+        )
+        let cardArtifactId = try await store.save(
+            payload: artifact(type: .flashcardDrafts, summary: "Two cards", items: [keptCard, excludedCard]),
+            parentId: topicId,
+            relationIds: [topicId, sourceId]
+        )
+        var editedCard = keptCard
+        editedCard.title = "Reviewed card"
+        editedCard.answer = "Reviewed answer"
+        var unknownCard = editedCard
+        unknownCard.id = UUID()
+        await XCTAssertThrowsErrorAsync(
+            try await store.saveLearningArtifactDraftReview(
+                id: cardArtifactId,
+                summary: "Invalid selection",
+                selectedItems: [unknownCard]
+            )
+        ) { error in
+            XCTAssertEqual(error as? StoreError, .invalidDraftReview)
+        }
+        try await store.saveLearningArtifactDraftReview(
+            id: cardArtifactId,
+            summary: "One selected card",
+            selectedItems: [editedCard]
+        )
+        let cardResult = try await store.acceptLearningArtifact(id: cardArtifactId)
+        let cards = try await store.list(FlashcardPayload.self)
+        let revisions = try await store.list(FlashcardRevisionPayload.self)
+        let savedCardArtifact = try await store.payload(LearningGenerationArtifact.self, id: cardArtifactId)
+        XCTAssertEqual(cardResult.flashcards, 1)
+        XCTAssertEqual(cards.count, 1)
+        XCTAssertEqual(revisions.first?.payload.prompt, "Reviewed card")
+        XCTAssertEqual(revisions.first?.payload.answer, "Reviewed answer")
+        XCTAssertEqual(savedCardArtifact.payload.response.items.count, 2)
+        XCTAssertEqual(savedCardArtifact.payload.editedResponse?.items.map(\.id), [keptCard.id])
+
+        let keptConcept = LearningDraftItem(
+            kind: "CONCEPT",
+            title: "Reviewed Concept",
+            body: "Accepted definition",
+            citedSourceIds: [sourceId]
+        )
+        let conceptArtifactId = try await store.save(
+            payload: artifact(
+                type: .conceptSuggestions,
+                summary: "Concepts",
+                items: [keptConcept, LearningDraftItem(
+                    kind: "CONCEPT",
+                    title: "Excluded Concept",
+                    body: "Unused",
+                    citedSourceIds: [sourceId]
+                )]
+            ),
+            parentId: topicId,
+            relationIds: [topicId, sourceId]
+        )
+        try await store.saveLearningArtifactDraftReview(
+            id: conceptArtifactId,
+            summary: "One Concept",
+            selectedItems: [keptConcept]
+        )
+        let conceptResult = try await store.acceptLearningArtifact(id: conceptArtifactId)
+        let concepts = try await store.list(ConceptPayload.self)
+        XCTAssertEqual(conceptResult.concepts, 1)
+        XCTAssertEqual(concepts.map(\.payload.name), ["Reviewed Concept"])
+
+        var keptQuestion = LearningDraftItem(
+            kind: "EXPLANATION",
+            title: "Original question",
+            body: "Explain each step.",
+            answer: "Original key",
+            objectiveTitles: ["Difference of squares"],
+            citedSourceIds: [sourceId]
+        )
+        let testArtifactId = try await store.save(
+            payload: artifact(
+                type: .testGeneration,
+                summary: "Generated test",
+                items: [keptQuestion, LearningDraftItem(
+                    kind: "SHORT_ANSWER",
+                    title: "Excluded question",
+                    body: "Unused rubric",
+                    answer: "Unused key",
+                    citedSourceIds: [sourceId]
+                )]
+            ),
+            parentId: topicId,
+            relationIds: [topicId, sourceId]
+        )
+        keptQuestion.title = "Reviewed question"
+        keptQuestion.answer = "Reviewed key"
+        try await store.saveLearningArtifactDraftReview(
+            id: testArtifactId,
+            summary: "Reviewed test",
+            selectedItems: [keptQuestion]
+        )
+        let testResult = try await store.acceptLearningArtifact(id: testArtifactId)
+        let tests = try await store.list(PracticeTestPayload.self)
+        let questions = try await store.list(TestQuestionPayload.self)
+        XCTAssertEqual(testResult.tests, 1)
+        XCTAssertEqual(tests.count, 1)
+        XCTAssertEqual(tests.first?.payload.title, "Reviewed test")
+        XCTAssertEqual(questions.map(\.payload.prompt), ["Reviewed question"])
+        XCTAssertEqual(questions.map(\.payload.correctAnswer), ["Reviewed key"])
+    }
 }
 
 private func XCTAssertThrowsErrorAsync<T>(

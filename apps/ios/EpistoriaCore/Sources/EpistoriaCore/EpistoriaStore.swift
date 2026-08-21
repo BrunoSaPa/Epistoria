@@ -19,6 +19,8 @@ public enum StoreError: Error, Equatable {
     case entityTypeMismatch
     case activeSessionExists
     case sessionTopicRequired
+    case artifactAlreadyAccepted
+    case invalidDraftReview
 }
 
 public struct AcceptedLearningRecords: Equatable, Sendable {
@@ -44,6 +46,10 @@ extension StoreError: LocalizedError {
             "Pause or end the active study session before starting another one."
         case .sessionTopicRequired:
             "Choose a Topic for this study session."
+        case .artifactAlreadyAccepted:
+            "This draft was already accepted and cannot be changed."
+        case .invalidDraftReview:
+            "The reviewed draft contains an invalid or unknown item. Reload the original draft and try again."
         }
     }
 }
@@ -885,7 +891,7 @@ public actor EpistoriaStore {
               var artifact = try? CanonicalJSON.decode(LearningGenerationArtifact.self, from: stored.content)
         else { throw StoreError.entityTypeMismatch }
         if artifact.reviewState == .accepted { return AcceptedLearningRecords() }
-        let response = artifact.editedResponse ?? artifact.response
+        let response = try validatedLearningResponse(for: artifact)
         artifact.reviewState = .accepted
         artifact.reviewedAt = date
         var writes: [LocalEntityWrite] = []
@@ -1036,6 +1042,60 @@ public actor EpistoriaStore {
         ))
         try await database.saveLocalBatch(writes)
         return result
+    }
+
+    /// Persists a reviewed working copy inside the encrypted artifact. The provider response
+    /// remains immutable in `response`; omission from `editedResponse.items` means excluded.
+    /// Stable item IDs allow excluded items to be restored from the original after relaunch.
+    public func saveLearningArtifactDraftReview(
+        id artifactId: UUID,
+        summary: String,
+        selectedItems: [LearningDraftItem],
+        at date: Date = .now
+    ) async throws {
+        var artifact = try await payload(LearningGenerationArtifact.self, id: artifactId)
+        guard artifact.payload.reviewState != .accepted else {
+            throw StoreError.artifactAlreadyAccepted
+        }
+        var candidate = artifact.payload.response
+        candidate.summary = summary.trimmingCharacters(in: .whitespacesAndNewlines)
+        candidate.items = selectedItems
+        artifact.payload.editedResponse = candidate
+        artifact.payload.reviewState = .edited
+        artifact.payload.reviewedAt = date
+        _ = try validatedLearningResponse(for: artifact.payload)
+        _ = try await save(
+            id: artifactId,
+            payload: artifact.payload,
+            parentId: artifact.payload.topicId,
+            relationIds: [artifact.payload.topicId] + artifact.payload.sourceIds
+        )
+    }
+
+    private func validatedLearningResponse(
+        for artifact: LearningGenerationArtifact
+    ) throws -> LearningGenerationResponse {
+        let response = artifact.editedResponse ?? artifact.response
+        let originalIds = Set(artifact.response.items.map(\.id))
+        let selectedIds = response.items.map(\.id)
+        guard Set(selectedIds).count == selectedIds.count,
+              selectedIds.allSatisfy(originalIds.contains),
+              response.items.allSatisfy({ item in
+                  let title = item.title.trimmingCharacters(in: .whitespacesAndNewlines)
+                  guard !title.isEmpty, Set(item.citedSourceIds).isSubset(of: Set(artifact.sourceIds)) else {
+                      return false
+                  }
+                  switch artifact.jobType {
+                  case .flashcardDrafts, .testGeneration:
+                      return item.answer?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+                  case .conceptSuggestions:
+                      return true
+                  default:
+                      return true
+                  }
+              })
+        else { throw StoreError.invalidDraftReview }
+        return response
     }
 
     @discardableResult

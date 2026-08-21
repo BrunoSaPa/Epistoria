@@ -13,6 +13,10 @@ struct TopicStudioView: View {
     @State private var prepared: PreparedLearningGenerationRequest?
     @State private var submittedJob: AIJobSummary?
     @State private var artifact: IdentifiedPayload<LearningGenerationArtifact>?
+    @State private var selectedItemIds: Set<UUID> = []
+    @State private var reviewedItems: [UUID: LearningDraftItem] = [:]
+    @State private var reviewedSummary = ""
+    @State private var editingItem: LearningDraftItem?
     @State private var isWorking = false
     @State private var acceptanceMessage: String?
     @State private var errorMessage: String?
@@ -73,32 +77,107 @@ struct TopicStudioView: View {
 
                 if let artifact {
                     Section("Latest draft") {
-                        Text(artifact.payload.response.summary)
-                        ForEach(artifact.payload.response.items) { item in
-                            VStack(alignment: .leading, spacing: 5) {
-                                Text(item.title).font(.headline)
-                                Text(item.body)
-                                if let answer = item.answer, !answer.isEmpty {
-                                    Text(answer).font(.subheadline).foregroundStyle(.secondary)
+                        if supportsItemReview {
+                            if artifact.payload.reviewState != .accepted {
+                                TextField("Draft title", text: $reviewedSummary, axis: .vertical)
+                                    .onSubmit { Task { await persistDraftReview() } }
+                                HStack {
+                                    Button("Select all") { Task { await selectAll() } }
+                                    Button("Clear") { Task { await clearSelection() } }
+                                    Spacer()
+                                    Text("\(selectedItemIds.count) of \(artifact.payload.response.items.count) selected")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
                                 }
-                                Text("\(item.citedSourceIds.count) cited item\(item.citedSourceIds.count == 1 ? "" : "s")")
+                            } else {
+                                Text((artifact.payload.editedResponse ?? artifact.payload.response).summary)
+                            }
+
+                            ForEach(artifact.payload.response.items) { original in
+                                let item = reviewedItems[original.id] ?? original
+                                HStack(alignment: .top, spacing: 12) {
+                                    if artifact.payload.reviewState != .accepted {
+                                        Toggle(
+                                            "Include \(item.title)",
+                                            isOn: selectionBinding(for: original.id)
+                                        )
+                                        .labelsHidden()
+                                        .disabled(isWorking)
+                                    } else {
+                                        Image(systemName: selectedItemIds.contains(original.id)
+                                              ? "checkmark.circle.fill" : "minus.circle")
+                                            .foregroundStyle(selectedItemIds.contains(original.id) ? EpistoriaDesign.ink : .secondary)
+                                    }
+                                    VStack(alignment: .leading, spacing: 5) {
+                                        Text(item.title).font(.headline)
+                                        Text(item.body)
+                                        if let answer = item.answer, !answer.isEmpty {
+                                            Text(answer).font(.subheadline).foregroundStyle(.secondary)
+                                        }
+                                        if !item.objectiveTitles.isEmpty {
+                                            Text(item.objectiveTitles.joined(separator: " · "))
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                        }
+                                        Label(
+                                            "\(item.citedSourceIds.count) citation\(item.citedSourceIds.count == 1 ? "" : "s")",
+                                            systemImage: "link"
+                                        )
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                    }
+                                    Spacer()
+                                    if artifact.payload.reviewState != .accepted {
+                                        Button("Edit", systemImage: "pencil") {
+                                            editingItem = item
+                                        }
+                                        .labelStyle(.iconOnly)
+                                        .accessibilityLabel("Edit \(item.title)")
+                                        .disabled(isWorking)
+                                    }
+                                }
+                                .padding(.vertical, 5)
+                                .opacity(selectedItemIds.contains(original.id) ? 1 : 0.5)
+                            }
+
+                            if !artifact.payload.response.coverageGaps.isEmpty {
+                                LabeledContent(
+                                    "Coverage gaps",
+                                    value: artifact.payload.response.coverageGaps.joined(separator: ", ")
+                                )
+                            }
+
+                            if artifact.payload.reviewState != .accepted {
+                                HStack {
+                                    Button("Accept selected", systemImage: "checkmark.circle") {
+                                        Task { await acceptSelected() }
+                                    }
+                                    .disabled(selectedItemIds.isEmpty || isWorking)
+                                    Button("Reject all", systemImage: "xmark.circle", role: .destructive) {
+                                        Task { await review(.rejected) }
+                                    }
+                                }
+                                Text("Only selected items become durable records. The original generated draft remains unchanged for provenance.")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
+                            } else {
+                                Label("Accepted", systemImage: "checkmark.circle.fill")
                             }
-                            .padding(.vertical, 4)
-                        }
-                        if !artifact.payload.response.coverageGaps.isEmpty {
-                            LabeledContent(
-                                "Coverage gaps",
-                                value: artifact.payload.response.coverageGaps.joined(separator: ", ")
-                            )
-                        }
-                        HStack {
-                            Button("Accept draft", systemImage: "checkmark.circle") {
-                                Task { await review(.accepted) }
+                        } else {
+                            Text(artifact.payload.response.summary)
+                            ForEach(artifact.payload.response.items) { item in
+                                VStack(alignment: .leading, spacing: 5) {
+                                    Text(item.title).font(.headline)
+                                    Text(item.body)
+                                }
                             }
-                            Button("Reject", systemImage: "xmark.circle", role: .destructive) {
-                                Task { await review(.rejected) }
+                            HStack {
+                                Button("Accept draft", systemImage: "checkmark.circle") {
+                                    Task { await review(.accepted) }
+                                }
+                                Button("Reject", systemImage: "xmark.circle", role: .destructive) {
+                                    Task { await review(.rejected) }
+                                }
                             }
                         }
                         if let acceptanceMessage {
@@ -121,6 +200,17 @@ struct TopicStudioView: View {
                 }
             }
             .task { await loadArtifact() }
+            .sheet(item: $editingItem) { item in
+                LearningDraftItemEditor(
+                    item: item,
+                    jobType: artifact?.payload.jobType ?? jobType
+                ) { edited in
+                    reviewedItems[edited.id] = edited
+                    selectedItemIds.insert(edited.id)
+                    editingItem = nil
+                    Task { await persistDraftReview() }
+                }
+            }
             .onChange(of: jobType) {
                 prepared = nil
                 submittedJob = nil
@@ -167,7 +257,85 @@ struct TopicStudioView: View {
     private func loadArtifact() async {
         do {
             artifact = try await model.aiJobs?.latestTopicGeneration(topicId: topicId, jobType: jobType)
+            configureDraftReview()
         } catch { errorMessage = error.localizedDescription }
+    }
+
+    private var supportsItemReview: Bool {
+        guard let type = artifact?.payload.jobType else { return false }
+        return type == .flashcardDrafts || type == .testGeneration || type == .conceptSuggestions
+    }
+
+    private var selectedItems: [LearningDraftItem] {
+        guard let artifact else { return [] }
+        return artifact.payload.response.items.compactMap { original in
+            guard selectedItemIds.contains(original.id) else { return nil }
+            return reviewedItems[original.id] ?? original
+        }
+    }
+
+    private func configureDraftReview() {
+        guard let artifact else {
+            selectedItemIds = []
+            reviewedItems = [:]
+            reviewedSummary = ""
+            return
+        }
+        let reviewed = artifact.payload.editedResponse
+        let items = reviewed?.items ?? artifact.payload.response.items
+        selectedItemIds = Set(items.map(\.id))
+        reviewedItems = Dictionary(uniqueKeysWithValues: items.map { ($0.id, $0) })
+        reviewedSummary = reviewed?.summary ?? artifact.payload.response.summary
+    }
+
+    private func selectionBinding(for id: UUID) -> Binding<Bool> {
+        Binding(
+            get: { selectedItemIds.contains(id) },
+            set: { included in
+                if included { selectedItemIds.insert(id) }
+                else { selectedItemIds.remove(id) }
+                Task { await persistDraftReview() }
+            }
+        )
+    }
+
+    private func selectAll() async {
+        guard let artifact else { return }
+        selectedItemIds = Set(artifact.payload.response.items.map(\.id))
+        for item in artifact.payload.response.items where reviewedItems[item.id] == nil {
+            reviewedItems[item.id] = item
+        }
+        await persistDraftReview()
+    }
+
+    private func clearSelection() async {
+        selectedItemIds = []
+        await persistDraftReview()
+    }
+
+    private func persistDraftReview() async {
+        guard let store = model.store, let artifact, artifact.payload.reviewState != .accepted else { return }
+        isWorking = true
+        defer { isWorking = false }
+        do {
+            try await store.saveLearningArtifactDraftReview(
+                id: artifact.id,
+                summary: reviewedSummary,
+                selectedItems: selectedItems
+            )
+            model.noteLocalMutation()
+            errorMessage = nil
+            await loadArtifact()
+        } catch {
+            errorMessage = error.localizedDescription
+            await loadArtifact()
+        }
+    }
+
+    private func acceptSelected() async {
+        await persistDraftReview()
+        guard errorMessage == nil else { return }
+        await review(.accepted)
     }
 
     private func review(_ state: AIArtifactReviewState) async {
@@ -200,6 +368,134 @@ struct TopicStudioView: View {
     }
 }
 
+private struct LearningDraftItemEditor: View {
+    @Environment(\.dismiss) private var dismiss
+    let item: LearningDraftItem
+    let jobType: LearningAIJobType
+    let onSave: (LearningDraftItem) -> Void
+
+    @State private var kind: String
+    @State private var title: String
+    @State private var bodyText: String
+    @State private var answer: String
+    @State private var choices: String
+    @State private var objectives: String
+
+    init(
+        item: LearningDraftItem,
+        jobType: LearningAIJobType,
+        onSave: @escaping (LearningDraftItem) -> Void
+    ) {
+        self.item = item
+        self.jobType = jobType
+        self.onSave = onSave
+        _kind = State(initialValue: item.kind)
+        _title = State(initialValue: item.title)
+        _bodyText = State(initialValue: item.body)
+        _answer = State(initialValue: item.answer ?? "")
+        _choices = State(initialValue: item.choices.joined(separator: "\n"))
+        _objectives = State(initialValue: item.objectiveTitles.joined(separator: "\n"))
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section(itemLabel) {
+                    Picker("Type", selection: $kind) {
+                        ForEach(availableKinds, id: \.self) { value in
+                            Text(value.replacingOccurrences(of: "_", with: " ").capitalized)
+                                .tag(value)
+                        }
+                    }
+                    TextField(titleLabel, text: $title, axis: .vertical)
+                    TextField(bodyLabel, text: $bodyText, axis: .vertical)
+                    if requiresAnswer {
+                        TextField("Answer or answer key", text: $answer, axis: .vertical)
+                    }
+                }
+                if jobType == .testGeneration {
+                    Section("Test details") {
+                        TextField("Choices, one per line", text: $choices, axis: .vertical)
+                        TextField("Objectives, one per line", text: $objectives, axis: .vertical)
+                    }
+                }
+                Section("Evidence") {
+                    Label(
+                        "\(item.citedSourceIds.count) source citation\(item.citedSourceIds.count == 1 ? "" : "s") retained",
+                        systemImage: "link"
+                    )
+                    Text("Citations are fixed during this review. Remove the item if its evidence does not support it.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .navigationTitle("Edit Draft Item")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") { save() }
+                        .disabled(title.trimmed.isEmpty || (requiresAnswer && answer.trimmed.isEmpty))
+                }
+            }
+        }
+    }
+
+    private var itemLabel: String {
+        switch jobType {
+        case .flashcardDrafts: "Flashcard"
+        case .testGeneration: "Question"
+        case .conceptSuggestions: "Concept"
+        default: "Item"
+        }
+    }
+
+    private var titleLabel: String {
+        switch jobType {
+        case .flashcardDrafts: "Prompt"
+        case .testGeneration: "Question"
+        case .conceptSuggestions: "Concept name"
+        default: "Title"
+        }
+    }
+
+    private var bodyLabel: String {
+        switch jobType {
+        case .testGeneration: "Rubric or grading guide"
+        case .conceptSuggestions: "Description"
+        default: "Explanation"
+        }
+    }
+
+    private var requiresAnswer: Bool {
+        jobType == .flashcardDrafts || jobType == .testGeneration
+    }
+
+    private var availableKinds: [String] {
+        switch jobType {
+        case .flashcardDrafts:
+            FlashcardKind.allCases.map(\.rawValue)
+        case .testGeneration:
+            TestQuestionKind.allCases.map(\.rawValue)
+        case .conceptSuggestions:
+            ["CONCEPT"]
+        default:
+            [item.kind]
+        }
+    }
+
+    private func save() {
+        var edited = item
+        edited.kind = kind
+        edited.title = title.trimmed
+        edited.body = bodyText.trimmed
+        edited.answer = requiresAnswer ? answer.trimmed : nil
+        edited.choices = choices.lines
+        edited.objectiveTitles = objectives.lines
+        onSave(edited)
+        dismiss()
+    }
+}
+
 private extension LearningAIJobType {
     var displayName: String {
         switch self {
@@ -226,4 +522,8 @@ private extension LearningAIJobType {
 
 private extension String {
     var nilIfEmpty: String? { isEmpty ? nil : self }
+    var trimmed: String { trimmingCharacters(in: .whitespacesAndNewlines) }
+    var lines: [String] {
+        split(whereSeparator: \.isNewline).map(String.init).map(\.trimmed).filter { !$0.isEmpty }
+    }
 }

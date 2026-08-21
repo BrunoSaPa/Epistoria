@@ -43,24 +43,25 @@ Completed:
    completed, resolved, suspended, archived, restored, or reorganized as appropriate. Card edits
    create revisions. Archived tests keep their attempts. Legacy Lists upgrade with a recovery
    backup when first edited.
+2. Generated flashcards, test questions, and Concepts can be reviewed item by item. Items can be
+   edited, included, or excluded before acceptance. Only selected items become durable records.
+   The original generated response remains unchanged for provenance.
 
 Next stages:
 
-1. Add item-by-item edit, selection, and exclusion before converting accepted AI card, test, or
-   Concept drafts into first-class records.
-2. Add Quick Check and Custom creation interfaces. Comprehensive tests will show the
+1. Add Quick Check and Custom creation interfaces. Comprehensive tests will show the
    detected topics before generation, cover every supported topic, use broader questions when
    appropriate, and report missing material or time limits instead of silently omitting content.
-3. Add direct start destinations and response history to every Study Next item.
-4. Add optional feedback for written answers. Show the grading guide and allow a score override.
-5. Add a proactive mode for selected material. The user will choose the allowed material, tasks,
+2. Add direct start destinations and response history to every Study Next item.
+3. Add optional feedback for written answers. Show the grading guide and allow a score override.
+4. Add a proactive mode for selected material. The user will choose the allowed material, tasks,
    frequency, expiration, and spending limit, and can pause it at any time.
-6. Add a weekly review for recent study, difficult material, unresolved questions, upcoming work,
+5. Add a weekly review for recent study, difficult material, unresolved questions, upcoming work,
    and recommended next actions.
-7. Add office documents, EPUB, spreadsheets, web capture, audio, video, and YouTube adapters in
+6. Add office documents, EPUB, spreadsheets, web capture, audio, video, and YouTube adapters in
    verified stages.
-8. Add side-by-side Source comparison, Evidence drag-out, backlinks, and reviewed Concept links.
-9. Evaluate optional local semantic search after daily use shows a retrieval gap.
+7. Add side-by-side Source comparison, Evidence drag-out, backlinks, and reviewed Concept links.
+8. Evaluate optional local semantic search after daily use shows a retrieval gap.
 
 Opening the app will not by itself send notebook content for processing. Review scheduling and the
 base daily queue will run on the iPad without paid processing.

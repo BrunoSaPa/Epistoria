@@ -1,5 +1,14 @@
 # Release notes
 
+## Item-level AI draft review
+
+- Added item-by-item selection and exclusion for generated cards, test questions, and Concepts.
+- Added editing for prompts, answers, rubrics, objectives, choices, names, and descriptions before
+  acceptance.
+- Preserved the original provider response while storing the reviewed working copy as encrypted
+  artifact data.
+- Materialized only selected items and retained idempotent acceptance.
+
 ## Learning record lifecycle update
 
 - Added Manage Learning for goals, unresolved questions, decks, cards, Concepts, and tests.

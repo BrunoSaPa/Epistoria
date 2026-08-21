@@ -102,8 +102,10 @@ This feature requires a paired Mac and a configured AI provider. It is optional.
 - Pin, snooze, dismiss, or mark a Study Next recommendation as irrelevant.
 - Use Topic Studio to review the exact Topic scope before requesting cited synthesis, flashcard
   drafts, test work, Concept suggestions, or a weekly review.
-- Accept a flashcard, test, or Concept draft to create first-class encrypted learning records in
-  one transaction while retaining the cited generation record.
+- Review generated flashcards, test questions, and Concepts one item at a time. Edit their
+  content, include supported items, and exclude unsupported items before acceptance.
+- Accept selected items to create first-class encrypted learning records in one transaction while
+  retaining the unchanged provider response and reviewed working copy.
 - Keep the current Topic as the default AI scope. Include connected Topics only when selected.
 
 ## Offline use and synchronization
