@@ -67,8 +67,9 @@ address and model in **Settings → AI Providers**. The address is reached from 
 a loopback address refers to the Mac. Local model quality and supported features vary. Confirm
 text, vision, and transcription support before enabling them.
 
-Provider-specific connection formats that do not provide the compatible interface are not yet
-supported directly.
+Epistoria also supports native Anthropic and Google Gemini connections for text and optional
+image input. Their native connections do not currently provide Epistoria's timestamped media
+transcription output.
 
 ## Can Epistoria create flashcards and practice tests?
 

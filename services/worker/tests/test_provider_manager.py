@@ -125,6 +125,67 @@ def test_safe_provider_url_accepts_local_http_and_remote_https(url: str, expecte
 
 
 @pytest.mark.parametrize(
+    ("adapter", "endpoint"),
+    [
+        ("OPENAI_RESPONSES", "https://api.openai.com/v1"),
+        ("ANTHROPIC_MESSAGES", "https://api.anthropic.com/v1"),
+        ("GEMINI_GENERATE_CONTENT", "https://generativelanguage.googleapis.com/v1beta"),
+    ],
+)
+def test_hosted_native_adapters_use_fixed_https_endpoints(adapter: str, endpoint: str) -> None:
+    assert safe_provider_base_url(None, adapter=adapter) == endpoint
+    with pytest.raises(ProviderConfigurationError):
+        safe_provider_base_url("https://proxy.example.test/v1", adapter=adapter)
+
+
+@pytest.mark.parametrize("adapter", ["ANTHROPIC_MESSAGES", "GEMINI_GENERATE_CONTENT"])
+def test_native_adapter_requires_key_and_rejects_transcription(adapter: str) -> None:
+    account_id = uuid4()
+    profile_id = uuid4()
+    manager = ProviderManager(
+        account_id=account_id,
+        store=MemoryProviderProfileStore(),
+        fallback=None,
+    )
+    missing_key = request(account_id=account_id, profile_id=profile_id, api_key=None)
+    missing_key.adapter = adapter
+    missing_key.base_url = None
+    with pytest.raises(ProviderConfigurationError, match="requires an API key"):
+        manager.apply_configuration(missing_key)
+
+    transcription = request(account_id=account_id, profile_id=profile_id)
+    transcription.adapter = adapter
+    transcription.base_url = None
+    transcription.capabilities = ["TEXT", "TRANSCRIPTION"]
+    transcription.transcription_model = "timestamp-model"
+    with pytest.raises(ProviderConfigurationError, match="timestamped transcription"):
+        manager.apply_configuration(transcription)
+
+
+@pytest.mark.parametrize("adapter", ["ANTHROPIC_MESSAGES", "GEMINI_GENERATE_CONTENT"])
+def test_native_adapter_configuration_is_stored_without_secret_artifact(adapter: str) -> None:
+    account_id = uuid4()
+    profile_id = uuid4()
+    store = MemoryProviderProfileStore()
+    manager = ProviderManager(account_id=account_id, store=store, fallback=None)
+    native = request(account_id=account_id, profile_id=profile_id)
+    native.adapter = adapter
+    native.base_url = None
+    native.display_name = "Native provider"
+    native.text_model = "native-model"
+    native.capabilities = ["TEXT", "VISION"]
+
+    artifact = manager.apply_configuration(native)
+
+    assert artifact.adapter == adapter
+    assert artifact.secret_stored is True
+    assert "secret-value" not in artifact.model_dump_json()
+    stored = store.get(account_id, profile_id)
+    assert stored is not None
+    assert stored.base_url.startswith("https://")
+
+
+@pytest.mark.parametrize(
     "url",
     [
         "http://ai.example.com/v1",

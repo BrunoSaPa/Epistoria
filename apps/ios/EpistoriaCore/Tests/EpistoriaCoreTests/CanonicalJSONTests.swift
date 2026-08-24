@@ -196,6 +196,31 @@ final class CanonicalJSONTests: XCTestCase {
         )
     }
 
+    func testNativeProviderAdaptersDecodeFromEncryptedContracts() throws {
+        for adapter in [AIProviderAdapter.anthropicMessages, .geminiGenerateContent] {
+            let route = AIProviderRouteSnapshot(
+                profileId: UUID(),
+                configurationRevisionId: UUID(),
+                displayName: "Native provider",
+                adapter: adapter,
+                baseURL: adapter == .anthropicMessages
+                    ? "https://api.anthropic.com/v1"
+                    : "https://generativelanguage.googleapis.com/v1beta",
+                textModel: "synthetic-model",
+                transcriptionModel: nil,
+                capabilities: [.text, .vision],
+                structuredOutput: true
+            )
+
+            let data = try CanonicalJSON.encode(route)
+
+            XCTAssertEqual(
+                try CanonicalJSON.decode(AIProviderRouteSnapshot.self, from: data),
+                route
+            )
+        }
+    }
+
     func testSourceAnalysisArtifactPreservesExactPDFCitation() throws {
         let referenceId = UUID()
         let statement = SourceGuideStatement(

@@ -450,8 +450,9 @@ The trusted Mac must be paired and running before a provider change can finish.
 
 1. Open **Settings → AI Providers**.
 2. Select **Add provider**.
-3. Choose the official option or a compatible local or hosted service.
-4. Enter the service address and exact model name when requested.
+3. Choose the official Responses service, Anthropic, Google Gemini, or a compatible local or
+   hosted service.
+4. Enter the exact model name. Enter a service address only for a compatible service.
 5. Enable only the capabilities supported by that service.
 6. Enter the provider key. A local service that does not require a key can leave it empty.
 7. Review the destination statement and select **Save**.
@@ -468,6 +469,10 @@ the new provider settings before submitting it.
 
 Changing the provider connection type clears the previous key unless a replacement is entered.
 This prevents a key for one service from being sent to another service.
+
+Anthropic and Gemini use fixed official HTTPS addresses. Their native connections support text
+and optional image input. They require structured output and cannot be selected for timestamped
+media transcription. The chosen model must support the capabilities that you enable.
 
 The provider address is reached from the trusted Mac. A loopback address refers to that Mac, not
 the iPad. Remote addresses require HTTPS. Provider keys stay in secure device storage and do not

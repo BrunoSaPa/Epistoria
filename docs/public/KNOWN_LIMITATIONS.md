@@ -62,11 +62,13 @@ Epistoria remains in personal beta. The following limits apply to the current pr
 - One provider is active for newly approved work. Each new request keeps the provider and model
   reviewed at approval. Editing or removing that connection before processing stops the request;
   it must be reviewed and submitted again.
-- Compatible local and hosted services are supported. Provider-specific connection formats that
-  do not offer the compatible interface are not connected directly.
+- The official Responses service, Anthropic, Gemini, and compatible local or hosted services are
+  supported. Other native provider protocols still require a compatible gateway.
 - Provider connections do not transfer to a fresh iPad. Enter the key again after recovery.
 - A local provider can keep approved content off a hosted service, but quality, speed, context,
   vision, transcription, and reliable structured output depend on the selected model and server.
+- Anthropic and Gemini native connections support text and optional vision only. Timestamped
+  transcription requires the official Responses or a compatible connection.
 - A live paid AI evaluation is not part of the current release evidence.
 - Source guides and exact question citations currently apply to PDFs. Other Source types do not
   yet use this source-analysis screen.

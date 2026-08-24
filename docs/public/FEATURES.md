@@ -95,7 +95,8 @@ the current personal beta.
 
 ## AI providers
 
-- Choose an official or compatible local or hosted AI provider from Settings.
+- Choose the official Responses service, Anthropic, Gemini, or a compatible local or hosted AI
+  provider from Settings.
 - Review the provider destination and model before approving generated work.
 - Keep the approved provider connection and model attached to the queued request. Changing the
   active provider later does not reroute it.
@@ -149,11 +150,13 @@ This feature requires a paired Mac and a configured AI provider. It is optional.
 ## AI provider choice
 
 - Add, edit, activate, and remove provider connections from Settings.
-- Use the official supported service or a compatible local or hosted service.
+- Use the official Responses service, Anthropic, Gemini, or a compatible local or hosted service.
 - Keep provider keys in secure device storage on the iPad and trusted Mac.
 - See the destination host and model before choosing the active provider.
 - Use unencrypted HTTP only for a local or private-network service. Remote services require HTTPS.
 - Declare vision and transcription support only when the selected service provides them.
+- Use Anthropic and Gemini native connections for text and optional vision. Timestamped media
+  transcription currently requires the official Responses or a compatible connection.
 - Keep provider connections and keys out of readable notebook exports.
 - Record the actual provider connection and model on each completed generated result.
 

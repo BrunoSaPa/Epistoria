@@ -103,6 +103,9 @@ Completed:
 19. Newly approved AI work keeps an encrypted, non-secret snapshot of the reviewed provider
     connection and model. Later activation of another provider cannot reroute queued work. An
     edited or removed connection stops older work and requires a new approval.
+20. Anthropic Messages and Google Gemini `generateContent` can be configured directly. Both use
+    fixed official HTTPS destinations, Keychain credentials, native JSON Schema output, optional
+    image input, and the same encrypted route and artifact boundaries as other providers.
 
 Next stages:
 

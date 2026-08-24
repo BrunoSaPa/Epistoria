@@ -43,7 +43,7 @@ The app also provides:
 - Explicit conflict review that preserves concurrent versions.
 - A readable ZIP export with JSON, original files, PencilKit data, and SHA-256 checksums.
 - Validated version 5 export import into an empty notebook under a new local encryption key.
-- AI provider management for the official Responses service and OpenAI-compatible local or hosted
+- AI provider management for OpenAI, Anthropic, Gemini, and OpenAI-compatible local or hosted
   endpoints, with device Keychain storage and encrypted trusted-Mac configuration.
 
 The learning system stores durable source-linked flashcards, practice tests, review history, and a
@@ -118,13 +118,12 @@ AI results are derived records. The user can accept, edit, reject, or delete the
 replace original notes, drawings, images, PDFs, annotations, or relationships. Each reviewed
 artifact records its source IDs and processing metadata.
 
-The trusted Mac has a provider interface with an official Responses adapter and a generic
-OpenAI-compatible adapter. Compatible local services include Ollama, LM Studio, vLLM, and LocalAI.
-Provider-native protocols require their own adapter. Provider keys are stored in device Keychains
-and cross the server only inside an end-to-end encrypted configuration job. The user sees a
-disclosure before an AI job is queued. Provider processing remains a separate plaintext
-disclosure from encrypted sync. See the public [privacy overview](docs/public/PRIVACY.md) for the
-user-facing processing boundaries.
+The trusted Mac has provider adapters for OpenAI Responses, Anthropic Messages, Gemini
+`generateContent`, and OpenAI-compatible services such as Ollama, LM Studio, vLLM, and LocalAI.
+Provider keys are stored in device Keychains and cross the server only inside an end-to-end
+encrypted configuration job. The user sees a disclosure before an AI job is queued. Provider
+processing remains a separate plaintext disclosure from encrypted sync. See the public
+[privacy overview](docs/public/PRIVACY.md) for the user-facing processing boundaries.
 
 ## How IBM Bob was used
 
@@ -143,10 +142,10 @@ The repository is a personal beta candidate. The following automated checks pass
 
 - `make verify`
 - Full unsigned iOS Simulator bundle build, including assets and the privacy manifest
-- 82 Swift Core tests
+- 84 Swift Core tests
 - 45 iOS app and UI tests on an iPad Simulator
 - 7 API unit tests
-- 52 worker tests
+- 75 worker tests
 
 The following release checks are still open:
 

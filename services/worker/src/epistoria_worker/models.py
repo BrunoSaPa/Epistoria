@@ -17,7 +17,12 @@ from pydantic.alias_generators import to_camel
 
 ShortText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)]
 BodyText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=12_000)]
-ProviderAdapter = Literal["OPENAI_RESPONSES", "OPENAI_COMPATIBLE"]
+ProviderAdapter = Literal[
+    "OPENAI_RESPONSES",
+    "OPENAI_COMPATIBLE",
+    "ANTHROPIC_MESSAGES",
+    "GEMINI_GENERATE_CONTENT",
+]
 ProviderCapability = Literal["TEXT", "VISION", "TRANSCRIPTION", "STRUCTURED_OUTPUT"]
 
 

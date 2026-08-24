@@ -245,15 +245,20 @@ private struct AIProviderEditorView: View {
                 Picker("Adapter", selection: $profile.adapter) {
                     Text("OpenAI").tag(AIProviderAdapter.openAIResponses)
                     Text("OpenAI-compatible").tag(AIProviderAdapter.openAICompatible)
+                    Text("Anthropic").tag(AIProviderAdapter.anthropicMessages)
+                    Text("Google Gemini").tag(AIProviderAdapter.geminiGenerateContent)
                 }
                 .onChange(of: profile.adapter) { _, adapter in
-                    if let normalized = AIProviderURLPolicy.normalized(
-                        profile.baseURL.absoluteString,
-                        adapter: adapter
-                    ) {
-                        profile.baseURL = normalized
-                    } else if adapter == .openAICompatible {
+                    if adapter == .openAICompatible {
                         profile.baseURL = URL(string: "http://127.0.0.1:11434/v1")!
+                    } else if let endpoint = AIProviderURLPolicy.normalized("", adapter: adapter) {
+                        profile.baseURL = endpoint
+                    }
+                    if !adapter.supportsTimestampedTranscription {
+                        profile.transcriptionModel = nil
+                        profile.capabilities.removeAll(where: { $0 == .transcription })
+                        profile.transcriptionUSDPerMinute = nil
+                        profile.structuredOutput = true
                     }
                 }
                 TextField("Name", text: $profile.displayName)
@@ -268,7 +273,7 @@ private struct AIProviderEditorView: View {
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                 } else {
-                    LabeledContent("Server", value: "api.openai.com")
+                    LabeledContent("Server", value: profile.adapter.fixedServerName)
                 }
                 SecureField(
                     profile.adapter == .openAICompatible
@@ -293,21 +298,29 @@ private struct AIProviderEditorView: View {
                 TextField("Text model", text: $profile.textModel)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
-                TextField(
-                    "Transcription model (optional)",
-                    text: Binding(
-                        get: { profile.transcriptionModel ?? "" },
-                        set: { profile.transcriptionModel = $0.isEmpty ? nil : $0 }
+                if profile.adapter.supportsTimestampedTranscription {
+                    TextField(
+                        "Transcription model (optional)",
+                        text: Binding(
+                            get: { profile.transcriptionModel ?? "" },
+                            set: { profile.transcriptionModel = $0.isEmpty ? nil : $0 }
+                        )
                     )
-                )
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                }
             }
 
             Section {
                 Toggle("Vision input", isOn: capability(.vision))
-                Toggle("Audio transcription", isOn: capability(.transcription))
-                Toggle("JSON output mode", isOn: $profile.structuredOutput)
+                if profile.adapter.supportsTimestampedTranscription {
+                    Toggle("Audio transcription", isOn: capability(.transcription))
+                }
+                if profile.adapter.usesNativeStructuredOutput {
+                    LabeledContent("Structured output", value: "Required")
+                } else {
+                    Toggle("JSON output mode", isOn: $profile.structuredOutput)
+                }
             } header: {
                 Text("Capabilities")
             } footer: {
@@ -329,7 +342,12 @@ private struct AIProviderEditorView: View {
             Section("Estimated pricing (optional)") {
                 OptionalPriceField("Input per million tokens", value: $profile.inputUSDPerMillion)
                 OptionalPriceField("Output per million tokens", value: $profile.outputUSDPerMillion)
-                OptionalPriceField("Transcription per minute", value: $profile.transcriptionUSDPerMinute)
+                if profile.adapter.supportsTimestampedTranscription {
+                    OptionalPriceField(
+                        "Transcription per minute",
+                        value: $profile.transcriptionUSDPerMinute
+                    )
+                }
             }
         }
         .navigationTitle(profile.state == .local ? "Add Provider" : "Edit Provider")
@@ -363,6 +381,9 @@ private struct AIProviderEditorView: View {
         return !name.isEmpty && name.count <= 200
             && !model.isEmpty && model.count <= 200
             && (transcription?.count ?? 0) <= 200
+            && (!requiresNewHostedKey || !apiKey.trimmingCharacters(
+                in: .whitespacesAndNewlines
+            ).isEmpty)
             && validPrice(profile.inputUSDPerMillion)
             && validPrice(profile.outputUSDPerMillion)
             && validPrice(profile.transcriptionUSDPerMinute)
@@ -375,6 +396,10 @@ private struct AIProviderEditorView: View {
     private func validPrice(_ value: Double?) -> Bool {
         guard let value else { return true }
         return value.isFinite && value >= 0
+    }
+
+    private var requiresNewHostedKey: Bool {
+        profile.state == .local && profile.adapter != .openAICompatible
     }
 
     private func capability(_ value: AIProviderCapability) -> Binding<Bool> {
@@ -398,10 +423,12 @@ private struct AIProviderEditorView: View {
         profile.textModel = profile.textModel.trimmingCharacters(in: .whitespacesAndNewlines)
         profile.isActive = makeActive
         if !profile.capabilities.contains(.text) { profile.capabilities.append(.text) }
+        if profile.adapter.usesNativeStructuredOutput { profile.structuredOutput = true }
         do {
+            let replacementSecret = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
             try await model.saveAIProviderProfile(
                 profile,
-                replacementSecret: apiKey.isEmpty ? nil : apiKey
+                replacementSecret: replacementSecret.isEmpty ? nil : replacementSecret
             )
             await onSaved()
             dismiss()
@@ -409,6 +436,25 @@ private struct AIProviderEditorView: View {
             errorMessage = error.localizedDescription
             isSaving = false
         }
+    }
+}
+
+private extension AIProviderAdapter {
+    var fixedServerName: String {
+        switch self {
+        case .openAIResponses: "api.openai.com"
+        case .openAICompatible: "Custom server"
+        case .anthropicMessages: "api.anthropic.com"
+        case .geminiGenerateContent: "generativelanguage.googleapis.com"
+        }
+    }
+
+    var supportsTimestampedTranscription: Bool {
+        self == .openAIResponses || self == .openAICompatible
+    }
+
+    var usesNativeStructuredOutput: Bool {
+        self == .anthropicMessages || self == .geminiGenerateContent
     }
 }
 

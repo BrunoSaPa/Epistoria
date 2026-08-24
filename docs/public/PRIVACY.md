@@ -57,6 +57,11 @@ model, and declared capabilities inside the encrypted request. Changing the acti
 not redirect already approved work. The trusted Mac stops the request if the approved connection
 was edited or removed. The recorded route does not contain the provider key.
 
+The official Responses, Anthropic, and Gemini connections use fixed official HTTPS destinations.
+A custom destination is available only for a compatible connection. Epistoria does not include a
+provider error response body in its saved error message or logs. The selected provider can still
+retain or review submitted content under its own account settings and policies.
+
 A local provider can avoid sending approved content to a hosted provider. The local service still
 receives readable approved content. Its software, host computer, and local network must be
 trusted.

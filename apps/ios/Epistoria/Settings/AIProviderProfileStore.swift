@@ -160,8 +160,15 @@ final class AIProviderSecretStore: @unchecked Sendable {
 
 enum AIProviderURLPolicy {
     static func normalized(_ value: String, adapter: AIProviderAdapter) -> URL? {
-        if adapter == .openAIResponses {
+        switch adapter {
+        case .openAIResponses:
             return URL(string: "https://api.openai.com/v1")
+        case .anthropicMessages:
+            return URL(string: "https://api.anthropic.com/v1")
+        case .geminiGenerateContent:
+            return URL(string: "https://generativelanguage.googleapis.com/v1beta")
+        case .openAICompatible:
+            break
         }
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         guard var components = URLComponents(string: trimmed),

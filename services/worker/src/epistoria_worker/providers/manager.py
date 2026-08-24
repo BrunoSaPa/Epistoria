@@ -28,6 +28,10 @@ from ..models import (
     SourceQueryResponseV1,
 )
 from .base import DigestProvider, ProviderError
+from .native_provider import (
+    AnthropicMessagesDigestProvider,
+    GeminiGenerateContentDigestProvider,
+)
 from .openai_provider import OpenAICompatibleDigestProvider, OpenAIDigestProvider
 
 
@@ -166,11 +170,26 @@ class ProviderManager:
         api_key = request.api_key
         if api_key is None and existing is not None and existing.adapter == request.adapter:
             api_key = existing.api_key
-        if request.adapter == "OPENAI_RESPONSES" and not api_key:
-            raise ProviderConfigurationError("OpenAI requires an API key")
+        hosted_adapters = {
+            "OPENAI_RESPONSES": "OpenAI",
+            "ANTHROPIC_MESSAGES": "Anthropic",
+            "GEMINI_GENERATE_CONTENT": "Gemini",
+        }
+        if request.adapter in hosted_adapters and not api_key:
+            provider_name = hosted_adapters[request.adapter]
+            raise ProviderConfigurationError(f"{provider_name} requires an API key")
         capabilities = tuple(dict.fromkeys(request.capabilities))
         if "TEXT" not in capabilities:
             raise ProviderConfigurationError("the provider must support text generation")
+        if request.adapter in {"ANTHROPIC_MESSAGES", "GEMINI_GENERATE_CONTENT"}:
+            if "TRANSCRIPTION" in capabilities or request.transcription_model is not None:
+                raise ProviderConfigurationError(
+                    "this native provider adapter does not support timestamped transcription"
+                )
+            if not request.structured_output:
+                raise ProviderConfigurationError(
+                    "this native provider adapter requires structured output"
+                )
         profile = StoredProviderProfile(
             profile_id=request.profile_id,
             configuration_revision_id=request.configuration_revision_id or request.profile_id,
@@ -239,6 +258,22 @@ class ProviderManager:
                 transcription_model=profile.transcription_model or "whisper-1",
                 transcription_usd_per_minute=profile.transcription_usd_per_minute,
                 structured_output=profile.structured_output,
+            )
+        if profile.adapter == "ANTHROPIC_MESSAGES":
+            return AnthropicMessagesDigestProvider(
+                api_key=profile.api_key or "",
+                provider_name=name,
+                model=profile.text_model,
+                input_usd_per_million=profile.input_usd_per_million,
+                output_usd_per_million=profile.output_usd_per_million,
+            )
+        if profile.adapter == "GEMINI_GENERATE_CONTENT":
+            return GeminiGenerateContentDigestProvider(
+                api_key=profile.api_key or "",
+                provider_name=name,
+                model=profile.text_model,
+                input_usd_per_million=profile.input_usd_per_million,
+                output_usd_per_million=profile.output_usd_per_million,
             )
         raise ProviderError(
             "The active provider adapter is unsupported",
@@ -322,10 +357,19 @@ class ProviderManager:
 
 
 def safe_provider_base_url(value: str | None, *, adapter: str) -> str:
-    if adapter == "OPENAI_RESPONSES":
-        if value not in {None, "", "https://api.openai.com/v1"}:
-            raise ProviderConfigurationError("OpenAI uses its fixed HTTPS endpoint")
-        return "https://api.openai.com/v1"
+    fixed_endpoints = {
+        "OPENAI_RESPONSES": ("OpenAI", "https://api.openai.com/v1"),
+        "ANTHROPIC_MESSAGES": ("Anthropic", "https://api.anthropic.com/v1"),
+        "GEMINI_GENERATE_CONTENT": (
+            "Gemini",
+            "https://generativelanguage.googleapis.com/v1beta",
+        ),
+    }
+    if adapter in fixed_endpoints:
+        name, endpoint = fixed_endpoints[adapter]
+        if value not in {None, "", endpoint}:
+            raise ProviderConfigurationError(f"{name} uses its fixed HTTPS endpoint")
+        return endpoint
     if value is None:
         raise ProviderConfigurationError("a provider server URL is required")
     parsed = urlsplit(value.strip())
@@ -361,7 +405,12 @@ def _is_local_host(host: str) -> bool:
 
 
 def _provider_adapter(value: str) -> ProviderAdapter:
-    if value not in {"OPENAI_RESPONSES", "OPENAI_COMPATIBLE"}:
+    if value not in {
+        "OPENAI_RESPONSES",
+        "OPENAI_COMPATIBLE",
+        "ANTHROPIC_MESSAGES",
+        "GEMINI_GENERATE_CONTENT",
+    }:
         raise ProviderConfigurationError("provider profile has an unsupported adapter")
     return value  # type: ignore[return-value]
 

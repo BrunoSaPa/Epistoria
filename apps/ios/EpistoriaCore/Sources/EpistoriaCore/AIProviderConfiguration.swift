@@ -3,6 +3,8 @@ import Foundation
 public enum AIProviderAdapter: String, Codable, CaseIterable, Sendable {
     case openAIResponses = "OPENAI_RESPONSES"
     case openAICompatible = "OPENAI_COMPATIBLE"
+    case anthropicMessages = "ANTHROPIC_MESSAGES"
+    case geminiGenerateContent = "GEMINI_GENERATE_CONTENT"
 }
 
 public enum AIProviderCapability: String, Codable, CaseIterable, Sendable {

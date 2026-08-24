@@ -75,6 +75,24 @@ final class AIProviderProfileStoreTests: XCTestCase {
         )
     }
 
+    func testHostedAdaptersUseFixedEndpoints() {
+        XCTAssertEqual(
+            AIProviderURLPolicy.normalized("ignored", adapter: .openAIResponses)?.absoluteString,
+            "https://api.openai.com/v1"
+        )
+        XCTAssertEqual(
+            AIProviderURLPolicy.normalized("ignored", adapter: .anthropicMessages)?.absoluteString,
+            "https://api.anthropic.com/v1"
+        )
+        XCTAssertEqual(
+            AIProviderURLPolicy.normalized(
+                "ignored",
+                adapter: .geminiGenerateContent
+            )?.absoluteString,
+            "https://generativelanguage.googleapis.com/v1beta"
+        )
+    }
+
     func testLegacyProfileWithoutConfigurationRevisionUsesStableProfileFallback() throws {
         let suite = "AIProviderProfileStoreTests.legacy.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))

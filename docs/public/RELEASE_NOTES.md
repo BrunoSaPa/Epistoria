@@ -1,5 +1,14 @@
 # Release notes
 
+## Native Anthropic and Gemini connections
+
+- Added direct Anthropic Messages and Google Gemini `generateContent` connections.
+- Added native structured-output validation and optional image input for both connections.
+- Fixed each native connection to its official HTTPS destination.
+- Kept keys in secure device storage and provider error bodies out of saved errors and logs.
+- Limited these native connections to text and optional vision. Timestamped transcription still
+  requires the official Responses or a compatible connection.
+
 ## Stable provider routing
 
 - Attached the reviewed provider connection and model to each newly approved AI request.
@@ -19,7 +28,8 @@
 ## AI provider choice
 
 - Added provider management in Settings.
-- Added an official connection and a compatible connection for local or hosted model servers.
+- Added the official Responses service and a compatible connection for local or hosted model
+  servers.
 - Added active-provider selection, model and capability settings, optional price estimates, and
   visible queue or failure state.
 - Stored provider keys in secure device storage on the iPad and trusted Mac.
