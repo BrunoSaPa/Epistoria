@@ -67,6 +67,7 @@ final class AppModel {
     var pendingFileCount = 0
     var unresolvedConflictCount = 0
     private(set) var isCreatingPortableExport = false
+    private(set) var isImportingPortableExport = false
     private(set) var isCreatingNotePDF = false
     var configuration: AccountConfiguration?
     let pendingSaves = PendingSaveRegistry()
@@ -91,6 +92,8 @@ final class AppModel {
     private var proactiveAutomationTask: Task<Void, Never>?
     private var syncAttemptTask: Task<SyncReport, Error>?
     private var exportTask: Task<EpistoriaExportResult, Error>?
+    private var portableImportService: EpistoriaPortableImportService?
+    private var pendingPortableImportPlan: EpistoriaImportPlan?
     private var notePDFExportTask: Task<NotePDFExportResult, Error>?
     private var syncRequestedWhileRunning = false
     private var pathMonitor: NWPathMonitor?
@@ -223,6 +226,13 @@ final class AppModel {
         }
         exportTask = nil
         isCreatingPortableExport = false
+
+        if let service = portableImportService, let plan = pendingPortableImportPlan {
+            try? await service.cancel(plan)
+        }
+        portableImportService = nil
+        pendingPortableImportPlan = nil
+        isImportingPortableExport = false
 
         let activeNotePDFExport = notePDFExportTask
         activeNotePDFExport?.cancel()
@@ -430,6 +440,7 @@ final class AppModel {
         guard !isOpening,
               !isLocking,
               !isCreatingPortableExport,
+              !isImportingPortableExport,
               !isCreatingNotePDF
         else { throw AppModelOperationError.unlockedSessionUnavailable }
         var storedConfiguration = try configurationStore.loadValidated()
@@ -548,8 +559,91 @@ final class AppModel {
         await synchronize(reportMissingServer: true)
     }
 
+    func preparePortableImport(from url: URL) async throws -> EpistoriaImportPlan {
+        guard !isCreatingPortableExport,
+              !isImportingPortableExport,
+              !isCreatingNotePDF,
+              !isReconfiguringSync,
+              !isLocking,
+              case .ready = phase,
+              let configuration,
+              let accountKey,
+              let database,
+              let store,
+              let assetManager
+        else { throw AppModelOperationError.unlockedSessionUnavailable }
+        isImportingPortableExport = true
+        let generation = sessionGeneration
+        automaticSyncTask?.cancel()
+        automaticSyncTask = nil
+        automaticSyncToken = nil
+        syncRequestedWhileRunning = false
+        if let syncAttemptTask { _ = await syncAttemptTask.result }
+        guard generation == sessionGeneration, !isLocking, case .ready = phase else {
+            isImportingPortableExport = false
+            throw CancellationError()
+        }
+        do {
+            try await pendingSaves.flushAll()
+            let support = try applicationSupportURL()
+            let storage = AccountStorageLocator(applicationSupportURL: support).location(
+                for: configuration.accountId,
+                purpose: storagePurpose(for: configuration)
+            )
+            let service = EpistoriaPortableImportService(
+                accountId: configuration.accountId,
+                accountKey: accountKey,
+                database: database,
+                store: store,
+                assetManager: assetManager,
+                assetsDirectory: storage.assetsDirectoryURL
+            )
+            portableImportService = service
+            let plan = try await service.prepare(from: url)
+            guard generation == sessionGeneration, !isLocking, case .ready = phase else {
+                try? await service.cancel(plan)
+                throw CancellationError()
+            }
+            pendingPortableImportPlan = plan
+            return plan
+        } catch {
+            portableImportService = nil
+            pendingPortableImportPlan = nil
+            isImportingPortableExport = false
+            resumeSyncSchedulingIfNeeded()
+            throw error
+        }
+    }
+
+    func commitPortableImport(_ plan: EpistoriaImportPlan) async throws -> EpistoriaImportResult {
+        guard isImportingPortableExport,
+              let service = portableImportService,
+              case .ready = phase,
+              !isLocking
+        else { throw AppModelOperationError.unlockedSessionUnavailable }
+        defer {
+            portableImportService = nil
+            pendingPortableImportPlan = nil
+            isImportingPortableExport = false
+            resumeSyncSchedulingIfNeeded()
+        }
+        let result = try await service.commit(plan)
+        await refreshDataHealth()
+        noteLocalMutation()
+        return result
+    }
+
+    func cancelPortableImport(_ plan: EpistoriaImportPlan) async {
+        if let service = portableImportService { try? await service.cancel(plan) }
+        portableImportService = nil
+        pendingPortableImportPlan = nil
+        isImportingPortableExport = false
+        resumeSyncSchedulingIfNeeded()
+    }
+
     func createPortableExport(includingDerivedAI: Bool) async throws -> EpistoriaExportResult {
         guard !isCreatingPortableExport,
+              !isImportingPortableExport,
               !isCreatingNotePDF,
               !isReconfiguringSync,
               !isLocking,
@@ -600,6 +694,7 @@ final class AppModel {
 
     func createNotePDF(noteId: UUID) async throws -> NotePDFExportResult {
         guard !isCreatingPortableExport,
+              !isImportingPortableExport,
               !isCreatingNotePDF,
               !isReconfiguringSync,
               !isLocking,
@@ -691,7 +786,11 @@ final class AppModel {
     }
 
     private func synchronize(reportMissingServer: Bool) async {
-        guard !isCreatingPortableExport, !isCreatingNotePDF, !isReconfiguringSync else { return }
+        guard !isCreatingPortableExport,
+              !isImportingPortableExport,
+              !isCreatingNotePDF,
+              !isReconfiguringSync
+        else { return }
         guard !isLocking, case .ready = phase, let syncEngine else {
             if reportMissingServer {
                 syncError = "Connect a private sync server in Data Health first."
@@ -746,6 +845,7 @@ final class AppModel {
     private func scheduleAutomaticSync(delay: Duration = .seconds(1.5)) {
         guard syncEngine != nil,
               !isCreatingPortableExport,
+              !isImportingPortableExport,
               !isCreatingNotePDF,
               !isReconfiguringSync
         else { return }
@@ -847,6 +947,7 @@ final class AppModel {
     private func resumeSyncSchedulingIfNeeded() {
         guard !isLocking,
               !isCreatingPortableExport,
+              !isImportingPortableExport,
               !isCreatingNotePDF,
               !isReconfiguringSync,
               case .ready = phase

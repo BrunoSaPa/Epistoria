@@ -253,7 +253,31 @@ final class EpistoriaExportServiceTests: XCTestCase {
         let taxonomy = try String(contentsOf: package.appendingPathComponent("taxonomy.json"), encoding: .utf8)
         let knowledge = try String(contentsOf: package.appendingPathComponent("knowledge.json"), encoding: .utf8)
         let learning = try String(contentsOf: package.appendingPathComponent("learning.json"), encoding: .utf8)
-        XCTAssertTrue(metadata.contains("epistoria-export/4"))
+        XCTAssertTrue(metadata.contains("epistoria-export/5"))
+        let entities = try String(
+            contentsOf: package.appendingPathComponent("entities.json"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(entities.lowercased().contains(noteId.uuidString.lowercased()))
+        XCTAssertFalse(entities.contains(asset.payload.assetKey))
+        XCTAssertFalse(entities.contains(asset.payload.dedupeTag))
+        let entityRecords = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(entities.utf8)) as? [[String: Any]]
+        )
+        for record in entityRecords {
+            let entityType = try XCTUnwrap(
+                (record["entityType"] as? String).flatMap(EntityType.init(rawValue:))
+            )
+            if entityType == .asset { continue }
+            let content = try XCTUnwrap(record["content"])
+            try EntityPayloadValidator.validate(
+                entityType: entityType,
+                content: JSONSerialization.data(
+                    withJSONObject: content,
+                    options: [.sortedKeys, .withoutEscapingSlashes]
+                )
+            )
+        }
         XCTAssertTrue(taxonomy.lowercased().contains(topicId.uuidString.lowercased()))
         XCTAssertTrue(knowledge.lowercased().contains(annotationResult.evidenceId.uuidString.lowercased()))
         XCTAssertTrue(knowledge.lowercased().contains(conceptLinkId.uuidString.lowercased()))
@@ -358,6 +382,125 @@ final class EpistoriaExportServiceTests: XCTestCase {
         XCTAssertTrue(knowledge.lowercased().contains(correctionId.uuidString.lowercased()))
         XCTAssertTrue(knowledge.lowercased().contains(evidenceId.uuidString.lowercased()))
         XCTAssertTrue(knowledge.contains("Owner-corrected transcript text."))
+    }
+
+    func testVersionFiveExportRestoresStableRecordsAndHistoricalAssetsIntoCleanAccount() async throws {
+        let source = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: source.root) }
+        let areaId = try await source.store.createArea(name: "Mathematics")
+        let topicId = try await source.store.createTopic(name: "Factorization", primaryAreaId: areaId)
+        let noteId = try await source.store.createNote(title: "Difference of squares", courseId: topicId)
+        _ = try await source.store.appendTextBlock(noteId: noteId, text: "a² - b²")
+
+        let firstPDF = Data("%PDF-1.4\nfirst immutable version\n%%EOF\n".utf8)
+        let secondPDF = Data("%PDF-1.4\nsecond immutable version\n%%EOF\n".utf8)
+        let pdfURL = source.root.appendingPathComponent("factorization.pdf")
+        try firstPDF.write(to: pdfURL, options: .atomic)
+        let imported = try await source.assetManager.importPDF(from: pdfURL, courseId: topicId)
+        try secondPDF.write(to: pdfURL, options: .atomic)
+        _ = try await source.assetManager.refreshSource(id: imported.resourceId, from: pdfURL)
+        let sourceVersions = try await source.store.list(
+            SourceVersionPayload.self,
+            parentId: imported.resourceId
+        )
+        let assetIds = try sourceVersions.map { try XCTUnwrap($0.payload.originalAssetId) }
+        XCTAssertEqual(assetIds.count, 2)
+
+        let package = try await source.service.prepareDecryptedDirectoryForTesting(
+            includingDerivedAI: false
+        )
+        defer { try? FileManager.default.removeItem(at: package.deletingLastPathComponent()) }
+
+        let targetRoot = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "EpistoriaImportTarget-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: targetRoot, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: targetRoot) }
+        let targetAccountId = UUID()
+        let targetAccountKey = try EntityCrypto().randomKey()
+        let targetDatabase = try SQLCipherDatabase(
+            url: targetRoot.appendingPathComponent("target.sqlite"),
+            key: try EntityCrypto().localDatabaseKey(
+                accountKey: targetAccountKey,
+                accountId: targetAccountId
+            )
+        )
+        let targetStore = EpistoriaStore(database: targetDatabase)
+        let targetAssets = targetRoot.appendingPathComponent("Assets", isDirectory: true)
+        let targetAssetManager = AssetManager(
+            accountId: targetAccountId,
+            accountKey: targetAccountKey,
+            store: targetStore,
+            directory: targetAssets
+        )
+        let importer = EpistoriaPortableImportService(
+            accountId: targetAccountId,
+            accountKey: targetAccountKey,
+            database: targetDatabase,
+            store: targetStore,
+            assetManager: targetAssetManager,
+            assetsDirectory: targetAssets
+        )
+
+        let plan = try await importer.prepare(from: package)
+        XCTAssertEqual(plan.summary.sourceAccountId, source.accountId)
+        XCTAssertEqual(plan.summary.noteCount, 1)
+        XCTAssertEqual(plan.summary.sourceCount, 1)
+        XCTAssertEqual(plan.summary.assetCount, 2)
+        _ = try await importer.commit(plan)
+
+        let restoredNote = try await targetStore.payload(NotePayload.self, id: noteId)
+        let restoredTopic = try await targetStore.payload(TopicPayload.self, id: topicId)
+        let restoredVersions = try await targetStore.list(
+            SourceVersionPayload.self,
+            parentId: imported.resourceId
+        )
+        XCTAssertEqual(restoredNote.payload.title, "Difference of squares")
+        XCTAssertEqual(restoredTopic.payload.name, "Factorization")
+        XCTAssertEqual(restoredVersions.count, 2)
+        var restored: [Data] = []
+        for assetId in assetIds {
+            restored.append(try await targetAssetManager.decryptedData(assetId: assetId))
+        }
+        XCTAssertEqual(Set(restored), Set([firstPDF, secondPDF]))
+        let health = try await targetDatabase.dataHealth()
+        XCTAssertGreaterThan(health.pendingMutations, 0)
+        XCTAssertEqual(health.pendingAssets, 2)
+    }
+
+    func testPortableImportRejectsNonEmptyTargetWithoutChangingIt() async throws {
+        let source = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: source.root) }
+        _ = try await source.store.createNote(title: "Source note")
+        let package = try await source.service.prepareDecryptedDirectoryForTesting(
+            includingDerivedAI: false
+        )
+        defer { try? FileManager.default.removeItem(at: package.deletingLastPathComponent()) }
+
+        let target = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: target.root) }
+        let existingId = try await target.store.createNote(title: "Keep me")
+        let importer = EpistoriaPortableImportService(
+            accountId: target.accountId,
+            accountKey: target.accountKey,
+            database: target.database,
+            store: target.store,
+            assetManager: target.assetManager,
+            assetsDirectory: target.root.appendingPathComponent("Assets", isDirectory: true)
+        )
+        do {
+            _ = try await importer.prepare(from: package)
+            XCTFail("Expected non-empty import rejection")
+        } catch let error as EpistoriaImportError {
+            guard case .requiresEmptyNotebook = error else {
+                return XCTFail("Unexpected import error: \(error)")
+            }
+        }
+        let existing = try await target.store.payload(NotePayload.self, id: existingId)
+        let notes = try await target.store.list(NotePayload.self)
+        XCTAssertEqual(existing.payload.title, "Keep me")
+        XCTAssertEqual(notes.count, 1)
     }
 
     func testValidationRejectsTamperingDuplicateEntriesHiddenFilesAndOtherAccounts() async throws {

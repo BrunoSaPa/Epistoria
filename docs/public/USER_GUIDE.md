@@ -480,7 +480,24 @@ The export contains standard data files, original Sources and images, local read
 for supported Source types, readable YouTube reference files, original Pencil data, and
 checksums. Accepted transcript data is included only when derived AI records are selected.
 Transcript corrections and timestamped Evidence are included as owner records in the knowledge
-file. The current app cannot import this export.
+file.
+
+## Import a readable export
+
+Import requires an empty notebook and a version 5 export. It does not merge with or replace
+existing data.
+
+1. Open **Settings → Data Health → Portable export**.
+2. Select **Import into empty notebook**.
+3. Choose the ZIP or unpacked `epistoria-export` directory.
+4. Review the export date, source account suffix, package size, and content counts.
+5. Select **Import into this notebook**.
+6. Wait for the completion screen before closing Epistoria.
+7. Open representative notes, Sources, original files, cards, tests, and conflict records.
+
+Epistoria validates the package before it changes the notebook. It preserves stable record IDs
+and re-encrypts every original file for the target notebook. Keep the source export until you have
+checked the imported copy. Versions 1 through 4 can be read and validated but cannot be imported.
 
 ## Restore on another iPad
 

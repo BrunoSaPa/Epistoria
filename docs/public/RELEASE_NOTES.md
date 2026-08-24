@@ -1,5 +1,14 @@
 # Release notes
 
+## Portable import
+
+- Added readable export version 5 with one complete sanitized record manifest.
+- Added ZIP and unpacked-directory validation before import.
+- Added clean-notebook import that preserves stable records and re-encrypts original files for the
+  target notebook.
+- Added a review screen with source, size, and content counts before activation.
+- Kept import separate from account recovery. Import does not merge with or replace existing data.
+
 ## Note organization
 
 - Added confirmed **Remove from List** and **Remove from Session** actions.

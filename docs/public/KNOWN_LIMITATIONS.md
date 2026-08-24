@@ -9,7 +9,10 @@ Epistoria remains in personal beta. The following limits apply to the current pr
 
 ## Recovery and export
 
-- The app can create and validate a readable export but cannot import it.
+- The app imports only version 5 readable exports and only into an empty notebook. It does not
+  merge with or replace existing data. Versions 1 through 4 must be recreated before import.
+- An export with an unresolved binary file conflict cannot be imported until that conflict is
+  resolved in the source notebook.
 - A note can be exported as a readable PDF. The PDF cannot be imported as an editable note.
 - An infinite note exports its used area as one custom-size PDF page. Very large infinite notes
   are scaled to the PDF page-dimension limit.

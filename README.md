@@ -36,23 +36,25 @@ The app also provides:
 
 - One private notebook that connects subjects, sources, notes, sessions, and learning history.
 - Immutable PDF import and separate page annotations.
-- Collections, institutions, academic terms, courses, and study sessions.
+- Areas, Topics, optional Lists, academic Topic details, and study sessions.
 - Local full-text search with links to the matching note item or PDF page.
 - Reversible archive and restore for notes and courses.
 - Optional encrypted synchronization through a private server.
 - Explicit conflict review that preserves concurrent versions.
 - A readable ZIP export with JSON, original files, PencilKit data, and SHA-256 checksums.
+- Validated version 5 export import into an empty notebook under a new local encryption key.
 
-The planned learning system will add durable source-linked flashcards, generated practice tests,
-review history, and a **Study next** queue. Accepted cards and tests will be normal notebook
-records, not temporary chat output. A completed attempt will retain the exact questions, answers,
-score, feedback, and source versions that the user saw.
+The learning system stores durable source-linked flashcards, practice tests, review history, and a
+**Study Next** queue. Accepted cards and tests are notebook records, not temporary chat output. A
+completed attempt retains the exact questions, answers, score, feedback, and source versions that
+the user saw.
 
 A test request can target a subject inside one notebook. Comprehensive mode will first produce a
 coverage outline, then include every relevant learning objective found in that notebook, broader
 questions that combine related skills, and a visible report of anything it could not cover. The
 queue will use goals, due reviews, unresolved questions, and practice results. It will state why it
-recommends each action. These learning features are not implemented in the current personal beta.
+recommends each action. Manual learning features and local recommendations work offline. Generated
+drafts and written-answer feedback require the optional trusted Mac workflow.
 
 The iPad stores data in SQLCipher. Each local record change and its sync outbox entry commit in
 one transaction. A successful local save does not wait for the network. The sync service stores
@@ -131,14 +133,14 @@ IBM Bob.
 ## Project status
 
 The repository is a personal beta candidate. The following automated checks passed on
-2026-08-13:
+2026-08-23:
 
 - `make verify`
 - Full unsigned iOS Simulator bundle build, including assets and the privacy manifest
-- 25 Swift Core tests
-- 17 iOS app and UI tests on an iPad Simulator
+- 81 Swift Core tests
+- 45 iOS app and UI tests on an iPad Simulator
 - 7 API unit tests
-- 23 worker tests
+- 36 worker tests
 
 The following release checks are still open:
 
@@ -147,7 +149,7 @@ The following release checks are still open:
 - Fresh-device recovery against a real server and object store
 - Independent object-mirror and production restore drills
 - Code signing, archive validation, and private TestFlight installation
-- Import of a readable Epistoria export
+- Physical-device import of a representative readable Epistoria export
 
 Do not use the current build as the only convenient copy of important data. See the public
 [known limitations](docs/public/KNOWN_LIMITATIONS.md) before using the beta.
@@ -218,6 +220,7 @@ engineering and operations documentation is intentionally excluded from the publ
 - The sync service stores ciphertext and structural metadata only.
 - Original files and PencilKit data remain separate from derived previews and AI output.
 - Concurrent versions remain available until the user resolves the conflict.
-- Readable export is not described as restore because no archive importer exists.
+- Version 5 readable exports can be imported only into an empty notebook. Import does not merge
+  with or replace existing records.
 - One Epistoria notebook connects the owner's subjects, sources, notes, sessions, and planned
   learning history. Setup does not create a second local notebook when one is configured.

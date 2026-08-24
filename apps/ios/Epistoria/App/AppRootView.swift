@@ -87,7 +87,10 @@ struct AppRootView: View {
                             ForEach(group.sections) { section in
                                 Label(section.rawValue, systemImage: section.symbol)
                                     .tag(section)
-                                    .disabled(model.isCreatingPortableExport && section != .settings)
+                                    .disabled(
+                                        (model.isCreatingPortableExport || model.isImportingPortableExport)
+                                            && section != .settings
+                                    )
                                     .accessibilityIdentifier("navigation.\(section.rawValue.lowercased().replacingOccurrences(of: " ", with: "-"))")
                             }
                         }
@@ -118,6 +121,9 @@ struct AppRootView: View {
                     model.selectedSection = .settings
                 }
             }
+            .onChange(of: model.isImportingPortableExport) { _, isImporting in
+                if isImporting { model.selectedSection = .settings }
+            }
         }
     }
 
@@ -131,7 +137,9 @@ struct AppRootView: View {
         Binding(
             get: { model.selectedSection },
             set: { selection in
-                guard !model.isCreatingPortableExport || selection == .settings else { return }
+                guard !(model.isCreatingPortableExport || model.isImportingPortableExport)
+                    || selection == .settings
+                else { return }
                 model.selectedSection = selection
             }
         )
@@ -157,10 +165,10 @@ private struct SidebarSyncStatus: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
             HStack(spacing: 8) {
-                if model.isCreatingPortableExport {
+                if model.isCreatingPortableExport || model.isImportingPortableExport {
                     ProgressView()
                         .controlSize(.small)
-                        .accessibilityLabel("Creating portable export")
+                        .accessibilityLabel(title)
                 } else {
                     Image(systemName: model.syncStatusSymbol)
                         .foregroundStyle(color)
@@ -177,8 +185,8 @@ private struct SidebarSyncStatus: View {
                 Spacer(minLength: 0)
             }
 
-            if model.isCreatingPortableExport {
-                Label("Editing resumes automatically when the validated archive is ready.", systemImage: "lock.open.display")
+            if model.isCreatingPortableExport || model.isImportingPortableExport {
+                Label(operationDetail, systemImage: "lock.open.display")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .accessibilityIdentifier("sidebar.exportProgress")
@@ -209,6 +217,7 @@ private struct SidebarSyncStatus: View {
     }
 
     private var title: String {
+        if model.isImportingPortableExport { return "Reviewing portable import" }
         if model.isCreatingPortableExport { return "Creating portable export" }
         if model.isSyncing { return "Syncing safely" }
         if model.syncError != nil { return "Saved locally" }
@@ -220,6 +229,9 @@ private struct SidebarSyncStatus: View {
     }
 
     private var detail: String {
+        if model.isImportingPortableExport {
+            return "Sync and editing stay paused until the import is confirmed or canceled."
+        }
         if model.isCreatingPortableExport {
             return "Data Health stays open while Epistoria assembles one consistent local snapshot."
         }
@@ -227,10 +239,16 @@ private struct SidebarSyncStatus: View {
     }
 
     private var color: Color {
-        if model.isCreatingPortableExport { return .primary }
+        if model.isCreatingPortableExport || model.isImportingPortableExport { return .primary }
         if model.syncError != nil || model.unresolvedConflictCount > 0 { return EpistoriaDesign.attention }
         if model.pendingRecordCount + model.pendingFileCount > 0 { return .primary }
         if model.configuration?.serverConnected == true { return EpistoriaDesign.positive }
         return EpistoriaDesign.accent
+    }
+
+    private var operationDetail: String {
+        model.isImportingPortableExport
+            ? "Editing resumes when the import is confirmed or canceled."
+            : "Editing resumes automatically when the validated archive is ready."
     }
 }

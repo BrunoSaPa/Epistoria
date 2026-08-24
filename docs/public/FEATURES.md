@@ -210,8 +210,10 @@ This feature requires a paired Mac and a configured AI provider. It is optional.
   and chunks when derived AI records are selected for export.
 - Include transcript corrections and timestamped Evidence in `knowledge.json`. Generated
   transcript chunks remain separate in `ai-artifacts.json`.
+- Import a validated version 5 export into an empty notebook. Stable records and original files
+  are encrypted for the target notebook before activation.
 
-The current app can validate a readable export but cannot import it. See
+Import does not merge with or replace existing notebook data. See
 [Known limitations](KNOWN_LIMITATIONS.md).
 
 ## Accessibility and input

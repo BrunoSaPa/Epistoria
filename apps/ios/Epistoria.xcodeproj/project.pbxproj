@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		04236E6A6424E1E356863A5F /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 84F79068F407B2C7BBC367E9 /* Assets.xcassets */; };
+		0821C0E7CC4CC776C0CC366D /* EpistoriaPortableImportService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58702253F48A1989D3C7C7E4 /* EpistoriaPortableImportService.swift */; };
 		0C13184662CE5717485E8BC1 /* LassoOverlayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 328ED5306D56EEB231FE8184 /* LassoOverlayView.swift */; };
 		13A7DC2EA6C84AD2D52D7630 /* NotePDFExportService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15B5D2C3B60622FA5DE19156 /* NotePDFExportService.swift */; };
 		1882F53EE20D174002135140 /* TodayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 507800F15F03EF683EB6D003 /* TodayView.swift */; };
@@ -87,6 +88,7 @@
 		4A51BF1AFCD893DADFCF6CD8 /* EpistoriaDesign.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EpistoriaDesign.swift; sourceTree = "<group>"; };
 		506A112DB7A5A7FDA172198B /* SessionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionsView.swift; sourceTree = "<group>"; };
 		507800F15F03EF683EB6D003 /* TodayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodayView.swift; sourceTree = "<group>"; };
+		58702253F48A1989D3C7C7E4 /* EpistoriaPortableImportService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EpistoriaPortableImportService.swift; sourceTree = "<group>"; };
 		5AB1C23E0019EE50083F7840 /* PendingSaveRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PendingSaveRegistry.swift; sourceTree = "<group>"; };
 		639D64932A90F21295231AD9 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
 		6A4D9E067E22ADC8DE6945B5 /* TopicsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TopicsView.swift; sourceTree = "<group>"; };
@@ -200,6 +202,7 @@
 			isa = PBXGroup;
 			children = (
 				14FBF3B7A2C6EFB97A8C896A /* EpistoriaExportService.swift */,
+				58702253F48A1989D3C7C7E4 /* EpistoriaPortableImportService.swift */,
 				15B5D2C3B60622FA5DE19156 /* NotePDFExportService.swift */,
 			);
 			path = Export;
@@ -473,6 +476,7 @@
 				2C79FFC1C80EB3DC2F7958CD /* EpistoriaApp.swift in Sources */,
 				D9B6616E05DB2E898D413AF1 /* EpistoriaDesign.swift in Sources */,
 				D7268FC5ECD9944DCF92D7DE /* EpistoriaExportService.swift in Sources */,
+				0821C0E7CC4CC776C0CC366D /* EpistoriaPortableImportService.swift in Sources */,
 				C020D783090ACF29E186284D /* KnowledgeSearchView.swift in Sources */,
 				0C13184662CE5717485E8BC1 /* LassoOverlayView.swift in Sources */,
 				B0BDDE9736A79A9B4EC8FEB0 /* LearningDetailViews.swift in Sources */,

@@ -10,11 +10,11 @@ change after personal use and beta testing.
 - Complete two-device synchronization and concurrent-version testing.
 - Complete fresh-device recovery and independent backup drills.
 - Complete private installation and update testing.
-- Decide whether readable-only export is acceptable for the first beta or add import support.
+- Test version 5 clean-notebook import on a physical spare iPad with representative data.
 
 ## Portability and file access
 
-- Import a validated Epistoria export into a clean installation.
+- Define safe merge behavior before allowing import into a notebook that already contains data.
 - Download selected or all restored files for offline use.
 - Improve archive and restore support for Sources and Lists.
 - Add a persistent Trash with a clear retention policy.

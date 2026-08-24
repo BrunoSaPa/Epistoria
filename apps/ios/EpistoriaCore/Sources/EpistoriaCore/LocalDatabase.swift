@@ -134,6 +134,39 @@ public struct LocalConflict: Equatable, Sendable, Identifiable {
     public var createdAt: Date
 }
 
+/// A conflict restored from a readable portability package. The candidate remains separate from
+/// the current entity so import never chooses a winner on the owner's behalf.
+public struct ImportedLocalConflict: Equatable, Sendable, Identifiable {
+    public var id: UUID
+    public var entityId: UUID
+    public var entityType: EntityType
+    public var parentId: UUID?
+    public var relationIds: [UUID]
+    public var candidateContent: Data
+    public var serverConflictId: UUID?
+    public var createdAt: Date
+
+    public init(
+        id: UUID,
+        entityId: UUID,
+        entityType: EntityType,
+        parentId: UUID?,
+        relationIds: [UUID],
+        candidateContent: Data,
+        serverConflictId: UUID?,
+        createdAt: Date
+    ) {
+        self.id = id
+        self.entityId = entityId
+        self.entityType = entityType
+        self.parentId = parentId
+        self.relationIds = relationIds
+        self.candidateContent = candidateContent
+        self.serverConflictId = serverConflictId
+        self.createdAt = createdAt
+    }
+}
+
 public struct RemoteEntityUpdate: Equatable, Sendable {
     public var entity: StoredEntity
     public var search: SearchDocument?
@@ -185,6 +218,22 @@ public struct LocalAsset: Equatable, Sendable, Identifiable {
     public var encryptedByteSize: Int64
     public var uploadState: LocalAssetUploadState
     public var lastErrorCode: String?
+
+    public init(
+        id: UUID,
+        dedupeTag: String,
+        encryptedFileURL: URL,
+        encryptedByteSize: Int64,
+        uploadState: LocalAssetUploadState,
+        lastErrorCode: String? = nil
+    ) {
+        self.id = id
+        self.dedupeTag = dedupeTag
+        self.encryptedFileURL = encryptedFileURL
+        self.encryptedByteSize = encryptedByteSize
+        self.uploadState = uploadState
+        self.lastErrorCode = lastErrorCode
+    }
 }
 
 public struct DataHealthSnapshot: Equatable, Sendable {
@@ -373,9 +422,13 @@ public actor SQLCipherDatabase {
         _ writes: [LocalEntityWrite],
         deleting deletionIds: [UUID] = [],
         deletedAt: Date = .now,
-        migration: LocalMigrationBatch? = nil
+        migration: LocalMigrationBatch? = nil,
+        registeringAssets assets: [LocalAsset] = [],
+        registeringConflicts conflicts: [ImportedLocalConflict] = []
     ) throws {
-        guard !writes.isEmpty || !deletionIds.isEmpty else { return }
+        guard !writes.isEmpty || !deletionIds.isEmpty || !assets.isEmpty || !conflicts.isEmpty else {
+            return
+        }
         guard Set(writes.map(\.id)).count == writes.count else {
             throw LocalDatabaseError.queryFailed("duplicate entity in atomic write")
         }
@@ -386,6 +439,13 @@ public actor SQLCipherDatabase {
         }
         guard writes.allSatisfy({ $0.content.count <= 2_097_152 }) else {
             throw LocalDatabaseError.payloadTooLarge
+        }
+        guard Set(assets.map(\.id)).count == assets.count,
+              Set(assets.map(\.dedupeTag)).count == assets.count,
+              Set(conflicts.map(\.id)).count == conflicts.count,
+              conflicts.allSatisfy({ $0.candidateContent.count <= 2_097_152 })
+        else {
+            throw LocalDatabaseError.invalidRow
         }
         let prepared = try writes.map { write in
             (
@@ -495,6 +555,36 @@ public actor SQLCipherDatabase {
                         ]
                     )
                     try updateSearch(id: current.id, document: nil)
+                }
+                for asset in assets {
+                    try registerLocalAsset(asset)
+                }
+                for conflict in conflicts {
+                    let currentType = try entity(id: conflict.entityId)?.entityType
+                    guard currentType == conflict.entityType
+                    else { throw LocalDatabaseError.invalidRow }
+                    try run(
+                        """
+                        INSERT INTO local_conflicts
+                            (id, entity_id, entity_type, parent_id, relation_ids, candidate_content,
+                             server_conflict_id, created_at, resolved_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)
+                        """,
+                        [
+                            .text(canonical(conflict.id)),
+                            .text(canonical(conflict.entityId)),
+                            .text(conflict.entityType.rawValue),
+                            conflict.parentId.map { .text(canonical($0)) } ?? .null,
+                            .text(try encodeUUIDs(conflict.relationIds)),
+                            .blob(conflict.candidateContent),
+                            conflict.serverConflictId.map { .text(canonical($0)) } ?? .null,
+                            .real(conflict.createdAt.timeIntervalSince1970),
+                        ]
+                    )
+                    try run(
+                        "UPDATE entities SET sync_state='CONFLICT' WHERE id=?",
+                        [.text(canonical(conflict.entityId))]
+                    )
                 }
                 if let migration {
                     try run(
@@ -650,6 +740,22 @@ public actor SQLCipherDatabase {
         }
         sql += " ORDER BY client_modified_at DESC, id ASC"
         return try query(sql, values).map(entityFromRow)
+    }
+
+    /// Returns every live entity for complete portability snapshots.
+    public func allEntities() throws -> [StoredEntity] {
+        try query(
+            "SELECT * FROM entities WHERE tombstone=0 ORDER BY entity_type ASC, id ASC"
+        ).map(entityFromRow)
+    }
+
+    /// Portable import is deliberately replace-free. Server cursors do not make a newly created
+    /// local notebook non-empty, but any record, mutation, asset, or conflict does.
+    public func portableImportIsEmpty() throws -> Bool {
+        try scalarInteger("SELECT count(*) FROM entities") == 0
+            && scalarInteger("SELECT count(*) FROM outbox") == 0
+            && scalarInteger("SELECT count(*) FROM local_assets") == 0
+            && scalarInteger("SELECT count(*) FROM local_conflicts") == 0
     }
 
     public func search(_ text: String, limit: Int = 50) throws -> [SearchHit] {

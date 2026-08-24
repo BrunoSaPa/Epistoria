@@ -51,7 +51,7 @@ actor EpistoriaExportService {
     }
 
     private struct Metadata: Codable {
-        var formatVersion = "epistoria-export/4"
+        var formatVersion = "epistoria-export/5"
         var exportedAt: Date
         var accountId: UUID
         var mode = "DECRYPTED"
@@ -153,6 +153,7 @@ actor EpistoriaExportService {
     private let database: SQLCipherDatabase
     private let assetManager: AssetManager
     private let fileManager: FileManager
+    private var exportedAssetPaths: [UUID: String] = [:]
 
     init(
         accountId: UUID,
@@ -236,7 +237,10 @@ actor EpistoriaExportService {
         }
     }
 
-    func validateDecryptedDirectory(at directory: URL) throws -> EpistoriaExportValidation {
+    func validateDecryptedDirectory(
+        at directory: URL,
+        requireMatchingAccount: Bool = true
+    ) throws -> EpistoriaExportValidation {
         guard directory.isFileURL else {
             throw EpistoriaExportError.validationFailed("the selected export is not a local directory")
         }
@@ -246,12 +250,16 @@ actor EpistoriaExportService {
         guard values.isDirectory == true, values.isSymbolicLink != true else {
             throw EpistoriaExportError.validationFailed("the selected export root is not a regular directory")
         }
-        return try validate(directory: directory.standardizedFileURL)
+        return try validate(
+            directory: directory.standardizedFileURL,
+            requireMatchingAccount: requireMatchingAccount
+        )
     }
 
     private func prepareDecryptedDirectory(
         includingDerivedAI: Bool
     ) async throws -> PreparedExport {
+        exportedAssetPaths = [:]
         try await database.checkpoint()
         let stagingRoot = fileManager.temporaryDirectory
             .appendingPathComponent("EpistoriaExport-\(UUID().uuidString)", isDirectory: true)
@@ -279,6 +287,10 @@ actor EpistoriaExportService {
             try await exportNotes(to: package)
             try Task.checkCancellation()
             try await exportResources(to: package)
+            try await exportEntityManifest(
+                to: package,
+                includingDerivedAI: includingDerivedAI
+            )
             try Task.checkCancellation()
             try await exportAnnotations(to: package)
             try await exportKnowledge(to: package)
@@ -292,7 +304,7 @@ actor EpistoriaExportService {
                 to: package.appendingPathComponent("provenance.json")
             )
             try writeChecksums(in: package)
-            let validation = try validate(directory: package)
+            let validation = try validate(directory: package, requireMatchingAccount: true)
             return PreparedExport(
                 stagingRoot: stagingRoot,
                 package: package,
@@ -380,7 +392,6 @@ actor EpistoriaExportService {
         try fileManager.createDirectory(at: richTextDirectory, withIntermediateDirectories: true)
         try fileManager.createDirectory(at: imagesDirectory, withIntermediateDirectories: true)
         var canvasAssets: [CanvasAssetRecord] = []
-        var exportedImagePaths: [UUID: String] = [:]
         let notes = try await store.list(NotePayload.self)
         for note in notes {
             let blocks = try await store.list(NoteBlockPayload.self, parentId: note.id)
@@ -414,7 +425,7 @@ actor EpistoriaExportService {
                 if block.payload.blockType == .image, let assetId = block.payload.assetId {
                     let metadata = try await store.payload(AssetPayload.self, id: assetId).payload
                     let relativePath: String
-                    if let existing = exportedImagePaths[assetId] {
+                    if let existing = exportedAssetPaths[assetId] {
                         relativePath = existing
                     } else {
                         let filename = "\(assetId.uuidString.lowercased()).\(imageExtension(for: metadata.mimeType))"
@@ -424,7 +435,7 @@ actor EpistoriaExportService {
                             plaintext,
                             to: imagesDirectory.appendingPathComponent(filename)
                         )
-                        exportedImagePaths[assetId] = relativePath
+                        exportedAssetPaths[assetId] = relativePath
                     }
                     canvasAssets.append(
                         CanvasAssetRecord(
@@ -469,8 +480,14 @@ actor EpistoriaExportService {
                 let filename = "\(assetId.uuidString.lowercased()).\(extensionName)"
                 let relativePath = "resources/originals/\(filename)"
                 let plaintext = try await assetManager.decryptedData(assetId: assetId)
-                try protectedWrite(plaintext, to: originalsDirectory.appendingPathComponent(filename))
-                originalPath = relativePath
+                if exportedAssetPaths[assetId] == nil {
+                    try protectedWrite(
+                        plaintext,
+                        to: originalsDirectory.appendingPathComponent(filename)
+                    )
+                    exportedAssetPaths[assetId] = relativePath
+                }
+                originalPath = exportedAssetPaths[assetId]
                 if resource.payload.sourceType != .audio,
                    resource.payload.sourceType != .video,
                    let adapter = try? SourceAdapterRegistry().adapter(
@@ -506,6 +523,80 @@ actor EpistoriaExportService {
             )
         }
         try write(records, to: resourcesDirectory.appendingPathComponent("resources.json"))
+    }
+
+    /// The category files remain the public, readable representation. This complete manifest is
+    /// the restore contract. Asset secrets are replaced by paths to readable bytes and are never
+    /// written to the archive.
+    private func exportEntityManifest(
+        to root: URL,
+        includingDerivedAI: Bool
+    ) async throws {
+        let entities = try await database.allEntities()
+        let allowedAI = exportableAIEntityIds(in: entities)
+        var records: [[String: Any]] = []
+        for entity in entities {
+            try Task.checkCancellation()
+            if entity.entityType == .aiArtifact,
+               (!includingDerivedAI || !allowedAI.contains(entity.id)) {
+                continue
+            }
+            var record: [String: Any] = [
+                "id": entity.id.uuidString.lowercased(),
+                "entityType": entity.entityType.rawValue,
+                "parentId": entity.parentId?.uuidString.lowercased() ?? NSNull(),
+                "relationIds": entity.relationIds.map { $0.uuidString.lowercased() },
+                "modifiedAt": RFC3339Milliseconds.string(from: entity.clientModifiedAt),
+            ]
+            if entity.entityType == .asset {
+                let asset = try CanonicalJSON.decode(AssetPayload.self, from: entity.content)
+                let relativePath: String
+                if let existing = exportedAssetPaths[entity.id] {
+                    relativePath = existing
+                } else {
+                    let filename = "\(entity.id.uuidString.lowercased()).\(portableExtension(for: asset))"
+                    relativePath = "resources/assets/\(filename)"
+                    let plaintext = try await assetManager.decryptedData(assetId: entity.id)
+                    try protectedWrite(plaintext, to: root.appendingPathComponent(relativePath))
+                    exportedAssetPaths[entity.id] = relativePath
+                }
+                record["assetPath"] = relativePath
+                record["content"] = try exportSafeJSONObject(
+                    entity.content,
+                    entityType: entity.entityType
+                )
+            } else {
+                record["content"] = try JSONSerialization.jsonObject(with: entity.content)
+            }
+            records.append(record)
+        }
+        let data = try JSONSerialization.data(
+            withJSONObject: records,
+            options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+        )
+        try protectedWrite(
+            data + Data("\n".utf8),
+            to: root.appendingPathComponent("entities.json")
+        )
+    }
+
+    private func exportableAIEntityIds(in entities: [StoredEntity]) -> Set<UUID> {
+        let ai = entities.filter { $0.entityType == .aiArtifact }
+        let acceptedTranscriptChunkIds = Set(
+            ai.compactMap { entity -> MediaTranscriptionManifest? in
+                guard let manifest = try? CanonicalJSON.decode(
+                    MediaTranscriptionManifest.self,
+                    from: entity.content
+                ), manifest.reviewState == .accepted || manifest.reviewState == .edited
+                else { return nil }
+                return manifest
+            }.flatMap(\.chunkEntityIds)
+        )
+        return Set(ai.compactMap { entity in
+            let accepted = reviewedAIArtifact(entity.content)
+                ?? acceptedTranscriptChunkIds.contains(entity.id)
+            return accepted ? entity.id : nil
+        })
     }
 
     private func exportAnnotations(to root: URL) async throws {
@@ -638,15 +729,7 @@ actor EpistoriaExportService {
             }.flatMap(\.chunkEntityIds)
         )
         let records: [[String: Any]] = try entities.compactMap { entity in
-            let digest = try? CanonicalJSON.decode(SessionDigestArtifact.self, from: entity.content)
-            let learning = try? CanonicalJSON.decode(LearningGenerationArtifact.self, from: entity.content)
-            let transcription = try? CanonicalJSON.decode(
-                MediaTranscriptionManifest.self,
-                from: entity.content
-            )
-            let accepted = digest.map { $0.reviewState == .accepted || $0.reviewState == .edited }
-                ?? learning.map { $0.reviewState == .accepted || $0.reviewState == .edited }
-                ?? transcription.map { $0.reviewState == .accepted || $0.reviewState == .edited }
+            let accepted = reviewedAIArtifact(entity.content)
                 ?? acceptedTranscriptChunkIds.contains(entity.id)
             guard accepted else { return nil }
             guard let content = try JSONSerialization.jsonObject(with: entity.content) as? [String: Any]
@@ -662,6 +745,25 @@ actor EpistoriaExportService {
         try protectedWrite(data + Data("\n".utf8), to: root.appendingPathComponent("ai-artifacts.json"))
     }
 
+    private func reviewedAIArtifact(_ content: Data) -> Bool? {
+        if let artifact = try? CanonicalJSON.decode(SessionDigestArtifact.self, from: content) {
+            return artifact.reviewState == .accepted || artifact.reviewState == .edited
+        }
+        if let artifact = try? CanonicalJSON.decode(LearningGenerationArtifact.self, from: content) {
+            return artifact.reviewState == .accepted || artifact.reviewState == .edited
+        }
+        if let artifact = try? CanonicalJSON.decode(FreeResponseFeedbackArtifact.self, from: content) {
+            return artifact.reviewState == .accepted || artifact.reviewState == .edited
+        }
+        if let artifact = try? CanonicalJSON.decode(NoteQueryArtifact.self, from: content) {
+            return artifact.reviewState == .accepted || artifact.reviewState == .edited
+        }
+        if let artifact = try? CanonicalJSON.decode(MediaTranscriptionManifest.self, from: content) {
+            return artifact.reviewState == .accepted || artifact.reviewState == .edited
+        }
+        return nil
+    }
+
     private func exportSafeJSONObject(_ data: Data, entityType: EntityType) throws -> Any {
         if entityType == .asset {
             let asset = try CanonicalJSON.decode(AssetPayload.self, from: data)
@@ -670,7 +772,6 @@ actor EpistoriaExportService {
                 "mimeType": asset.mimeType,
                 "plaintextByteSize": asset.plaintextByteSize,
                 "encryptedByteSize": asset.encryptedByteSize,
-                "dedupeTag": asset.dedupeTag,
                 "originalFilename": asset.originalFilename,
                 "createdAt": RFC3339Milliseconds.string(from: asset.createdAt),
                 "updatedAt": RFC3339Milliseconds.string(from: asset.updatedAt),
@@ -707,7 +808,10 @@ actor EpistoriaExportService {
         #endif
     }
 
-    private func validate(directory: URL) throws -> EpistoriaExportValidation {
+    private func validate(
+        directory: URL,
+        requireMatchingAccount: Bool
+    ) throws -> EpistoriaExportValidation {
         var required = [
             "metadata.json", "collections.json", "university.json", "sessions.json",
             "resources/resources.json", "annotations.json", "ai-artifacts.json",
@@ -717,21 +821,35 @@ actor EpistoriaExportService {
         guard fileManager.fileExists(atPath: metadataURL.path) else {
             throw EpistoriaExportError.validationFailed("missing metadata.json")
         }
-        let metadataData = try Data(contentsOf: metadataURL)
+        let metadataData = try boundedFileData(
+            at: metadataURL,
+            maximum: 1 * 1_024 * 1_024,
+            label: "metadata.json"
+        )
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         let metadata = try decoder.decode(Metadata.self, from: metadataData)
-        guard ["epistoria-export/1", "epistoria-export/2", "epistoria-export/3", "epistoria-export/4"].contains(metadata.formatVersion),
+        guard [
+            "epistoria-export/1", "epistoria-export/2", "epistoria-export/3",
+            "epistoria-export/4", "epistoria-export/5",
+        ].contains(metadata.formatVersion),
               metadata.mode == "DECRYPTED",
-              metadata.accountId == accountId
+              (!requireMatchingAccount || metadata.accountId == accountId)
         else {
             throw EpistoriaExportError.validationFailed("unsupported metadata version or mode")
         }
-        if ["epistoria-export/2", "epistoria-export/3", "epistoria-export/4"].contains(metadata.formatVersion) {
+        if [
+            "epistoria-export/2", "epistoria-export/3", "epistoria-export/4",
+            "epistoria-export/5",
+        ].contains(metadata.formatVersion) {
             required.append("notes/canvas-assets.json")
         }
-        if metadata.formatVersion == "epistoria-export/3" || metadata.formatVersion == "epistoria-export/4" {
+        if ["epistoria-export/3", "epistoria-export/4", "epistoria-export/5"]
+            .contains(metadata.formatVersion) {
             required.append(contentsOf: ["taxonomy.json", "knowledge.json", "learning.json"])
+        }
+        if metadata.formatVersion == "epistoria-export/5" {
+            required.append("entities.json")
         }
         for path in required where !fileManager.fileExists(
             atPath: directory.appendingPathComponent(path).path
@@ -739,7 +857,14 @@ actor EpistoriaExportService {
             throw EpistoriaExportError.validationFailed("missing \(path)")
         }
         let manifestURL = directory.appendingPathComponent("checksums.sha256")
-        let manifest = try String(contentsOf: manifestURL, encoding: .utf8)
+        let manifestData = try boundedFileData(
+            at: manifestURL,
+            maximum: 32 * 1_024 * 1_024,
+            label: "checksums.sha256"
+        )
+        guard let manifest = String(data: manifestData, encoding: .utf8) else {
+            throw EpistoriaExportError.validationFailed("checksum manifest is not UTF-8")
+        }
         var expected: [String: String] = [:]
         for line in manifest.split(whereSeparator: { $0.isNewline }) {
             let raw = String(line)
@@ -769,11 +894,25 @@ actor EpistoriaExportService {
             expected[path] = digest
         }
         let files = try regularFiles(in: directory).filter { $0.lastPathComponent != "checksums.sha256" }
+        guard files.count <= 100_000 else {
+            throw EpistoriaExportError.validationFailed("the package contains too many files")
+        }
         var total: Int64 = 0
         for file in files {
             let relative = relativePath(file, under: directory)
+            let values = try file.resourceValues(forKeys: [.fileSizeKey])
+            let byteSize = Int64(values.fileSize ?? 0)
+            guard byteSize >= 0, byteSize <= 512 * 1_024 * 1_024 else {
+                throw EpistoriaExportError.validationFailed("\(relative) exceeds the file limit")
+            }
+            total += byteSize
+            guard total <= 4 * 1_024 * 1_024 * 1_024 else {
+                throw EpistoriaExportError.validationFailed("the package exceeds the total size limit")
+            }
+            if file.pathExtension == "json", byteSize > 64 * 1_024 * 1_024 {
+                throw EpistoriaExportError.validationFailed("\(relative) exceeds the JSON limit")
+            }
             let data = try Data(contentsOf: file, options: .mappedIfSafe)
-            total += Int64(data.count)
             guard expected[relative] == sha256(data) else {
                 throw EpistoriaExportError.validationFailed("checksum mismatch for \(relative)")
             }
@@ -787,6 +926,19 @@ actor EpistoriaExportService {
             throw EpistoriaExportError.validationFailed("checksum manifest has unexpected entries")
         }
         return EpistoriaExportValidation(fileCount: files.count + 1, byteCount: total)
+    }
+
+    private func boundedFileData(at url: URL, maximum: Int, label: String) throws -> Data {
+        let values = try url.resourceValues(
+            forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey]
+        )
+        guard values.isRegularFile == true,
+              values.isSymbolicLink != true,
+              let size = values.fileSize,
+              size >= 0,
+              size <= maximum
+        else { throw EpistoriaExportError.validationFailed("\(label) exceeds its safe limit") }
+        return try Data(contentsOf: url, options: .mappedIfSafe)
     }
 
     private func writeChecksums(in directory: URL) throws {
@@ -840,6 +992,16 @@ actor EpistoriaExportService {
         case "image/webp": "webp"
         default: "image"
         }
+    }
+
+    private func portableExtension(for asset: AssetPayload) -> String {
+        let original = URL(fileURLWithPath: asset.originalFilename).pathExtension.lowercased()
+        if !original.isEmpty,
+           original.count <= 12,
+           original.unicodeScalars.allSatisfy({ CharacterSet.alphanumerics.contains($0) }) {
+            return original
+        }
+        return UTType(mimeType: asset.mimeType)?.preferredFilenameExtension ?? "bin"
     }
 
     private func createArchive(from directory: URL) throws -> URL {

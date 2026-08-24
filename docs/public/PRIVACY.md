@@ -58,7 +58,9 @@ A readable export is decrypted. After you save or share it, its protection depen
 destination. Store exports on an encrypted device or another trusted location. Do not attach them
 to issues, support requests, public messages, or test reports.
 
-The current app can validate an export but cannot import it.
+The app can import a version 5 export into an empty notebook. Import copies the readable package
+into protected temporary storage, validates it, and re-encrypts original files for the target
+notebook. Delete the readable package from temporary and shared locations after verification.
 
 ## Device revocation
 
@@ -69,4 +71,3 @@ erase notes, cached files, recovery information, or exports already stored on th
 
 The product remains in personal beta. Physical-device, multi-device, and full recovery testing is
 still in progress. Keep independent copies of important original material.
-

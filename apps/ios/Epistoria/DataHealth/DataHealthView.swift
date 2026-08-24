@@ -43,6 +43,9 @@ struct DataHealthView: View {
     @State private var includeDerivedAI = true
     @State private var exportResult: EpistoriaExportResult?
     @State private var isChoosingExportDirectory = false
+    @State private var isChoosingPortableImport = false
+    @State private var importPlan: EpistoriaImportPlan?
+    @State private var importResult: EpistoriaImportResult?
     @State private var validationMessage: String?
     @State private var errorMessage: String?
     #if DEBUG
@@ -68,16 +71,16 @@ struct DataHealthView: View {
                     developmentSection
                     #endif
                 }
-                .disabled(model.isCreatingPortableExport)
+                .disabled(model.isCreatingPortableExport || model.isImportingPortableExport)
             }
             .navigationTitle("Data Health")
             .toolbar {
                 Button("Refresh", systemImage: "arrow.clockwise") { Task { await load() } }
-                    .disabled(model.isCreatingPortableExport)
+                    .disabled(model.isCreatingPortableExport || model.isImportingPortableExport)
             }
             .task { await load() }
             .refreshable {
-                guard !model.isCreatingPortableExport else { return }
+                guard !model.isCreatingPortableExport, !model.isImportingPortableExport else { return }
                 await load()
             }
             .sheet(item: $pairing) { PairMacView(material: $0, apiURL: model.configuration?.apiURL) }
@@ -92,6 +95,17 @@ struct DataHealthView: View {
                 ExportReadyView(result: result) {
                     removeExport(result)
                 }
+            }
+            .sheet(item: $importPlan) { plan in
+                PortableImportReviewView(
+                    plan: plan,
+                    isWorking: isWorking,
+                    onImport: { Task { await commitImport(plan) } },
+                    onCancel: { Task { await cancelImport(plan) } }
+                )
+            }
+            .sheet(item: $importResult) { result in
+                PortableImportCompleteView(result: result) { importResult = nil }
             }
             .confirmationDialog(
                 "Create a readable export?",
@@ -126,6 +140,13 @@ struct DataHealthView: View {
                 allowsMultipleSelection: false
             ) { result in
                 Task { await validateExport(result) }
+            }
+            .fileImporter(
+                isPresented: $isChoosingPortableImport,
+                allowedContentTypes: [.zip, .folder],
+                allowsMultipleSelection: false
+            ) { result in
+                Task { await prepareImport(result) }
             }
             .sheet(isPresented: Binding(
                 get: { recoveryWords != nil },
@@ -353,6 +374,11 @@ struct DataHealthView: View {
                 isChoosingExportDirectory = true
             }
             .disabled(isWorking)
+            Button("Import into empty notebook…", systemImage: "square.and.arrow.down") {
+                isChoosingPortableImport = true
+            }
+            .disabled(isWorking)
+            .accessibilityIdentifier("dataHealth.importExport")
             if let validationMessage {
                 Label(validationMessage, systemImage: "checkmark.circle.fill")
                     .font(.caption)
@@ -361,7 +387,7 @@ struct DataHealthView: View {
         } header: {
             Text("Portable export")
         } footer: {
-            Text("The generated ZIP is validated with SHA-256 checksums and includes open JSON, original PDFs, and original PencilKit drawing data. It is readable, so store it securely.")
+            Text("The generated ZIP is validated with SHA-256 checksums and includes open JSON, original files, and PencilKit drawing data. Import restores format version 5 only and requires an empty notebook. Readable exports should be stored securely.")
         }
     }
 
@@ -554,6 +580,41 @@ struct DataHealthView: View {
         }
     }
 
+    private func prepareImport(_ result: Result<[URL], Error>) async {
+        isWorking = true
+        defer { isWorking = false }
+        do {
+            guard let url = try result.get().first else { return }
+            importPlan = try await model.preparePortableImport(from: url)
+        } catch is CancellationError {
+            return
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func commitImport(_ plan: EpistoriaImportPlan) async {
+        isWorking = true
+        defer { isWorking = false }
+        do {
+            let result = try await model.commitPortableImport(plan)
+            importPlan = nil
+            await Task.yield()
+            importResult = result
+            await load()
+        } catch {
+            importPlan = nil
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func cancelImport(_ plan: EpistoriaImportPlan) async {
+        isWorking = true
+        await model.cancelPortableImport(plan)
+        importPlan = nil
+        isWorking = false
+    }
+
     private func discardSensitiveState() {
         bootstrapSecret = ""
         recoveryWords = nil
@@ -598,6 +659,105 @@ private struct ExportReadyView: View {
             .padding(30)
             .navigationTitle("Portable export")
             .toolbar { Button("Done") { onDone() } }
+        }
+        .interactiveDismissDisabled()
+    }
+}
+
+private struct PortableImportReviewView: View {
+    let plan: EpistoriaImportPlan
+    let isWorking: Bool
+    let onImport: () -> Void
+    let onCancel: () -> Void
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section("Export") {
+                    LabeledContent("Created", value: plan.summary.exportedAt.formatted())
+                    LabeledContent("Format", value: plan.summary.formatVersion)
+                    LabeledContent(
+                        "Source account",
+                        value: "…\(plan.summary.sourceAccountId.uuidString.lowercased().suffix(8))"
+                    )
+                    LabeledContent(
+                        "Package",
+                        value: ByteCountFormatter.string(
+                            fromByteCount: plan.summary.byteCount,
+                            countStyle: .file
+                        )
+                    )
+                }
+                Section("Contents") {
+                    countRow("Records", plan.summary.recordCount)
+                    countRow("Topics", plan.summary.topicCount)
+                    countRow("Notes", plan.summary.noteCount)
+                    countRow("Sources", plan.summary.sourceCount)
+                    countRow("Original files", plan.summary.assetCount)
+                    countRow("Flashcards", plan.summary.flashcardCount)
+                    countRow("Tests", plan.summary.testCount)
+                }
+                Section {
+                    Label(
+                        "The source account is informational. Epistoria will encrypt every record and original file with this notebook's key.",
+                        systemImage: "lock.shield"
+                    )
+                    Label(
+                        "Import works only when this notebook is empty. It never merges with or replaces existing records.",
+                        systemImage: "rectangle.and.pencil.and.ellipsis"
+                    )
+                } header: {
+                    Text("Before importing")
+                }
+                Section {
+                    Button(action: onImport) {
+                        HStack {
+                            if isWorking { ProgressView().accessibilityHidden(true) }
+                            Text(isWorking ? "Importing…" : "Import into this notebook")
+                                .frame(maxWidth: .infinity)
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(isWorking)
+                    .accessibilityIdentifier("portableImport.confirm")
+                }
+            }
+            .navigationTitle("Import notebook")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel", action: onCancel).disabled(isWorking)
+                }
+            }
+        }
+        .interactiveDismissDisabled()
+    }
+
+    private func countRow(_ title: String, _ value: Int) -> some View {
+        LabeledContent(title, value: value.formatted())
+    }
+}
+
+private struct PortableImportCompleteView: View {
+    let result: EpistoriaImportResult
+    let onDone: () -> Void
+
+    var body: some View {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 18) {
+                Label("Import complete", systemImage: "checkmark.seal")
+                    .font(.title2.bold())
+                Text("\(result.summary.recordCount.formatted()) records and \(result.summary.assetCount.formatted()) original files are encrypted on this iPad.")
+                Text("Epistoria preserved stable record IDs, source versions, learning history, and unresolved conflicts. Connected sync can upload the restored encrypted records.")
+                    .foregroundStyle(.secondary)
+                if let warning = result.cleanupWarning {
+                    Label(warning, systemImage: "exclamationmark.triangle")
+                        .foregroundStyle(EpistoriaDesign.attention)
+                }
+                Spacer()
+            }
+            .padding(30)
+            .navigationTitle("Portable import")
+            .toolbar { Button("Done", action: onDone) }
         }
         .interactiveDismissDisabled()
     }
