@@ -55,6 +55,16 @@ Epistoria remains in personal beta. The following limits apply to the current pr
 - Two-device interruption and concurrent-version testing is not complete.
 - Device revocation and recovery still require live-environment validation.
 
+## Search
+
+- Exact text search remains available for indexed notebook content.
+- Related results depend on language support available on the iPad. Unsupported content falls
+  back to exact matches without sending the query to an external service.
+- Related matching is approximate. A related result can be useful without containing every query
+  word. Confirm important claims against the opened note or Source.
+- Related PDF results use the matched excerpt to find a supporting passage. A result can open at
+  the first indexed page when an exact page cannot be recovered from that excerpt.
+
 ## Optional processing
 
 - PDF extraction and AI features require a paired Mac.

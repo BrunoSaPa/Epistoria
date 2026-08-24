@@ -37,7 +37,8 @@ The app also provides:
 - One private notebook that connects subjects, sources, notes, sessions, and learning history.
 - Immutable PDF import and separate page annotations.
 - Areas, Topics, optional Lists, academic Topic details, and study sessions.
-- Local full-text search with links to the matching note item or PDF page.
+- Automatic on-device hybrid search. Exact text matches appear first. Related results can find
+  different wording and link back to the matching note item or PDF passage when available.
 - Reversible archive and restore for notes and courses.
 - Optional encrypted synchronization through a private server.
 - Explicit conflict review that preserves concurrent versions.

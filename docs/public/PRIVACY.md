@@ -12,6 +12,10 @@ material without a network connection.
 The account key is protected separately by the iPad. The app asks for user presence when it opens
 the private notebook.
 
+Exact and related search run on the unlocked iPad. Search information remains in protected local
+storage. Related search does not send a query or notebook content to the synchronization service,
+paired Mac, or configured AI provider.
+
 ## Optional private synchronization
 
 Private synchronization sends encrypted content to a configured service. The service handles the

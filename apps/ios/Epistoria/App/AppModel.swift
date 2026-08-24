@@ -101,6 +101,7 @@ final class AppModel {
     private var automaticSyncToken: UUID?
     private var periodicSyncTask: Task<Void, Never>?
     private var proactiveAutomationTask: Task<Void, Never>?
+    private var semanticIndexTask: Task<Void, Never>?
     private var syncAttemptTask: Task<SyncReport, Error>?
     private var exportTask: Task<EpistoriaExportResult, Error>?
     private var portableImportService: EpistoriaPortableImportService?
@@ -221,6 +222,8 @@ final class AppModel {
         periodicSyncTask = nil
         proactiveAutomationTask?.cancel()
         proactiveAutomationTask = nil
+        semanticIndexTask?.cancel()
+        semanticIndexTask = nil
         pathMonitor?.pathUpdateHandler = nil
         pathMonitor?.cancel()
         pathMonitor = nil
@@ -984,6 +987,7 @@ final class AppModel {
         Task { await refreshDataHealth() }
         scheduleAutomaticSync()
         scheduleProactiveAutomation(delay: .seconds(10))
+        scheduleSemanticIndexing(delay: .seconds(2))
     }
 
     func refreshDataHealth() async {
@@ -1126,6 +1130,28 @@ final class AppModel {
         if let pendingSaveWarning { syncError = pendingSaveWarning }
         resumeSyncSchedulingIfNeeded()
         scheduleProactiveAutomation()
+        scheduleSemanticIndexing(delay: .zero)
+    }
+
+    private func scheduleSemanticIndexing(delay: Duration) {
+        semanticIndexTask?.cancel()
+        guard let database, !isLocking, case .ready = phase else { return }
+        semanticIndexTask = Task(priority: .utility) {
+            do { try await Task.sleep(for: delay) }
+            catch { return }
+            while !Task.isCancelled {
+                let indexed: Int
+                do {
+                    indexed = try await database.rebuildSemanticSearchIndex(batchLimit: 48)
+                } catch {
+                    // This index is local and disposable. Exact search remains available.
+                    return
+                }
+                guard indexed == 48 else { return }
+                do { try await Task.sleep(for: .milliseconds(50)) }
+                catch { return }
+            }
+        }
     }
 
     private func startPeriodicSync() {
@@ -1178,6 +1204,8 @@ final class AppModel {
         periodicSyncTask = nil
         proactiveAutomationTask?.cancel()
         proactiveAutomationTask = nil
+        semanticIndexTask?.cancel()
+        semanticIndexTask = nil
         pathMonitor?.pathUpdateHandler = nil
         pathMonitor?.cancel()
         pathMonitor = nil

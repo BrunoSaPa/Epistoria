@@ -33,7 +33,7 @@ struct KnowledgeSearchView: View {
                     ContentUnavailableView {
                         Label("No matches", systemImage: "magnifyingglass")
                     } description: {
-                        Text("Try fewer words, another spelling, or the All scope. Search stays entirely inside your encrypted database.")
+                        Text("Try fewer words, different wording, or the All scope. Search stays entirely on this iPad.")
                     } actions: {
                         if scope != .all {
                             Button("Search everything") { scope = .all }
@@ -41,32 +41,25 @@ struct KnowledgeSearchView: View {
                         }
                     }
                 } else {
-                    List(hits) { hit in
-                        NavigationLink {
-                            SearchDestination(model: model, hit: hit)
-                        } label: {
-                            VStack(alignment: .leading, spacing: 6) {
-                                HStack {
-                                    Label(title(for: hit), systemImage: symbol(for: hit.entity.entityType))
-                                        .font(.headline)
-                                    Spacer()
-                                    Text(typeLabel(hit.entity.entityType))
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                        .padding(.horizontal, 8)
-                                        .padding(.vertical, 4)
-                                        .background(.quaternary, in: Capsule())
-                                }
-                                if !hit.snippet.isEmpty {
-                                    Text(cleanSnippet(hit.snippet))
-                                        .font(.subheadline)
-                                        .foregroundStyle(.secondary)
-                                        .lineLimit(3)
+                    List {
+                        if !exactHits.isEmpty {
+                            Section("Exact matches") {
+                                ForEach(exactHits) { hit in
+                                    resultLink(for: hit)
                                 }
                             }
-                            .padding(.vertical, 3)
                         }
-                        .accessibilityIdentifier("search.result.\(hit.entity.id.uuidString)")
+                        if !relatedHits.isEmpty {
+                            Section {
+                                ForEach(relatedHits) { hit in
+                                    resultLink(for: hit)
+                                }
+                            } header: {
+                                Text("Related")
+                            } footer: {
+                                Text("Matched by meaning on this iPad. Related results never use your AI provider.")
+                            }
+                        }
                     }
                 }
             }
@@ -97,7 +90,9 @@ struct KnowledgeSearchView: View {
         if !skipDelay { try? await Task.sleep(for: .milliseconds(220)) }
         guard !Task.isCancelled else { return }
         do {
-            hits = try await database.search(clean).filter(isInScope)
+            let results = try await database.search(clean, entityTypes: scopedEntityTypes)
+            guard !Task.isCancelled else { return }
+            hits = results
             isSearching = false
         } catch {
             isSearching = false
@@ -105,17 +100,53 @@ struct KnowledgeSearchView: View {
         }
     }
 
-    private func isInScope(_ hit: SearchHit) -> Bool {
+    private var scopedEntityTypes: [EntityType]? {
         switch scope {
         case .all:
-            true
+            nil
         case .notes:
-            [.note, .noteBlock].contains(hit.entity.entityType)
+            [.note, .noteBlock]
         case .resources:
-            [.resource, .asset, .annotation, .aiArtifact].contains(hit.entity.entityType)
+            [.resource, .asset, .annotation, .transcriptCorrection, .evidence, .aiArtifact]
         case .sessions:
-            hit.entity.entityType == .studySession
+            [.studySession]
         }
+    }
+
+    private var exactHits: [SearchHit] {
+        hits.filter { $0.matchKind == .exact }
+    }
+
+    private var relatedHits: [SearchHit] {
+        hits.filter { $0.matchKind == .related }
+    }
+
+    private func resultLink(for hit: SearchHit) -> some View {
+        NavigationLink {
+            SearchDestination(model: model, hit: hit)
+        } label: {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Label(title(for: hit), systemImage: symbol(for: hit.entity.entityType))
+                        .font(.headline)
+                    Spacer()
+                    Text(typeLabel(hit.entity.entityType))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(.quaternary, in: Capsule())
+                }
+                if !hit.snippet.isEmpty {
+                    Text(cleanSnippet(hit.snippet))
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(3)
+                }
+            }
+            .padding(.vertical, 3)
+        }
+        .accessibilityIdentifier("search.result.\(hit.entity.id.uuidString)")
     }
 
     private func title(for hit: SearchHit) -> String {
@@ -183,7 +214,7 @@ private struct SearchDestination: View {
                     model: model,
                     noteId: noteId,
                     focusedBlockId: hit.entity.id,
-                    highlightText: matchedSearchText(in: hit.snippet)
+                    highlightText: navigationSearchText(for: hit)
                 )
             } else {
                 SearchRecordView(hit: hit)
@@ -237,7 +268,7 @@ private struct SearchDestination: View {
             if let artifact = try? CanonicalJSON.decode(SessionDigestArtifact.self, from: hit.entity.content) {
                 SessionDetailView(model: model, sessionId: artifact.sessionId)
             } else if let chunk = try? CanonicalJSON.decode(PDFExtractionChunk.self, from: hit.entity.content) {
-                let term = matchedSearchText(in: hit.snippet)
+                let term = navigationSearchText(for: hit)
                 ResourceDetailView(
                     model: model,
                     resourceId: chunk.resourceId,
@@ -291,4 +322,13 @@ private func matchedSearchText(in snippet: String) -> String? {
     guard let close = remainder.firstIndex(of: "]") else { return nil }
     let match = remainder[..<close].trimmingCharacters(in: .whitespacesAndNewlines)
     return match.count >= 2 ? match : nil
+}
+
+private func navigationSearchText(for hit: SearchHit) -> String? {
+    if hit.matchKind == .exact {
+        return matchedSearchText(in: hit.snippet)
+    }
+    let text = hit.snippet.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard text.count >= 2 else { return nil }
+    return String(text.prefix(120))
 }

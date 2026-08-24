@@ -106,10 +106,13 @@ Completed:
 20. Anthropic Messages and Google Gemini `generateContent` can be configured directly. Both use
     fixed official HTTPS destinations, Keychain credentials, native JSON Schema output, optional
     image input, and the same encrypted route and artifact boundaries as other providers.
+21. Search automatically combines exact text results with a separate related-results section.
+    Both run on the iPad. Exact results remain available when related matching is unavailable.
 
 Next stages:
 
-1. Evaluate optional local semantic search after daily use shows a retrieval gap.
+1. Validate related-result quality, performance, battery use, VoiceOver, and direct Source
+   navigation during representative daily use on a physical iPad.
 
 Opening the app will not by itself send notebook content for processing. Review scheduling and the
 base daily queue will run on the iPad without paid processing.

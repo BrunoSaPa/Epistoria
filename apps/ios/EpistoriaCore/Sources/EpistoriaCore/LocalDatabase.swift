@@ -117,10 +117,17 @@ public struct PendingMutation: Equatable, Sendable {
     public var attemptCount: Int
 }
 
+public enum SearchMatchKind: String, Equatable, Sendable {
+    case exact
+    case related
+}
+
 public struct SearchHit: Equatable, Sendable, Identifiable {
     public var id: UUID { entity.id }
     public var entity: StoredEntity
     public var snippet: String
+    public var matchKind: SearchMatchKind
+    public var relevance: Double?
 }
 
 public struct LocalConflict: Equatable, Sendable, Identifiable {
@@ -292,11 +299,25 @@ public actor SQLCipherDatabase {
     }
 
     private let connection: SQLCipherConnection
+    private let semanticEmbeddingProvider: any LocalSemanticEmbeddingProviding
     public nonisolated let url: URL
 
     public init(url: URL, key: Data) throws {
+        try self.init(
+            url: url,
+            key: key,
+            semanticEmbeddingProvider: AppleLocalSemanticEmbeddingProvider()
+        )
+    }
+
+    init(
+        url: URL,
+        key: Data,
+        semanticEmbeddingProvider: any LocalSemanticEmbeddingProviding
+    ) throws {
         guard key.count == 32 else { throw LocalDatabaseError.keyRejected }
         self.url = url
+        self.semanticEmbeddingProvider = semanticEmbeddingProvider
         try FileManager.default.createDirectory(
             at: url.deletingLastPathComponent(),
             withIntermediateDirectories: true
@@ -713,6 +734,8 @@ public actor SQLCipherDatabase {
                 ]
             )
             try run("DELETE FROM search_index WHERE entity_id=?", [.text(canonical(id))])
+            try run("DELETE FROM search_embeddings WHERE entity_id=?", [.text(canonical(id))])
+            try run("DELETE FROM search_embedding_status WHERE entity_id=?", [.text(canonical(id))])
         }
     }
 
@@ -758,29 +781,103 @@ public actor SQLCipherDatabase {
             && scalarInteger("SELECT count(*) FROM local_conflicts") == 0
     }
 
-    public func search(_ text: String, limit: Int = 50) throws -> [SearchHit] {
+    public func search(
+        _ text: String,
+        entityTypes: [EntityType]? = nil,
+        limit: Int = 50
+    ) throws -> [SearchHit] {
         let tokens = text
             .split { !$0.isLetter && !$0.isNumber }
             .prefix(12)
             .map { "\"\($0.replacingOccurrences(of: "\"", with: "\"\""))\"*" }
         guard !tokens.isEmpty else { return [] }
         let expression = tokens.joined(separator: " AND ")
+        let resultLimit = min(max(limit, 1), 200)
+        let scope = Array(Set(entityTypes ?? [])).sorted { $0.rawValue < $1.rawValue }
+        if entityTypes != nil, scope.isEmpty { return [] }
+        var scopeSQL = ""
+        var scopeValues: [SQLValue] = []
+        if !scope.isEmpty {
+            scopeSQL = " AND e.entity_type IN (\(Array(repeating: "?", count: scope.count).joined(separator: ",")))"
+            scopeValues = scope.map { .text($0.rawValue) }
+        }
         let rows = try query(
             """
-            SELECT e.*, snippet(search_index, 2, '[', ']', '…', 18) AS result_snippet
+            SELECT e.*, snippet(search_index, -1, '[', ']', '…', 18) AS result_snippet
             FROM search_index JOIN entities e ON e.id = search_index.entity_id
-            WHERE search_index MATCH ? AND e.tombstone=0
-            ORDER BY bm25(search_index), e.client_modified_at DESC
+            WHERE search_index MATCH ? AND e.tombstone=0\(scopeSQL)
+            ORDER BY bm25(search_index, 0.0, 8.0, 1.0), e.client_modified_at DESC
             LIMIT ?
             """,
-            [.text(expression), .integer(Int64(min(max(limit, 1), 200)))]
+            [.text(expression)] + scopeValues + [.integer(Int64(resultLimit))]
         )
-        return try rows.map { row in
+        let exact = try rows.map { row in
             guard case let .text(snippet) = row["result_snippet"] else {
                 throw LocalDatabaseError.invalidRow
             }
-            return SearchHit(entity: try entityFromRow(row), snippet: snippet)
+            return SearchHit(
+                entity: try entityFromRow(row),
+                snippet: snippet,
+                matchKind: .exact,
+                relevance: nil
+            )
         }
+        guard exact.count < resultLimit, semanticEmbeddingProvider.isAvailable else {
+            return exact
+        }
+        _ = try? rebuildSemanticSearchIndex(batchLimit: 8)
+        let related = try relatedSearchHits(
+            text,
+            excluding: Set(exact.map(\ .id)),
+            entityTypes: scope,
+            limit: resultLimit - exact.count
+        )
+        return exact + related
+    }
+
+    /// Builds a bounded batch of the disposable local semantic index.
+    ///
+    /// The source text already exists in SQLCipher's full-text table. Embedding failure never
+    /// changes an entity or its synchronization state.
+    @discardableResult
+    public func rebuildSemanticSearchIndex(batchLimit: Int = 48) throws -> Int {
+        guard semanticEmbeddingProvider.isAvailable else { return 0 }
+        let boundedLimit = min(max(batchLimit, 1), 256)
+        let rows = try query(
+            """
+            SELECT search_index.entity_id, search_index.title, search_index.body
+            FROM search_index
+            WHERE NOT EXISTS (
+                SELECT 1 FROM search_embedding_status
+                WHERE search_embedding_status.entity_id = search_index.entity_id
+                  AND search_embedding_status.engine_version = ?
+            )
+            ORDER BY search_index.rowid ASC
+            LIMIT ?
+            """,
+            [
+                .integer(Int64(LocalSemanticSearch.engineVersion)),
+                .integer(Int64(boundedLimit)),
+            ]
+        )
+        var processed = 0
+        for row in rows {
+            guard case let .text(entityId) = row["entity_id"],
+                  case let .text(title) = row["title"],
+                  case let .text(body) = row["body"]
+            else { continue }
+            do {
+                _ = try replaceSemanticSearch(
+                    entityId: entityId,
+                    document: SearchDocument(title: title, body: body)
+                )
+                processed += 1
+            } catch {
+                try? run("DELETE FROM search_embeddings WHERE entity_id=?", [.text(entityId)])
+                try? run("DELETE FROM search_embedding_status WHERE entity_id=?", [.text(entityId)])
+            }
+        }
+        return processed
     }
 
     public func pendingMutations(limit: Int = 100) throws -> [PendingMutation] {
@@ -1162,6 +1259,27 @@ public actor SQLCipherDatabase {
             tokenize='unicode61 remove_diacritics 2'
         );
 
+        CREATE TABLE IF NOT EXISTS search_embeddings (
+            entity_id TEXT NOT NULL,
+            chunk_index INTEGER NOT NULL CHECK (chunk_index >= 0),
+            engine_version INTEGER NOT NULL CHECK (engine_version > 0),
+            language TEXT NOT NULL,
+            model_revision INTEGER NOT NULL CHECK (model_revision >= 0),
+            dimension INTEGER NOT NULL CHECK (dimension > 0),
+            vector BLOB NOT NULL,
+            snippet TEXT NOT NULL,
+            PRIMARY KEY(entity_id, chunk_index),
+            FOREIGN KEY(entity_id) REFERENCES entities(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS search_embeddings_model
+            ON search_embeddings(language, model_revision, dimension);
+
+        CREATE TABLE IF NOT EXISTS search_embedding_status (
+            entity_id TEXT PRIMARY KEY,
+            engine_version INTEGER NOT NULL CHECK (engine_version > 0),
+            FOREIGN KEY(entity_id) REFERENCES entities(id) ON DELETE CASCADE
+        );
+
         CREATE TABLE IF NOT EXISTS migration_journal (
             id TEXT PRIMARY KEY,
             name TEXT NOT NULL,
@@ -1188,6 +1306,9 @@ public actor SQLCipherDatabase {
                 PRAGMA user_version = 2;
                 """
             )
+        }
+        if version < 3 {
+            try execute(database, "PRAGMA user_version = 3;")
         }
     }
 
@@ -1318,13 +1439,147 @@ public actor SQLCipherDatabase {
     }
 
     private func updateSearch(id: UUID, document: SearchDocument?) throws {
-        try run("DELETE FROM search_index WHERE entity_id=?", [.text(canonical(id))])
+        let entityId = canonical(id)
+        try run("DELETE FROM search_index WHERE entity_id=?", [.text(entityId)])
+        try run("DELETE FROM search_embeddings WHERE entity_id=?", [.text(entityId)])
+        try run("DELETE FROM search_embedding_status WHERE entity_id=?", [.text(entityId)])
         if let document {
             try run(
                 "INSERT INTO search_index(entity_id, title, body) VALUES (?, ?, ?)",
-                [.text(canonical(id)), .text(document.title), .text(document.body)]
+                [.text(entityId), .text(document.title), .text(document.body)]
             )
         }
+    }
+
+    private func replaceSemanticSearch(
+        entityId: String,
+        document: SearchDocument
+    ) throws -> Bool {
+        try run("DELETE FROM search_embeddings WHERE entity_id=?", [.text(entityId)])
+        try run("DELETE FROM search_embedding_status WHERE entity_id=?", [.text(entityId)])
+        var inserted = 0
+        for (index, chunk) in LocalSemanticSearch.chunks(for: document).enumerated() {
+            guard let model = semanticEmbeddingProvider.model(for: chunk.text),
+                  let rawVector = semanticEmbeddingProvider.vector(for: chunk.text, model: model),
+                  let vector = LocalSemanticSearch.normalized(rawVector),
+                  vector.count == model.dimension
+            else { continue }
+            try run(
+                """
+                INSERT INTO search_embeddings(
+                    entity_id, chunk_index, engine_version, language, model_revision,
+                    dimension, vector, snippet
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    .text(entityId),
+                    .integer(Int64(index)),
+                    .integer(Int64(LocalSemanticSearch.engineVersion)),
+                    .text(model.language),
+                    .integer(Int64(model.revision)),
+                    .integer(Int64(model.dimension)),
+                    .blob(LocalSemanticSearch.encode(vector)),
+                    .text(chunk.snippet),
+                ]
+            )
+            inserted += 1
+        }
+        try run(
+            "INSERT OR REPLACE INTO search_embedding_status(entity_id, engine_version) VALUES (?, ?)",
+            [
+                .text(entityId),
+                .integer(Int64(LocalSemanticSearch.engineVersion)),
+            ]
+        )
+        return inserted > 0
+    }
+
+    private func relatedSearchHits(
+        _ text: String,
+        excluding exactIds: Set<UUID>,
+        entityTypes: [EntityType],
+        limit: Int
+    ) throws -> [SearchHit] {
+        guard limit > 0 else { return [] }
+        var scopeSQL = ""
+        var values: [SQLValue] = [.integer(Int64(LocalSemanticSearch.engineVersion))]
+        if !entityTypes.isEmpty {
+            let placeholders = Array(repeating: "?", count: entityTypes.count)
+                .joined(separator: ",")
+            scopeSQL = " AND e.entity_type IN (\(placeholders))"
+            values += entityTypes.map { .text($0.rawValue) }
+        }
+        let rows = try query(
+            """
+            SELECT e.*, search_embeddings.language AS semantic_language,
+                   search_embeddings.model_revision AS semantic_revision,
+                   search_embeddings.dimension AS semantic_dimension,
+                   search_embeddings.vector AS semantic_vector,
+                   search_embeddings.snippet AS semantic_snippet
+            FROM search_embeddings
+            JOIN entities e ON e.id = search_embeddings.entity_id
+            WHERE search_embeddings.engine_version=? AND e.tombstone=0\(scopeSQL)
+            """,
+            values
+        )
+        var queryVectors: [LocalSemanticEmbeddingModel: [Float]] = [:]
+        var unavailableModels: Set<LocalSemanticEmbeddingModel> = []
+        var bestByEntity: [UUID: SearchHit] = [:]
+        for row in rows {
+            guard let entity = try? entityFromRow(row), !exactIds.contains(entity.id),
+                  case let .text(language) = row["semantic_language"],
+                  case let .integer(rawRevision) = row["semantic_revision"],
+                  case let .integer(rawDimension) = row["semantic_dimension"],
+                  case let .blob(data) = row["semantic_vector"],
+                  case let .text(snippet) = row["semantic_snippet"],
+                  rawRevision >= 0, rawDimension > 0,
+                  rawRevision <= Int64(Int.max), rawDimension <= Int64(Int.max)
+            else { continue }
+            let model = LocalSemanticEmbeddingModel(
+                language: language,
+                revision: Int(rawRevision),
+                dimension: Int(rawDimension)
+            )
+            let queryVector: [Float]
+            if let cached = queryVectors[model] {
+                queryVector = cached
+            } else {
+                guard !unavailableModels.contains(model),
+                      let raw = semanticEmbeddingProvider.vector(for: text, model: model),
+                      let normalized = LocalSemanticSearch.normalized(raw),
+                      normalized.count == model.dimension
+                else {
+                    unavailableModels.insert(model)
+                    continue
+                }
+                queryVectors[model] = normalized
+                queryVector = normalized
+            }
+            guard let documentVector = LocalSemanticSearch.decode(
+                data,
+                dimension: model.dimension
+            ), let similarity = LocalSemanticSearch.similarity(queryVector, documentVector),
+               similarity >= LocalSemanticSearch.minimumSimilarity
+            else { continue }
+            let hit = SearchHit(
+                entity: entity,
+                snippet: snippet,
+                matchKind: .related,
+                relevance: similarity
+            )
+            if similarity > (bestByEntity[entity.id]?.relevance ?? -.infinity) {
+                bestByEntity[entity.id] = hit
+            }
+        }
+        return bestByEntity.values.sorted { left, right in
+            let leftScore = left.relevance ?? -.infinity
+            let rightScore = right.relevance ?? -.infinity
+            if leftScore != rightScore { return leftScore > rightScore }
+            if left.entity.clientModifiedAt != right.entity.clientModifiedAt {
+                return left.entity.clientModifiedAt > right.entity.clientModifiedAt
+            }
+            return left.id.uuidString < right.id.uuidString
+        }.prefix(limit).map(\ .self)
     }
 
     private func applyRemoteInsideTransaction(

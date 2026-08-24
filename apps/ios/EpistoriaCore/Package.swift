@@ -33,6 +33,7 @@ let package = Package(
                 .linkedFramework("AVFoundation"),
                 .linkedFramework("AVFAudio"),
                 .linkedFramework("ImageIO"),
+                .linkedFramework("NaturalLanguage"),
                 .linkedFramework("Security"),
                 .linkedFramework("UniformTypeIdentifiers"),
             ]

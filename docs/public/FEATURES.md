@@ -135,7 +135,10 @@ the current personal beta.
 
 - Search notes, resources, PDF text, annotations, and sessions on the iPad.
 - Filter results by content type.
+- See exact text matches first and related results in a separate section.
+- Find related material when the query uses different wording from the note or Source.
 - Open the matching note item or PDF page when a precise location is available.
+- Use related search without a network connection, paired Mac, or configured AI provider.
 
 ## Selected-region questions
 

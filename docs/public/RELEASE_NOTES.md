@@ -1,5 +1,13 @@
 # Release notes
 
+## Automatic related search
+
+- Kept exact text matches first.
+- Added a separate Related section for material that uses different wording.
+- Kept both search paths on the unlocked iPad without a paired Mac or AI provider request.
+- Applied Notes, Resources, and Sessions filters before ranking results.
+- Preserved exact search when related matching is unavailable for a language or device.
+
 ## Native Anthropic and Gemini connections
 
 - Added direct Anthropic Messages and Google Gemini `generateContent` connections.

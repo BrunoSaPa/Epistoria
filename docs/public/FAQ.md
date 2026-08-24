@@ -17,6 +17,12 @@ content without a network connection.
 Optional synchronization, first-time restored-file downloads, trusted Mac processing, and AI
 requests require the applicable service and connection.
 
+## Does related search use my AI provider?
+
+No. Exact and related search run on the unlocked iPad. They do not create an AI request, use the
+paired Mac, or incur provider charges. If related matching is unavailable for the current
+language or device, exact text search still works.
+
 ## Is synchronization required?
 
 No. Epistoria can operate as a local-only notebook. Private synchronization is optional.

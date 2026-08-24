@@ -485,7 +485,13 @@ appear in readable notebook exports. A fresh iPad requires the key to be entered
 3. Enter the search text.
 4. Open a result.
 
-Search happens on the unlocked iPad. A precise result opens the matching note item or PDF page.
+**Exact matches** lists direct text matches first. **Related** lists material with similar meaning
+when the wording differs. Both searches happen on the unlocked iPad. They do not use the paired
+Mac or configured AI provider.
+
+A precise result opens the matching note item or PDF page. A related result opens the record and
+uses its matched excerpt to locate a supporting passage when one is available. Some languages or
+devices may show exact matches only.
 
 ## Ask about part of a note
 
