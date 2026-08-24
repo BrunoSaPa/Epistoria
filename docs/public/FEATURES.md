@@ -130,6 +130,17 @@ the current personal beta.
 
 This feature requires a paired Mac and a configured AI provider. It is optional.
 
+## AI provider choice
+
+- Add, edit, activate, and remove provider connections from Settings.
+- Use the official supported service or a compatible local or hosted service.
+- Keep provider keys in secure device storage on the iPad and trusted Mac.
+- See the destination host and model before choosing the active provider.
+- Use unencrypted HTTP only for a local or private-network service. Remote services require HTTPS.
+- Declare vision and transcription support only when the selected service provides them.
+- Keep provider connections and keys out of readable notebook exports.
+- Record the actual provider connection and model on each completed generated result.
+
 ## Learning
 
 - Create and manage flashcard decks.

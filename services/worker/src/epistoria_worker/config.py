@@ -47,6 +47,7 @@ class WorkerSettings:
     poll_seconds: float = 10.0
     maximum_asset_bytes: int = 268_435_456
     keychain_service: str = "com.epistoria.worker.account-key"
+    provider_keychain_service: str = "com.epistoria.worker.provider-profile"
     outbox_directory: Path = Path.home() / "Library/Application Support/EpistoriaWorker/outbox"
     cost_ledger_path: Path = (
         Path.home() / "Library/Application Support/EpistoriaWorker/cost-ledger.json"
@@ -106,6 +107,10 @@ class WorkerSettings:
             maximum_asset_bytes=maximum_asset_bytes,
             keychain_service=os.environ.get(
                 "EPISTORIA_KEYCHAIN_SERVICE", "com.epistoria.worker.account-key"
+            ),
+            provider_keychain_service=os.environ.get(
+                "EPISTORIA_PROVIDER_KEYCHAIN_SERVICE",
+                "com.epistoria.worker.provider-profile",
             ),
             outbox_directory=Path(
                 os.environ.get("EPISTORIA_OUTBOX_DIRECTORY", str(default_outbox))

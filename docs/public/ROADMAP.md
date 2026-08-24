@@ -68,6 +68,9 @@ Completed:
    a scrollable local table. Malformed and oversized files create no partial Source record.
 9. EPUB, DOCX, ODT, PPTX, ODP, and XLSX files import after bounded package validation. Their
    readable text is available locally while the original file remains unchanged.
+10. AI provider connections can be managed from Settings. The current choices include the
+    official supported service and compatible local or hosted services. Keys stay in secure
+    device storage and completed results identify the provider connection and model used.
 10. MP3, M4A, AAC, WAV, and CAF recordings import after local format and decoder validation and
     play from decrypted memory on the iPad.
 11. MP4, M4V, and MOV files import after bounded container and decoder validation. Video uses

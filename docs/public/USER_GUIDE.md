@@ -420,6 +420,30 @@ the scope again. Use **Revoke permission** to stop it permanently. Pausing or re
 local state immediately and requests cancellation for nonterminal server jobs when reachable.
 Already completed drafts remain available for review.
 
+## Choose an AI provider
+
+The trusted Mac must be paired and running before a provider change can finish.
+
+1. Open **Settings → AI Providers**.
+2. Select **Add provider**.
+3. Choose the official option or a compatible local or hosted service.
+4. Enter the service address and exact model name when requested.
+5. Enable only the capabilities supported by that service.
+6. Enter the provider key. A local service that does not require a key can leave it empty.
+7. Review the destination statement and select **Save**.
+8. Wait until the provider shows **Ready**.
+
+Only one provider is active. Swipe a ready inactive provider and select **Use** to activate it.
+Open a provider to update its model, capabilities, price estimates, or key. Swipe from the other
+side to remove it.
+
+Changing the provider connection type clears the previous key unless a replacement is entered.
+This prevents a key for one service from being sent to another service.
+
+The provider address is reached from the trusted Mac. A loopback address refers to that Mac, not
+the iPad. Remote addresses require HTTPS. Provider keys stay in secure device storage and do not
+appear in readable notebook exports. A fresh iPad requires the key to be entered again.
+
 ## Search
 
 1. Open **Search**.

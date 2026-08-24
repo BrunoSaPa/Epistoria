@@ -38,6 +38,7 @@
 		99CD9B1D16B8674E84C0C4A7 /* AccountStorageLocatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D596908EB59446C1A5DE9C2 /* AccountStorageLocatorTests.swift */; };
 		A423FEC02233BDC185DF7430 /* AccountConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E6623DB8C75432BEBBCAF11 /* AccountConfiguration.swift */; };
 		A5D94E2534C764EDA8A7B2C9 /* SpatialNotebookCanvas.swift in Sources */ = {isa = PBXBuildFile; fileRef = D375328611A336119E2F55C0 /* SpatialNotebookCanvas.swift */; };
+		AC37C44E07929B7D23EE6A20 /* AIProviderProfileStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9168A7AD8732315016FE923D /* AIProviderProfileStore.swift */; };
 		B0BDDE9736A79A9B4EC8FEB0 /* LearningDetailViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F587C85FB9CDBD4AD20B0D1 /* LearningDetailViews.swift */; };
 		B1545FB1ED851A4A6F5AA038 /* AppRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 994FB1067AAB271804368E81 /* AppRootView.swift */; };
 		B9DACEB1B0ED2EA6FAB4734C /* DeveloperNotebookResetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2ADF9EA8B4CC8ABB172FB42 /* DeveloperNotebookResetView.swift */; };
@@ -49,8 +50,10 @@
 		D7268FC5ECD9944DCF92D7DE /* EpistoriaExportService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14FBF3B7A2C6EFB97A8C896A /* EpistoriaExportService.swift */; };
 		D9B6616E05DB2E898D413AF1 /* EpistoriaDesign.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A51BF1AFCD893DADFCF6CD8 /* EpistoriaDesign.swift */; };
 		DF9CD341ABD3A514D2FF6BB3 /* ConflictResolutionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF1667158D395E586B7CD1DF /* ConflictResolutionView.swift */; };
+		E14B4009C652B01AA6C6E50D /* AIProviderProfileStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F1E4086C7FDF893EA78CE43 /* AIProviderProfileStoreTests.swift */; };
 		E49A752F660F93F32EB06C31 /* UniversityView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15B4A893BDC4C76907E1C2C1 /* UniversityView.swift */; };
 		E8739243E0E6F49401DB4C3F /* NoteEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B279FE27DE285AD320383789 /* NoteEditorView.swift */; };
+		ED3175F1927D08497010BC4A /* AIProviderSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 30EFB9A31E1C3EF9A2C4938E /* AIProviderSettingsView.swift */; };
 		F24D041C272858D40ABDA08A /* NotebookVisualStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0B720938C61EE02FC5D5A7A /* NotebookVisualStyle.swift */; };
 /* End PBXBuildFile section */
 
@@ -84,6 +87,7 @@
 		21D6211A0941084661F0FDEA /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		22B2DB2C7A2173AC08F7A0DE /* TopicStudioView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TopicStudioView.swift; sourceTree = "<group>"; };
 		296046E5F66D2C6212FE9F27 /* KnowledgeSearchView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KnowledgeSearchView.swift; sourceTree = "<group>"; };
+		30EFB9A31E1C3EF9A2C4938E /* AIProviderSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIProviderSettingsView.swift; sourceTree = "<group>"; };
 		328ED5306D56EEB231FE8184 /* LassoOverlayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LassoOverlayView.swift; sourceTree = "<group>"; };
 		4A51BF1AFCD893DADFCF6CD8 /* EpistoriaDesign.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EpistoriaDesign.swift; sourceTree = "<group>"; };
 		506A112DB7A5A7FDA172198B /* SessionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionsView.swift; sourceTree = "<group>"; };
@@ -95,9 +99,11 @@
 		6B327DC563DB084489F94B66 /* EpistoriaTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = EpistoriaTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		6C755E81DF1E06F682506F2E /* Epistoria.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Epistoria.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		6D596908EB59446C1A5DE9C2 /* AccountStorageLocatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountStorageLocatorTests.swift; sourceTree = "<group>"; };
+		6F1E4086C7FDF893EA78CE43 /* AIProviderProfileStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIProviderProfileStoreTests.swift; sourceTree = "<group>"; };
 		77B3805565CF9C5E40505BCF /* NoteQueryArtifactsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteQueryArtifactsView.swift; sourceTree = "<group>"; };
 		7931BB0B2776308E4D8C7656 /* LibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryView.swift; sourceTree = "<group>"; };
 		84F79068F407B2C7BBC367E9 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		9168A7AD8732315016FE923D /* AIProviderProfileStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIProviderProfileStore.swift; sourceTree = "<group>"; };
 		98E92AF31F99B4E43AAC5CFF /* EpistoriaApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EpistoriaApp.swift; sourceTree = "<group>"; };
 		994FB1067AAB271804368E81 /* AppRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppRootView.swift; sourceTree = "<group>"; };
 		9DB9152EBDDEC2EE344EF519 /* EpistoriaExportServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EpistoriaExportServiceTests.swift; sourceTree = "<group>"; };
@@ -193,6 +199,8 @@
 		2EE0C54EC19B420CC558399D /* Settings */ = {
 			isa = PBXGroup;
 			children = (
+				9168A7AD8732315016FE923D /* AIProviderProfileStore.swift */,
+				30EFB9A31E1C3EF9A2C4938E /* AIProviderSettingsView.swift */,
 				21D6211A0941084661F0FDEA /* SettingsView.swift */,
 			);
 			path = Settings;
@@ -331,6 +339,7 @@
 			isa = PBXGroup;
 			children = (
 				6D596908EB59446C1A5DE9C2 /* AccountStorageLocatorTests.swift */,
+				6F1E4086C7FDF893EA78CE43 /* AIProviderProfileStoreTests.swift */,
 				9DB9152EBDDEC2EE344EF519 /* EpistoriaExportServiceTests.swift */,
 				9F5E9EDA6F3C5E53A7A9D068 /* NotePDFExportServiceTests.swift */,
 				A4A9C2EECA501629A0A6DE66 /* PendingSaveRegistryTests.swift */,
@@ -465,6 +474,8 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				AC37C44E07929B7D23EE6A20 /* AIProviderProfileStore.swift in Sources */,
+				ED3175F1927D08497010BC4A /* AIProviderSettingsView.swift in Sources */,
 				A423FEC02233BDC185DF7430 /* AccountConfiguration.swift in Sources */,
 				35EF6CB34C88412ED6ED3677 /* AppModel.swift in Sources */,
 				B1545FB1ED851A4A6F5AA038 /* AppRootView.swift in Sources */,
@@ -507,6 +518,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				E14B4009C652B01AA6C6E50D /* AIProviderProfileStoreTests.swift in Sources */,
 				99CD9B1D16B8674E84C0C4A7 /* AccountStorageLocatorTests.swift in Sources */,
 				3E66A6A86E116DD30AD26D1B /* EpistoriaExportServiceTests.swift in Sources */,
 				5BA923E33DD56FC8E15298F9 /* NotePDFExportServiceTests.swift in Sources */,

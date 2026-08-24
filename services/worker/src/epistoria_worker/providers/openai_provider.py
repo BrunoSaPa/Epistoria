@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import base64
-from typing import Any, Literal
+from typing import Any, Literal, TypeVar
 
 from openai import APIConnectionError, APIStatusError, APITimeoutError, OpenAI, RateLimitError
+from pydantic import BaseModel, ValidationError
 
 from ..canonical import json_bytes
 from ..models import (
@@ -63,6 +64,7 @@ deterministic correctness result, test score, or owner override. Report insuffic
 through the feedback and uncertainty instead of adding outside knowledge."""
 
 _MAX_IMAGE_BYTES = 2 * 1024 * 1024  # 2 MiB decoded
+_StructuredResponse = TypeVar("_StructuredResponse", bound=BaseModel)
 
 
 def _build_note_query_input(request: NoteQueryRequestV1) -> list[dict[str, object]]:
@@ -130,9 +132,17 @@ class OpenAIDigestProvider:
         output_usd_per_million: float | None,
         transcription_model: str = "whisper-1",
         transcription_usd_per_minute: float | None = 0.006,
+        base_url: str | None = None,
+        provider_name: str = "openai",
     ) -> None:
-        self._client = OpenAI(api_key=api_key, timeout=90, max_retries=2)
+        self._client = OpenAI(
+            api_key=api_key or "local-no-key",
+            base_url=base_url,
+            timeout=90,
+            max_retries=2,
+        )
         self._model = model
+        self._provider_name = provider_name
         self._prompt_version = prompt_version
         self._input_rate = input_usd_per_million
         self._output_rate = output_usd_per_million
@@ -216,7 +226,7 @@ class OpenAIDigestProvider:
             else None
         )
         trace = ProviderTraceV1(
-            provider="openai",
+            provider=self._provider_name,
             model=self._transcription_model,
             prompt_version="media-transcription/v1",
             input_tokens=None,
@@ -401,7 +411,207 @@ class OpenAIDigestProvider:
                 input_tokens * self._input_rate + output_tokens * self._output_rate
             ) / 1_000_000
         return ProviderTraceV1(
-            provider="openai",
+            provider=self._provider_name,
+            model=self._model,
+            prompt_version=prompt_version,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            estimated_cost_usd=estimated_cost,
+            provider_request_id=getattr(response, "_request_id", None),
+        )
+
+
+class OpenAICompatibleDigestProvider(OpenAIDigestProvider):
+    """Provider for OpenAI-compatible Chat Completions and transcription endpoints.
+
+    This adapter is used for local servers such as Ollama, LM Studio, vLLM, and LocalAI, and for
+    hosted gateways that expose the same protocol. Responses are always validated against the
+    existing Epistoria Pydantic contracts before they can become encrypted artifacts.
+    """
+
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        base_url: str,
+        provider_name: str,
+        model: str,
+        prompt_version: str,
+        structured_output: bool,
+        input_usd_per_million: float | None,
+        output_usd_per_million: float | None,
+        transcription_model: str = "whisper-1",
+        transcription_usd_per_minute: float | None = None,
+    ) -> None:
+        super().__init__(
+            api_key=api_key,
+            base_url=base_url,
+            provider_name=provider_name,
+            model=model,
+            prompt_version=prompt_version,
+            input_usd_per_million=input_usd_per_million,
+            output_usd_per_million=output_usd_per_million,
+            transcription_model=transcription_model,
+            transcription_usd_per_minute=transcription_usd_per_minute,
+        )
+        self._structured_output = structured_output
+
+    def generate(self, request: SessionDigestRequestV1) -> tuple[SessionDigestV1, ProviderTraceV1]:
+        output, response = self._chat(
+            response_type=SessionDigestV1,
+            system_prompt=_DIGEST_SYSTEM_PROMPT,
+            user_content=json_bytes(request).decode("utf-8"),
+        )
+        return output, self._chat_trace(response, prompt_version=self._prompt_version)
+
+    def generate_learning(
+        self, request: LearningGenerationRequestV1
+    ) -> tuple[LearningGenerationResponseV1, ProviderTraceV1]:
+        disclosure = json_bytes(
+            request.model_dump(
+                mode="json",
+                by_alias=True,
+                exclude_none=True,
+                exclude={"automation_authorization"},
+            )
+        ).decode("utf-8")
+        output, response = self._chat(
+            response_type=LearningGenerationResponseV1,
+            system_prompt=_LEARNING_SYSTEM_PROMPT,
+            user_content=disclosure,
+        )
+        return output, self._chat_trace(response, prompt_version="learning-generation/v1")
+
+    def generate_free_response_feedback(
+        self, request: FreeResponseFeedbackRequestV1
+    ) -> tuple[FreeResponseFeedbackResponseV1, ProviderTraceV1]:
+        output, response = self._chat(
+            response_type=FreeResponseFeedbackResponseV1,
+            system_prompt=_FEEDBACK_SYSTEM_PROMPT,
+            user_content=json_bytes(request).decode("utf-8"),
+        )
+        return output, self._chat_trace(response, prompt_version="free-response-feedback/v1")
+
+    def generate_note_query(
+        self, request: NoteQueryRequestV1
+    ) -> tuple[NoteQueryResponseV1, ProviderTraceV1]:
+        content: list[dict[str, Any]] = [
+            {"type": "text", "text": f"Question: {request.question}\n\n=== SELECTED SOURCES ===\n"}
+        ]
+        for source in request.selection_sources:
+            content.append({
+                "type": "text",
+                "text": (
+                    f"[sourceId={source.source_id} kind={source.source_kind} "
+                    f"locator={source.locator!r}]\n"
+                ),
+            })
+            if source.image_content is not None:
+                raw = base64.b64decode(source.image_content)
+                if len(raw) > _MAX_IMAGE_BYTES:
+                    raise ProviderError(
+                        "Image source exceeds 2 MiB limit",
+                        code="PROVIDER_IMAGE_TOO_LARGE",
+                        retryable=False,
+                    )
+                content.append({
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/png;base64,{source.image_content}"},
+                })
+            elif source.excerpt is not None:
+                content.append({"type": "text", "text": source.excerpt + "\n"})
+        if request.context_sources:
+            content.append({
+                "type": "text",
+                "text": "\n=== CONTEXT SOURCES (background only) ===\n",
+            })
+            for source in request.context_sources:
+                if source.excerpt:
+                    content.append({
+                        "type": "text",
+                        "text": (
+                            f"[sourceId={source.source_id} locator={source.locator!r}]\n"
+                            f"{source.excerpt}\n"
+                        ),
+                    })
+        output, response = self._chat(
+            response_type=NoteQueryResponseV1,
+            system_prompt=_NOTE_QUERY_SYSTEM_PROMPT,
+            user_content=content,
+        )
+        return output, self._chat_trace(response, prompt_version="note-query/v1")
+
+    def _chat(
+        self,
+        *,
+        response_type: type[_StructuredResponse],
+        system_prompt: str,
+        user_content: str | list[dict[str, Any]],
+    ) -> tuple[_StructuredResponse, object]:
+        schema = response_type.model_json_schema()
+        schema_instruction = (
+            "\nReturn only one JSON object matching this JSON Schema:\n"
+            + json_bytes(schema).decode("utf-8")
+        )
+        kwargs: dict[str, Any] = {
+            "model": self._model,
+            "temperature": 0,
+            "messages": [
+                {"role": "system", "content": system_prompt + schema_instruction},
+                {"role": "user", "content": user_content},
+            ],
+        }
+        if self._structured_output:
+            kwargs["response_format"] = {"type": "json_object"}
+        try:
+            response = self._client.chat.completions.create(**kwargs)
+        except RateLimitError as error:
+            raise ProviderError(
+                "Provider rate limit reached", code="PROVIDER_RATE_LIMIT", retryable=True
+            ) from error
+        except (APIConnectionError, APITimeoutError) as error:
+            raise ProviderError(
+                "Provider is unreachable", code="PROVIDER_UNAVAILABLE", retryable=True
+            ) from error
+        except APIStatusError as error:
+            retryable = error.status_code in {408, 425, 429} or error.status_code >= 500
+            raise ProviderError(
+                "Provider rejected the request",
+                code="PROVIDER_REQUEST_FAILED",
+                retryable=retryable,
+            ) from error
+        content = response.choices[0].message.content if response.choices else None
+        if not isinstance(content, str) or not content.strip():
+            raise ProviderError(
+                "Provider returned no JSON response",
+                code="PROVIDER_SCHEMA_INVALID",
+                retryable=True,
+            )
+        try:
+            return response_type.model_validate_json(content), response
+        except ValidationError as error:
+            raise ProviderError(
+                "Provider returned an invalid response",
+                code="PROVIDER_SCHEMA_INVALID",
+                retryable=True,
+            ) from error
+
+    def _chat_trace(self, response: object, *, prompt_version: str) -> ProviderTraceV1:
+        usage = getattr(response, "usage", None)
+        input_tokens = getattr(usage, "prompt_tokens", None) if usage else None
+        output_tokens = getattr(usage, "completion_tokens", None) if usage else None
+        estimated_cost: float | None = None
+        if (
+            input_tokens is not None
+            and output_tokens is not None
+            and self._input_rate is not None
+            and self._output_rate is not None
+        ):
+            estimated_cost = (
+                input_tokens * self._input_rate + output_tokens * self._output_rate
+            ) / 1_000_000
+        return ProviderTraceV1(
+            provider=self._provider_name,
             model=self._model,
             prompt_version=prompt_version,
             input_tokens=input_tokens,

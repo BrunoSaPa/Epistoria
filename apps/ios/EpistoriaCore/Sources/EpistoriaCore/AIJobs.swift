@@ -863,11 +863,11 @@ extension AIJobCoordinatorError: LocalizedError {
 }
 
 public actor AIJobCoordinator {
-    private let accountId: UUID
-    private let accountKey: Data
+    let accountId: UUID
+    let accountKey: Data
     private let database: SQLCipherDatabase
     private let store: EpistoriaStore
-    private let api: EpistoriaAPIClient
+    let api: EpistoriaAPIClient
     private let crypto = EntityCrypto()
 
     public init(

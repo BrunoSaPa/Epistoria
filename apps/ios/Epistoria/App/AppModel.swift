@@ -11,6 +11,9 @@ private enum AppModelOperationError: Error, LocalizedError {
     case serverIdentityMismatch
     case serverConnectionRollbackFailed
     case unlockedSessionUnavailable
+    case aiProviderUnavailable
+    case aiProviderSecretRequired
+    case aiProviderURLInvalid
 
     var errorDescription: String? {
         switch self {
@@ -28,6 +31,12 @@ private enum AppModelOperationError: Error, LocalizedError {
             "Epistoria could not safely restore the previous server credentials. Reconnect with the bootstrap secret."
         case .unlockedSessionUnavailable:
             "The unlocked notebook changed while this operation was running. Please try again."
+        case .aiProviderUnavailable:
+            "Connect private sync before changing an AI provider. The trusted Mac can process the queued change when it is running."
+        case .aiProviderSecretRequired:
+            "This provider requires an API key. The existing key was not changed."
+        case .aiProviderURLInvalid:
+            "Use HTTPS for a remote provider. Plain HTTP is allowed only for a local or private-network address."
         }
     }
 }
@@ -83,6 +92,8 @@ final class AppModel {
     private let configurationStore: AccountConfigurationStore
     private let accountKeyStore: KeychainStore
     private let tokenStore: DeviceTokenStore
+    private let aiProviderProfileStore: AIProviderProfileStore
+    private let aiProviderSecretStore: AIProviderSecretStore
     private let crypto: EntityCrypto
     private let applicationSupportOverride: URL?
     private var isOpening = false
@@ -107,12 +118,16 @@ final class AppModel {
         configurationStore: AccountConfigurationStore = AccountConfigurationStore(),
         accountKeyStore: KeychainStore = KeychainStore(),
         tokenStore: DeviceTokenStore = DeviceTokenStore(),
+        aiProviderProfileStore: AIProviderProfileStore = AIProviderProfileStore(),
+        aiProviderSecretStore: AIProviderSecretStore = AIProviderSecretStore(),
         crypto: EntityCrypto = EntityCrypto(),
         applicationSupportURL: URL? = nil
     ) {
         self.configurationStore = configurationStore
         self.accountKeyStore = accountKeyStore
         self.tokenStore = tokenStore
+        self.aiProviderProfileStore = aiProviderProfileStore
+        self.aiProviderSecretStore = aiProviderSecretStore
         self.crypto = crypto
         applicationSupportOverride = applicationSupportURL
     }
@@ -431,6 +446,207 @@ final class AppModel {
         await beginReadyWork()
         isOpening = false
         await honorDeferredRestartIfNeeded()
+    }
+
+    func aiProviderProfiles() throws -> [AIProviderProfile] {
+        guard let accountId = configuration?.accountId else { return [] }
+        return try aiProviderProfileStore.load(accountId: accountId)
+    }
+
+    var activeAIProviderDescription: String {
+        guard let profile = try? aiProviderProfiles().first(where: \.isActive) else {
+            return "the provider active on your trusted Mac"
+        }
+        return "\(profile.displayName) at \(profile.destinationHost) using \(profile.textModel)"
+    }
+
+    func saveAIProviderProfile(
+        _ proposed: AIProviderProfile,
+        replacementSecret: String?
+    ) async throws {
+        guard let accountId = configuration?.accountId, let aiJobs else {
+            throw AppModelOperationError.aiProviderUnavailable
+        }
+        guard AIProviderURLPolicy.normalized(
+            proposed.baseURL.absoluteString,
+            adapter: proposed.adapter
+        ) == proposed.baseURL else {
+            throw AppModelOperationError.aiProviderURLInvalid
+        }
+        var profiles = try aiProviderProfileStore.load(accountId: accountId)
+        let existing = profiles.first(where: { $0.id == proposed.id })
+        if let replacementSecret, !replacementSecret.isEmpty {
+            try aiProviderSecretStore.save(
+                replacementSecret,
+                accountId: accountId,
+                profileId: proposed.id
+            )
+        } else if let existing, existing.adapter != proposed.adapter {
+            try aiProviderSecretStore.delete(accountId: accountId, profileId: proposed.id)
+        }
+        let secret = try aiProviderSecretStore.secret(
+            accountId: accountId,
+            profileId: proposed.id
+        )
+        if proposed.adapter == .openAIResponses, secret == nil {
+            throw AppModelOperationError.aiProviderSecretRequired
+        }
+
+        var pending = proposed
+        if !pending.isActive,
+           !profiles.contains(where: { $0.id != pending.id && $0.isActive }) {
+            pending.isActive = true
+        }
+        pending.state = .queued
+        pending.pendingOperation = .upsert
+        pending.lastErrorCode = nil
+        pending.updatedAt = Date()
+        upsert(pending, in: &profiles)
+        try aiProviderProfileStore.save(profiles, accountId: accountId)
+
+        do {
+            let request = AIProviderConfigurationRequest(
+                accountId: accountId,
+                operation: .upsert,
+                profileId: pending.id,
+                displayName: pending.displayName,
+                adapter: pending.adapter,
+                baseURL: pending.baseURL.absoluteString,
+                apiKey: secret,
+                textModel: pending.textModel,
+                transcriptionModel: pending.transcriptionModel,
+                capabilities: pending.capabilities,
+                structuredOutput: pending.structuredOutput,
+                inputUSDPerMillion: pending.inputUSDPerMillion,
+                outputUSDPerMillion: pending.outputUSDPerMillion,
+                transcriptionUSDPerMinute: pending.transcriptionUSDPerMinute,
+                makeActive: pending.isActive
+            )
+            let job = try await aiJobs.submitProviderConfiguration(request)
+            pending.lastJobId = job.id
+            upsert(pending, in: &profiles)
+            try aiProviderProfileStore.save(profiles, accountId: accountId)
+        } catch {
+            pending.state = .failed
+            pending.lastErrorCode = "SUBMISSION_FAILED"
+            upsert(pending, in: &profiles)
+            try? aiProviderProfileStore.save(profiles, accountId: accountId)
+            throw error
+        }
+    }
+
+    func activateAIProviderProfile(id: UUID) async throws {
+        guard let accountId = configuration?.accountId, let aiJobs else {
+            throw AppModelOperationError.aiProviderUnavailable
+        }
+        var profiles = try aiProviderProfileStore.load(accountId: accountId)
+        guard var profile = profiles.first(where: { $0.id == id }) else { return }
+        let request = AIProviderConfigurationRequest(
+            accountId: accountId,
+            operation: .activate,
+            profileId: id
+        )
+        let job = try await aiJobs.submitProviderConfiguration(request)
+        profile.state = .queued
+        profile.pendingOperation = .activate
+        profile.lastJobId = job.id
+        profile.lastErrorCode = nil
+        profile.updatedAt = Date()
+        upsert(profile, in: &profiles)
+        try aiProviderProfileStore.save(profiles, accountId: accountId)
+    }
+
+    func removeAIProviderProfile(id: UUID) async throws {
+        guard let accountId = configuration?.accountId, let aiJobs else {
+            throw AppModelOperationError.aiProviderUnavailable
+        }
+        var profiles = try aiProviderProfileStore.load(accountId: accountId)
+        guard var profile = profiles.first(where: { $0.id == id }) else { return }
+        let request = AIProviderConfigurationRequest(
+            accountId: accountId,
+            operation: .delete,
+            profileId: id
+        )
+        let job = try await aiJobs.submitProviderConfiguration(request)
+        profile.state = .deleting
+        profile.pendingOperation = .delete
+        profile.lastJobId = job.id
+        profile.lastErrorCode = nil
+        profile.updatedAt = Date()
+        upsert(profile, in: &profiles)
+        try aiProviderProfileStore.save(profiles, accountId: accountId)
+    }
+
+    func refreshAIProviderProfiles() async throws {
+        guard let accountId = configuration?.accountId, let api else { return }
+        let profiles = try aiProviderProfileStore.load(accountId: accountId)
+        var refreshed: [AIProviderProfile] = []
+        var activationCandidates: [(
+            profileId: UUID,
+            completedAt: String,
+            requestedAt: Date
+        )] = []
+        var changed = false
+        for var profile in profiles {
+            guard let jobId = profile.lastJobId,
+                  let operation = profile.pendingOperation
+            else {
+                refreshed.append(profile)
+                continue
+            }
+            let job = try await api.aiJob(id: jobId)
+            switch job.status {
+            case "COMPLETE":
+                if operation == .delete {
+                    try aiProviderSecretStore.delete(
+                        accountId: accountId,
+                        profileId: profile.id
+                    )
+                    changed = true
+                    continue
+                }
+                if operation == .activate || profile.isActive {
+                    activationCandidates.append((
+                        profile.id,
+                        job.completedAt ?? job.updatedAt,
+                        profile.updatedAt
+                    ))
+                }
+                profile.state = .ready
+                profile.pendingOperation = nil
+                profile.lastErrorCode = nil
+                profile.updatedAt = Date()
+                changed = true
+            case "FAILED", "CANCELLED":
+                profile.state = .failed
+                profile.pendingOperation = nil
+                profile.lastErrorCode = job.errorCode ?? job.status
+                profile.updatedAt = Date()
+                changed = true
+            default:
+                break
+            }
+            refreshed.append(profile)
+        }
+        if let winner = activationCandidates.max(by: {
+            $0.completedAt == $1.completedAt
+                ? $0.requestedAt < $1.requestedAt
+                : $0.completedAt < $1.completedAt
+        }) {
+            for index in refreshed.indices {
+                refreshed[index].isActive = refreshed[index].id == winner.profileId
+            }
+            changed = true
+        }
+        if changed { try aiProviderProfileStore.save(refreshed, accountId: accountId) }
+    }
+
+    private func upsert(_ profile: AIProviderProfile, in profiles: inout [AIProviderProfile]) {
+        if let index = profiles.firstIndex(where: { $0.id == profile.id }) {
+            profiles[index] = profile
+        } else {
+            profiles.append(profile)
+        }
     }
 
     #if DEBUG

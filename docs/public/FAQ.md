@@ -60,6 +60,16 @@ You can create a separate recurring permission for selected Topics and supported
 minimum interval, expiration, and spending limit. You can pause or revoke it. Automatic results
 remain drafts until you review and accept them. Opening the app does not create permission.
 
+## Can I use a local AI model?
+
+Yes, when the model server provides the compatible connection supported by Epistoria. Add its
+address and model in **Settings → AI Providers**. The address is reached from the trusted Mac, so
+a loopback address refers to the Mac. Local model quality and supported features vary. Confirm
+text, vision, and transcription support before enabling them.
+
+Provider-specific connection formats that do not provide the compatible interface are not yet
+supported directly.
+
 ## Can Epistoria create flashcards and practice tests?
 
 Yes. The current beta creates durable manual cards and coverage-first tests. Topic Studio can

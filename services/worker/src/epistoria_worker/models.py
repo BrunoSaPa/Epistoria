@@ -540,6 +540,52 @@ class LearningGenerationArtifactV1(ContractModel):
     known_concept_ids: list[UUID] = Field(default_factory=list, max_length=200)
 
 
+ProviderAdapter = Literal["OPENAI_RESPONSES", "OPENAI_COMPATIBLE"]
+ProviderCapability = Literal["TEXT", "VISION", "TRANSCRIPTION", "STRUCTURED_OUTPUT"]
+ProviderConfigurationOperation = Literal["UPSERT", "ACTIVATE", "DELETE"]
+
+
+class ProviderConfigurationRequestV1(ContractModel):
+    schema_version: Literal["provider-configuration-request/v1"] = (
+        "provider-configuration-request/v1"
+    )
+    account_id: UUID
+    job_id: UUID
+    operation: ProviderConfigurationOperation
+    profile_id: UUID
+    display_name: ShortText | None = None
+    adapter: ProviderAdapter | None = None
+    base_url: str | None = Field(default=None, max_length=2048)
+    api_key: str | None = Field(default=None, min_length=1, max_length=8192, repr=False)
+    text_model: ShortText | None = None
+    transcription_model: ShortText | None = None
+    capabilities: list[ProviderCapability] = Field(default_factory=list, max_length=4)
+    structured_output: bool = True
+    input_usd_per_million: float | None = Field(default=None, ge=0)
+    output_usd_per_million: float | None = Field(default=None, ge=0)
+    transcription_usd_per_minute: float | None = Field(default=None, ge=0)
+    make_active: bool = False
+    disclosure_acknowledged: bool
+
+
+class ProviderConfigurationArtifactV1(ContractModel):
+    schema_version: Literal["ai-artifact/provider-configuration/v1"] = (
+        "ai-artifact/provider-configuration/v1"
+    )
+    job_id: UUID
+    profile_id: UUID
+    operation: ProviderConfigurationOperation
+    display_name: ShortText | None = None
+    adapter: ProviderAdapter | None = None
+    base_url: str | None = None
+    text_model: ShortText | None = None
+    transcription_model: ShortText | None = None
+    capabilities: list[ProviderCapability] = Field(default_factory=list, max_length=4)
+    is_active: bool
+    secret_stored: bool
+    configured_at: AwareDatetime
+
+
 class AIJobLease(ContractModel):
     id: UUID
     job_type: Literal[
@@ -557,6 +603,7 @@ class AIJobLease(ContractModel):
         "SOURCE_DISCOVERY",
         "SESSION_REVIEW",
         "WEEKLY_REVIEW",
+        "PROVIDER_CONFIGURATION",
     ]
     crypto_version: int = Field(ge=1, le=255)
     content_version: int = Field(ge=1, le=65_535)

@@ -41,6 +41,15 @@ An approved AI request sends selected readable material to the configured provid
 processing. This is a separate privacy boundary from encrypted synchronization. Provider data
 handling and retention policies can apply.
 
+Provider keys are stored separately in secure storage on the iPad and paired Mac. Saving a
+provider connection sends the key to the trusted Mac through the same private encrypted channel.
+The synchronization service is not intended to receive a readable key, destination, or model.
+Provider keys and connections are not included in readable notebook exports.
+
+A local provider can avoid sending approved content to a hosted provider. The local service still
+receives readable approved content. Its software, host computer, and local network must be
+trusted.
+
 Generated results remain separate from original notebook content until you choose to insert or
 otherwise use them.
 

@@ -19,11 +19,15 @@ struct SettingsView: View {
                 }
 
                 Section("Learning") {
-                    SettingsRow(
-                        title: "AI processing",
-                        detail: "Paid processing stays off until you approve a scoped request",
-                        symbol: "sparkles"
-                    )
+                    NavigationLink {
+                        AIProviderSettingsView(model: model)
+                    } label: {
+                        SettingsRow(
+                            title: "AI providers",
+                            detail: "Choose the AI service used by your trusted Mac",
+                            symbol: "cpu"
+                        )
+                    }
                     SettingsRow(
                         title: "Study Next",
                         detail: "Local suggestions are enabled and work offline",

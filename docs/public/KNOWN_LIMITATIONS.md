@@ -59,6 +59,13 @@ Epistoria remains in personal beta. The following limits apply to the current pr
 
 - PDF extraction and AI features require a paired Mac.
 - AI features require a separately configured provider account and can incur provider charges.
+- One provider is active for all generated work. A queued request uses the provider active when
+  the trusted Mac processes it.
+- Compatible local and hosted services are supported. Provider-specific connection formats that
+  do not offer the compatible interface are not connected directly.
+- Provider connections do not transfer to a fresh iPad. Enter the key again after recovery.
+- A local provider can keep approved content off a hosted service, but quality, speed, context,
+  vision, transcription, and reliable structured output depend on the selected model and server.
 - A live paid AI evaluation is not part of the current release evidence.
 - Manual cards, tests, and typed Concept connections are available. Generated card, test, Concept,
   and Concept-connection drafts can be edited or excluded before acceptance.

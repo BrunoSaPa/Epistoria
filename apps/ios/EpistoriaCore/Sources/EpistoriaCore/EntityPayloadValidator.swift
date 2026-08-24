@@ -90,6 +90,7 @@ public enum EntityPayloadValidator {
             "ai-artifact/free-response-feedback/v1",
             "ai-artifact/media-transcription/v1",
             "media-transcription-chunk/v1",
+            "ai-artifact/provider-configuration/v1",
         ]
         case .transcriptCorrection: ["transcript-correction/v1"]
         case .sourceVersion: ["source-version/v1"]

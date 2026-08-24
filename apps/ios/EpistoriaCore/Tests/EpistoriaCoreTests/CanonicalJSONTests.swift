@@ -118,4 +118,59 @@ final class CanonicalJSONTests: XCTestCase {
         XCTAssertTrue(decoded.resolvedTranscriptSegmentIndexes.isEmpty)
         XCTAssertTrue(decoded.resolvedTranscriptCorrectionIds.isEmpty)
     }
+
+    func testProviderConfigurationContractsRoundTrip() throws {
+        let accountId = UUID()
+        let profileId = UUID()
+        let request = AIProviderConfigurationRequest(
+            accountId: accountId,
+            operation: .upsert,
+            profileId: profileId,
+            displayName: "Local model",
+            adapter: .openAICompatible,
+            baseURL: "http://127.0.0.1:11434/v1",
+            apiKey: "synthetic-key",
+            textModel: "test-model",
+            capabilities: [.vision, .text, .text],
+            structuredOutput: true,
+            makeActive: true
+        )
+
+        let requestData = try CanonicalJSON.encode(request)
+        let decodedRequest = try CanonicalJSON.decode(
+            AIProviderConfigurationRequest.self,
+            from: requestData
+        )
+        XCTAssertEqual(decodedRequest, request)
+        XCTAssertEqual(decodedRequest.capabilities, [.text, .vision])
+
+        let artifactData = try XCTUnwrap(
+            """
+            {
+              "schemaVersion":"ai-artifact/provider-configuration/v1",
+              "jobId":"\(request.jobId.uuidString)",
+              "profileId":"\(profileId.uuidString)",
+              "operation":"UPSERT",
+              "displayName":"Local model",
+              "adapter":"OPENAI_COMPATIBLE",
+              "baseURL":"http://127.0.0.1:11434/v1",
+              "textModel":"test-model",
+              "capabilities":["TEXT"],
+              "isActive":true,
+              "secretStored":true,
+              "configuredAt":"2026-08-24T12:00:00.000Z"
+            }
+            """.data(using: .utf8)
+        )
+        let artifact = try CanonicalJSON.decode(
+            AIProviderConfigurationArtifact.self,
+            from: artifactData
+        )
+        XCTAssertEqual(artifact.profileId, profileId)
+        XCTAssertTrue(artifact.secretStored)
+        XCTAssertNil(artifactData.range(of: Data("synthetic-key".utf8)))
+        XCTAssertNoThrow(
+            try EntityPayloadValidator.validate(entityType: .aiArtifact, content: artifactData)
+        )
+    }
 }

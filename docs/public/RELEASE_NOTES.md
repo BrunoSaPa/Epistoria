@@ -1,5 +1,16 @@
 # Release notes
 
+## AI provider choice
+
+- Added provider management in Settings.
+- Added an official connection and a compatible connection for local or hosted model servers.
+- Added active-provider selection, model and capability settings, optional price estimates, and
+  visible queue or failure state.
+- Stored provider keys in secure device storage on the iPad and trusted Mac.
+- Required HTTPS for remote services and limited plain HTTP to local or private-network services.
+- Kept provider keys and connections out of readable notebook exports.
+- Recorded the actual provider connection and model on completed generated results.
+
 ## Portable import
 
 - Added readable export version 5 with one complete sanitized record manifest.

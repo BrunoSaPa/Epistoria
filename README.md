@@ -43,6 +43,8 @@ The app also provides:
 - Explicit conflict review that preserves concurrent versions.
 - A readable ZIP export with JSON, original files, PencilKit data, and SHA-256 checksums.
 - Validated version 5 export import into an empty notebook under a new local encryption key.
+- AI provider management for the official Responses service and OpenAI-compatible local or hosted
+  endpoints, with device Keychain storage and encrypted trusted-Mac configuration.
 
 The learning system stores durable source-linked flashcards, practice tests, review history, and a
 **Study Next** queue. Accepted cards and tests are notebook records, not temporary chat output. A
@@ -94,11 +96,12 @@ The current system supports these processing jobs:
 | Session digest | Evidence linked to a study session | Cited study digest | Yes |
 | Note query | A selected note region, a question, and bounded note context | Cited answer and follow-up questions | Yes |
 | PDF extraction | An encrypted PDF | Locally extracted text | No |
+| Flashcard and test drafts | A reviewed Topic scope and frozen sources | Cited reviewable learning drafts | Yes |
+| Written-answer feedback | A frozen response, rubric, and linked Evidence | Cited feedback and proposed score | Yes |
+| Media transcription | One approved local media Source | Timestamped transcript segments | Yes |
 
-Planned jobs will create flashcard drafts, practice-test drafts, free-response feedback, and
-source-backed study-plan proposals. Generated material will remain a draft until the user reviews
-it. Accepted cards, tests, attempts, and review schedules will remain available without a network
-connection.
+Generated material remains a draft until the user reviews it. Accepted cards, tests, attempts,
+and review schedules remain available without a network connection.
 
 The planned assistant will support three levels of proactivity:
 
@@ -115,10 +118,13 @@ AI results are derived records. The user can accept, edit, reject, or delete the
 replace original notes, drawings, images, PDFs, annotations, or relationships. Each reviewed
 artifact records its source IDs and processing metadata.
 
-The OpenAI adapter uses structured output and `store=false`. The user sees a disclosure before
-an AI job is queued. Provider processing remains a separate plaintext disclosure from encrypted
-sync. See the public [privacy overview](docs/public/PRIVACY.md) for the user-facing processing
-boundaries.
+The trusted Mac has a provider interface with an official Responses adapter and a generic
+OpenAI-compatible adapter. Compatible local services include Ollama, LM Studio, vLLM, and LocalAI.
+Provider-native protocols require their own adapter. Provider keys are stored in device Keychains
+and cross the server only inside an end-to-end encrypted configuration job. The user sees a
+disclosure before an AI job is queued. Provider processing remains a separate plaintext
+disclosure from encrypted sync. See the public [privacy overview](docs/public/PRIVACY.md) for the
+user-facing processing boundaries.
 
 ## How IBM Bob was used
 
@@ -133,14 +139,14 @@ IBM Bob.
 ## Project status
 
 The repository is a personal beta candidate. The following automated checks passed on
-2026-08-23:
+2026-08-24:
 
 - `make verify`
 - Full unsigned iOS Simulator bundle build, including assets and the privacy manifest
-- 81 Swift Core tests
+- 82 Swift Core tests
 - 45 iOS app and UI tests on an iPad Simulator
 - 7 API unit tests
-- 36 worker tests
+- 52 worker tests
 
 The following release checks are still open:
 

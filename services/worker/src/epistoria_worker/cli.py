@@ -12,10 +12,10 @@ from uuid import UUID
 from .api import APIError, EpistoriaAPI
 from .config import ConfigurationError, WorkerSettings
 from .cost_ledger import CostLedger, CostLedgerError
-from .keychain import MacOSKeychain, SecretStoreError
+from .keychain import MacOSKeychain, MacOSProviderProfileStore, SecretStoreError
 from .outbox import EncryptedOutbox
 from .processor import WorkerProcessor
-from .providers import DeterministicDigestProvider, OpenAIDigestProvider
+from .providers import DeterministicDigestProvider, OpenAIDigestProvider, ProviderManager
 from .providers.base import DigestProvider
 from .recovery import (
     RecoveryError,
@@ -114,6 +114,11 @@ def _runtime(command: str) -> int:
     if key is None:
         raise SecretStoreError("account key is not present in macOS Keychain")
     provider = _provider(settings)
+    provider_manager = ProviderManager(
+        account_id=settings.account_id,
+        store=MacOSProviderProfileStore(settings.provider_keychain_service),
+        fallback=provider,
+    )
     with EpistoriaAPI(
         base_url=settings.api_url,
         device_token=settings.device_token,
@@ -124,7 +129,7 @@ def _runtime(command: str) -> int:
             cost = ledger.status()
             print(f"API: {health.get('status', 'unknown')}")
             print("Account key: available in macOS Keychain")
-            print(f"Session digest provider: {'ready' if provider else 'disabled'}")
+            print(f"AI provider: {'ready' if provider_manager.is_ready else 'disabled'}")
             print(f"Encrypted retry outbox: {settings.outbox_directory}")
             print(
                 f"Estimated OpenAI spend ({cost.month}): ${cost.estimated_usd:.4f} / "
@@ -136,7 +141,8 @@ def _runtime(command: str) -> int:
             account_key=key,
             api=api,
             outbox=EncryptedOutbox(settings.outbox_directory),
-            digest_provider=provider,
+            digest_provider=provider_manager,
+            provider_configuration_manager=provider_manager,
             maximum_asset_bytes=settings.maximum_asset_bytes,
             cost_ledger=ledger,
         )

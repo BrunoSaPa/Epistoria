@@ -21,6 +21,7 @@ from epistoria_worker.crypto import (
     entity_aad,
     job_aad,
 )
+from epistoria_worker.keychain import MemoryProviderProfileStore
 from epistoria_worker.models import (
     AIJobLease,
     AutomationAuthorizationV1,
@@ -35,6 +36,8 @@ from epistoria_worker.models import (
     MediaTranscriptionRequestV1,
     PDFExtractionManifestV1,
     PDFExtractionRequestV1,
+    ProviderConfigurationArtifactV1,
+    ProviderConfigurationRequestV1,
     SessionDigestArtifactV1,
     SessionDigestRequestV1,
     SourceExcerptV1,
@@ -44,6 +47,7 @@ from epistoria_worker.models import TestGenerationPlanV1 as GenerationPlanV1
 from epistoria_worker.outbox import EncryptedOutbox
 from epistoria_worker.processor import WorkerProcessor
 from epistoria_worker.providers.fake import DeterministicDigestProvider
+from epistoria_worker.providers.manager import ProviderManager
 
 ACCOUNT_ID = UUID("11111111-1111-4111-8111-111111111111")
 ACCOUNT_KEY = bytes(range(32))
@@ -58,6 +62,7 @@ def lease_for(
         "FLASHCARD_DRAFTS",
         "TEST_GENERATION",
         "FREE_RESPONSE_FEEDBACK",
+        "PROVIDER_CONFIGURATION",
     ],
     payload: bytes,
     job_id: UUID | None = None,
@@ -776,3 +781,53 @@ def test_transcription_rejects_spoofed_media_before_provider(tmp_path) -> None:
     assert api.failed == [
         (job_id, "TRANSCRIPTION_MEDIA_IDENTITY_MISMATCH", False)
     ]
+
+
+def test_provider_configuration_job_stores_secret_and_syncs_sanitized_ack(tmp_path) -> None:
+    job_id = uuid4()
+    profile_id = uuid4()
+    request = ProviderConfigurationRequestV1(
+        account_id=ACCOUNT_ID,
+        job_id=job_id,
+        operation="UPSERT",
+        profile_id=profile_id,
+        display_name="Local model",
+        adapter="OPENAI_COMPATIBLE",
+        base_url="http://127.0.0.1:11434/v1",
+        api_key="provider-secret",
+        text_model="qwen3:8b",
+        capabilities=["TEXT"],
+        structured_output=True,
+        make_active=True,
+        disclosure_acknowledged=True,
+    )
+    api = FakeAPI([
+        lease_for("PROVIDER_CONFIGURATION", json_bytes(request), job_id)
+    ])
+    profile_store = MemoryProviderProfileStore()
+    manager = ProviderManager(
+        account_id=ACCOUNT_ID,
+        store=profile_store,
+        fallback=None,
+    )
+    worker = WorkerProcessor(
+        account_id=ACCOUNT_ID,
+        account_key=ACCOUNT_KEY,
+        api=api,  # type: ignore[arg-type]
+        outbox=EncryptedOutbox(tmp_path / "outbox"),
+        digest_provider=manager,
+        maximum_asset_bytes=10_000_000,
+        provider_configuration_manager=manager,
+    )
+
+    assert worker.process_once()
+    stored = profile_store.get(ACCOUNT_ID, profile_id)
+    assert stored is not None
+    assert stored.api_key == "provider-secret"
+    assert len(api.pushed) == 1
+    artifact_bytes = decrypt_artifact(api.pushed[0])
+    artifact = ProviderConfigurationArtifactV1.model_validate_json(artifact_bytes)
+    assert artifact.profile_id == profile_id
+    assert artifact.secret_stored is True
+    assert b"provider-secret" not in artifact_bytes
+    assert b"provider-secret" not in json_bytes(api.pushed)

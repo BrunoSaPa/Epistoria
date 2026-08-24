@@ -30,6 +30,7 @@ from .models import (
     PDFExtractionChunkV1,
     PDFExtractionManifestV1,
     PDFExtractionRequestV1,
+    ProviderConfigurationRequestV1,
     SessionDigestArtifactV1,
     SessionDigestRequestV1,
     SessionDigestV1,
@@ -38,6 +39,7 @@ from .models import (
 from .outbox import CachedCompletion, EncryptedOutbox
 from .pdf_extract import PDFExtractionError, chunk_pages, extract_pdf_pages
 from .providers.base import DigestProvider, ProviderError
+from .providers.manager import ProviderConfigurationError, ProviderManager
 
 LOGGER = logging.getLogger("epistoria.worker")
 _MAX_PUSH_CIPHER_BYTES = 6_250_000
@@ -61,6 +63,7 @@ class WorkerProcessor:
         outbox: EncryptedOutbox,
         digest_provider: DigestProvider | None,
         maximum_asset_bytes: int,
+        provider_configuration_manager: ProviderManager | None = None,
         cost_ledger: CostLedger | None = None,
     ) -> None:
         if len(account_key) != 32:
@@ -70,6 +73,7 @@ class WorkerProcessor:
         self._api = api
         self._outbox = outbox
         self._digest_provider = digest_provider
+        self._provider_configuration_manager = provider_configuration_manager
         self._maximum_asset_bytes = maximum_asset_bytes
         self._cost_ledger = cost_ledger
 
@@ -124,6 +128,8 @@ class WorkerProcessor:
             return self._learning_generation(lease, plaintext)
         if lease.job_type == "FREE_RESPONSE_FEEDBACK":
             return self._free_response_feedback(lease, plaintext)
+        if lease.job_type == "PROVIDER_CONFIGURATION":
+            return self._provider_configuration(lease, plaintext)
         if lease.job_type in {
             "SOURCE_EXTRACTION",
             "TOPIC_SYNTHESIS",
@@ -137,6 +143,34 @@ class WorkerProcessor:
         }:
             return self._learning_generation(lease, plaintext)
         raise ProcessingFailure(code="UNSUPPORTED_JOB_TYPE", retryable=False)
+
+    def _provider_configuration(self, lease: AIJobLease, plaintext: bytes) -> CachedCompletion:
+        if self._provider_configuration_manager is None:
+            raise ProcessingFailure(code="PROVIDER_CONFIGURATION_UNAVAILABLE", retryable=False)
+        try:
+            request = ProviderConfigurationRequestV1.model_validate_json(plaintext)
+        except ValidationError as error:
+            raise ProcessingFailure(code="INVALID_JOB_PAYLOAD", retryable=False) from error
+        if request.account_id != self._account_id or request.job_id != lease.id:
+            raise ProcessingFailure(code="JOB_IDENTITY_MISMATCH", retryable=False)
+        try:
+            artifact = self._provider_configuration_manager.apply_configuration(request)
+        except ProviderConfigurationError as error:
+            raise ProcessingFailure(
+                code="PROVIDER_CONFIGURATION_INVALID", retryable=False
+            ) from error
+        artifact_id = uuid5(lease.id, "provider-configuration-artifact/v1")
+        mutation = self._encrypted_mutation(
+            entity_id=artifact_id,
+            parent_id=None,
+            relation_ids=[],
+            plaintext=json_bytes(artifact),
+        )
+        return CachedCompletion(
+            job_id=lease.id,
+            artifact_entity_id=artifact_id,
+            mutations=[mutation],
+        )
 
     def _decrypt_lease(self, lease: AIJobLease) -> bytes:
         try:
@@ -681,7 +715,7 @@ class WorkerProcessor:
         self,
         *,
         entity_id: UUID,
-        parent_id: UUID,
+        parent_id: UUID | None,
         relation_ids: list[UUID],
         plaintext: bytes,
     ) -> dict[str, Any]:
@@ -702,7 +736,7 @@ class WorkerProcessor:
             "entityType": "AI_ARTIFACT",
             "operation": "UPSERT",
             "baseRevision": 0,
-            "parentId": str(parent_id),
+            "parentId": str(parent_id) if parent_id is not None else None,
             "relationIds": [str(value) for value in relation_ids],
             "clientModifiedAt": timestamp,
             "envelope": envelope.to_wire(),

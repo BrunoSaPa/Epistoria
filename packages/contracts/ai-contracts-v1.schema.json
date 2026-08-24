@@ -7,10 +7,57 @@
     { "$ref": "#/$defs/sessionDigest" },
     { "$ref": "#/$defs/pdfExtractionRequest" },
     { "$ref": "#/$defs/noteQueryRequest" },
-    { "$ref": "#/$defs/noteQueryResponse" }
+    { "$ref": "#/$defs/noteQueryResponse" },
+    { "$ref": "#/$defs/providerConfigurationRequest" },
+    { "$ref": "#/$defs/providerConfigurationArtifact" }
   ],
   "$defs": {
     "uuid": { "type": "string", "format": "uuid" },
+    "providerConfigurationRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "accountId", "jobId", "operation", "profileId", "capabilities", "structuredOutput", "makeActive", "disclosureAcknowledged"],
+      "properties": {
+        "schemaVersion": { "const": "provider-configuration-request/v1" },
+        "accountId": { "$ref": "#/$defs/uuid" },
+        "jobId": { "$ref": "#/$defs/uuid" },
+        "operation": { "enum": ["UPSERT", "ACTIVATE", "DELETE"] },
+        "profileId": { "$ref": "#/$defs/uuid" },
+        "displayName": { "type": ["string", "null"], "minLength": 1, "maxLength": 500 },
+        "adapter": { "type": ["string", "null"], "enum": ["OPENAI_RESPONSES", "OPENAI_COMPATIBLE", null] },
+        "baseURL": { "type": ["string", "null"], "maxLength": 2048 },
+        "apiKey": { "type": ["string", "null"], "minLength": 1, "maxLength": 8192 },
+        "textModel": { "type": ["string", "null"], "minLength": 1, "maxLength": 500 },
+        "transcriptionModel": { "type": ["string", "null"], "minLength": 1, "maxLength": 500 },
+        "capabilities": { "type": "array", "maxItems": 4, "uniqueItems": true, "items": { "enum": ["TEXT", "VISION", "TRANSCRIPTION", "STRUCTURED_OUTPUT"] } },
+        "structuredOutput": { "type": "boolean" },
+        "inputUSDPerMillion": { "type": ["number", "null"], "minimum": 0 },
+        "outputUSDPerMillion": { "type": ["number", "null"], "minimum": 0 },
+        "transcriptionUSDPerMinute": { "type": ["number", "null"], "minimum": 0 },
+        "makeActive": { "type": "boolean" },
+        "disclosureAcknowledged": { "const": true }
+      }
+    },
+    "providerConfigurationArtifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "jobId", "profileId", "operation", "capabilities", "isActive", "secretStored", "configuredAt"],
+      "properties": {
+        "schemaVersion": { "const": "ai-artifact/provider-configuration/v1" },
+        "jobId": { "$ref": "#/$defs/uuid" },
+        "profileId": { "$ref": "#/$defs/uuid" },
+        "operation": { "enum": ["UPSERT", "ACTIVATE", "DELETE"] },
+        "displayName": { "type": ["string", "null"], "maxLength": 500 },
+        "adapter": { "type": ["string", "null"], "enum": ["OPENAI_RESPONSES", "OPENAI_COMPATIBLE", null] },
+        "baseURL": { "type": ["string", "null"], "maxLength": 2048 },
+        "textModel": { "type": ["string", "null"], "maxLength": 500 },
+        "transcriptionModel": { "type": ["string", "null"], "maxLength": 500 },
+        "capabilities": { "type": "array", "maxItems": 4, "uniqueItems": true, "items": { "enum": ["TEXT", "VISION", "TRANSCRIPTION", "STRUCTURED_OUTPUT"] } },
+        "isActive": { "type": "boolean" },
+        "secretStored": { "type": "boolean" },
+        "configuredAt": { "type": "string", "format": "date-time" }
+      }
+    },
     "source": {
       "type": "object",
       "additionalProperties": false,
@@ -136,4 +183,3 @@
     }
   }
 }
-
