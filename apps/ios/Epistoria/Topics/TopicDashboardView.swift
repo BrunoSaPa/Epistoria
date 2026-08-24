@@ -75,7 +75,7 @@ struct TopicDashboardView: View {
         }
         .fileImporter(
             isPresented: $isImportingSources,
-            allowedContentTypes: [.pdf, .image, .plainText, .html],
+            allowedContentTypes: EpistoriaSourceImportTypes.supported,
             allowsMultipleSelection: true
         ) { result in
             Task { await importSources(result) }
@@ -114,7 +114,7 @@ struct TopicDashboardView: View {
                 if let activeSession { selectedSessionId = activeSession.id }
                 else { showNewSession = true }
             }
-            EpistoriaQuickAction(title: "Add Source", subtitle: "PDF, image, text, or web file", symbol: "doc.badge.plus") { isImportingSources = true }
+            EpistoriaQuickAction(title: "Add Source", subtitle: "Documents, books, sheets, or images", symbol: "doc.badge.plus") { isImportingSources = true }
             EpistoriaQuickAction(title: "Ask Topic", subtitle: "Review a cited AI request", symbol: "sparkles") { showStudio = true }
             EpistoriaQuickAction(title: "Create cards", subtitle: "Durable review material", symbol: "rectangle.stack") { showNewCard = true }
             EpistoriaQuickAction(title: "Create test", subtitle: "Coverage-first blueprint", symbol: "checkmark.square") { showNewTest = true }
@@ -180,7 +180,7 @@ struct TopicDashboardView: View {
                 NavigationLink {
                     ResourceDetailView(model: model, resourceId: source.id)
                 } label: {
-                    dashboardRow(title: source.payload.title, detail: source.payload.sourceType.displayName, symbol: "doc.text")
+                    dashboardRow(title: source.payload.title, detail: source.payload.sourceType.displayName, symbol: source.payload.sourceType.epistoriaSymbol)
                 }
                 .buttonStyle(.plain)
             }
@@ -256,7 +256,7 @@ struct TopicDashboardView: View {
         guard let manager = model.assetManager else { return }
         do {
             for url in try result.get() {
-                _ = try await manager.importPhaseOneSource(from: url, topicId: topicId)
+                _ = try await manager.importSource(from: url, topicId: topicId)
             }
             model.noteLocalMutation()
             await load()

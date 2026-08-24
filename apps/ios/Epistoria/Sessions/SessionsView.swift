@@ -272,6 +272,7 @@ struct SessionDetailView: View {
     @State private var showDigestEditor = false
     @State private var showAddExistingNotes = false
     @State private var createdNoteId: UUID?
+    @State private var pendingUnlinkNote: IdentifiedPayload<NotePayload>?
     @State private var errorMessage: String?
 
     var body: some View {
@@ -329,6 +330,16 @@ struct SessionDetailView: View {
                                 context: "Session · \(session.payload.title)"
                             )
                         }
+                        .swipeActions {
+                            Button("Remove from Session", systemImage: "link.badge.minus", role: .destructive) {
+                                pendingUnlinkNote = note
+                            }
+                        }
+                        .contextMenu {
+                            Button("Remove from Session", systemImage: "link.badge.minus", role: .destructive) {
+                                pendingUnlinkNote = note
+                            }
+                        }
                     }
                     Button("Add existing notes", systemImage: "plus.rectangle.on.rectangle") {
                         showAddExistingNotes = true
@@ -348,7 +359,7 @@ struct SessionDetailView: View {
                             ResourceDetailView(model: model, resourceId: resource.id, sessionId: sessionId)
                         }
                     }
-                    Button("Import PDF for this session", systemImage: "doc.badge.plus") {
+                    Button("Import Source for this session", systemImage: "doc.badge.plus") {
                         isImporting = true
                     }
                 }
@@ -428,8 +439,11 @@ struct SessionDetailView: View {
             }
             .disabled(model.isSyncing || model.syncEngine == nil)
         }
-        .fileImporter(isPresented: $isImporting, allowedContentTypes: [.pdf]) { result in
-            Task { await importPDF(result) }
+        .fileImporter(
+            isPresented: $isImporting,
+            allowedContentTypes: EpistoriaSourceImportTypes.supported
+        ) { result in
+            Task { await importSource(result) }
         }
         .navigationDestination(item: $createdNoteId) { id in
             NoteEditorView(
@@ -453,6 +467,23 @@ struct SessionDetailView: View {
         }
         .task { await load() }
         .refreshable { await load() }
+        .confirmationDialog(
+            "Remove this note from the Session?",
+            isPresented: Binding(
+                get: { pendingUnlinkNote != nil },
+                set: { if !$0 { pendingUnlinkNote = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Remove from Session", role: .destructive) {
+                guard let pendingUnlinkNote else { return }
+                Task { await unlinkNote(pendingUnlinkNote.id) }
+                self.pendingUnlinkNote = nil
+            }
+            Button("Cancel", role: .cancel) { pendingUnlinkNote = nil }
+        } message: {
+            Text("The note remains in the notebook. Session activity history is not removed.")
+        }
         .alert("Session error", isPresented: .constant(errorMessage != nil)) {
             Button("OK") { errorMessage = nil }
         } message: { Text(errorMessage ?? "") }
@@ -589,13 +620,13 @@ struct SessionDetailView: View {
         } catch { errorMessage = error.localizedDescription }
     }
 
-    private func importPDF(_ result: Result<URL, Error>) async {
+    private func importSource(_ result: Result<URL, Error>) async {
         guard let manager = model.assetManager else { return }
         do {
             let url = try result.get()
-            _ = try await manager.importPDF(
+            _ = try await manager.importSource(
                 from: url,
-                courseId: session?.payload.courseId,
+                topicId: session?.payload.courseId,
                 sessionId: sessionId
             )
             model.noteLocalMutation()
@@ -625,6 +656,15 @@ struct SessionDetailView: View {
         guard let store = model.store else { return }
         do {
             try await store.removeSessionActivity(id: id)
+            model.noteLocalMutation()
+            await load()
+        } catch { errorMessage = error.localizedDescription }
+    }
+
+    private func unlinkNote(_ noteId: UUID) async {
+        guard let store = model.store else { return }
+        do {
+            try await store.unlinkNote(noteId, fromSession: sessionId)
             model.noteLocalMutation()
             await load()
         } catch { errorMessage = error.localizedDescription }

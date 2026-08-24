@@ -51,7 +51,7 @@ actor EpistoriaExportService {
     }
 
     private struct Metadata: Codable {
-        var formatVersion = "epistoria-export/3"
+        var formatVersion = "epistoria-export/4"
         var exportedAt: Date
         var accountId: UUID
         var mode = "DECRYPTED"
@@ -79,6 +79,7 @@ actor EpistoriaExportService {
     private struct KnowledgeRecords: Codable {
         var sourceVersions: [Record<SourceVersionPayload>]
         var evidence: [Record<EvidencePayload>]
+        var transcriptCorrections: [Record<TranscriptCorrectionPayload>]
         var concepts: [Record<ConceptPayload>]
         var conceptEvidence: [Record<ConceptEvidenceRelationPayload>]
         var conceptLinks: [Record<ConceptLinkPayload>]
@@ -122,8 +123,9 @@ actor EpistoriaExportService {
 
     private struct ResourceRecord: Codable {
         var id: UUID
-        var resource: ResourcePayload
+        var resource: SourcePayload
         var originalPath: String?
+        var readablePath: String?
     }
 
     private struct CanvasAssetRecord: Codable {
@@ -443,22 +445,64 @@ actor EpistoriaExportService {
     private func exportResources(to root: URL) async throws {
         let resourcesDirectory = root.appendingPathComponent("resources", isDirectory: true)
         let originalsDirectory = resourcesDirectory.appendingPathComponent("originals", isDirectory: true)
+        let readableDirectory = resourcesDirectory.appendingPathComponent("readable", isDirectory: true)
         try fileManager.createDirectory(at: originalsDirectory, withIntermediateDirectories: true)
-        let resources = try await store.list(ResourcePayload.self)
+        try fileManager.createDirectory(at: readableDirectory, withIntermediateDirectories: true)
+        let resources = try await store.list(SourcePayload.self)
         var records: [ResourceRecord] = []
         for resource in resources {
             var originalPath: String?
+            var readablePath: String?
             if let assetId = resource.payload.originalAssetId {
                 let metadata = try await store.payload(AssetPayload.self, id: assetId).payload
-                let extensionName = UTType(mimeType: metadata.mimeType)?.preferredFilenameExtension ?? "bin"
+                let inferredExtension = UTType(mimeType: metadata.mimeType)?.preferredFilenameExtension
+                let originalExtension = URL(fileURLWithPath: metadata.originalFilename)
+                    .pathExtension.lowercased()
+                let safeOriginalExtension = originalExtension.count <= 12
+                    && !originalExtension.isEmpty
+                    && originalExtension.unicodeScalars.allSatisfy {
+                        CharacterSet.alphanumerics.contains($0)
+                    }
+                    ? originalExtension
+                    : nil
+                let extensionName = inferredExtension ?? safeOriginalExtension ?? "bin"
                 let filename = "\(assetId.uuidString.lowercased()).\(extensionName)"
                 let relativePath = "resources/originals/\(filename)"
                 let plaintext = try await assetManager.decryptedData(assetId: assetId)
                 try protectedWrite(plaintext, to: originalsDirectory.appendingPathComponent(filename))
                 originalPath = relativePath
+                if resource.payload.sourceType != .audio,
+                   resource.payload.sourceType != .video,
+                   let adapter = try? SourceAdapterRegistry().adapter(
+                    for: resource.payload.sourceType
+                ), let readable = try? adapter.readableExport(data: plaintext) {
+                    let readableExtension = resource.payload.sourceType == .csv ? "csv" : "txt"
+                    let readableFilename = "\(resource.id.uuidString.lowercased()).\(readableExtension)"
+                    try protectedWrite(
+                        readable,
+                        to: readableDirectory.appendingPathComponent(readableFilename)
+                    )
+                    readablePath = "resources/readable/\(readableFilename)"
+                }
+            } else if resource.payload.sourceType == .youtube,
+                      let canonicalURL = resource.payload.canonicalURL {
+                let readableFilename = "\(resource.id.uuidString.lowercased()).txt"
+                let readable = Data(
+                    "\(resource.payload.title)\n\nYouTube URL: \(canonicalURL.absoluteString)\n".utf8
+                )
+                try protectedWrite(
+                    readable,
+                    to: readableDirectory.appendingPathComponent(readableFilename)
+                )
+                readablePath = "resources/readable/\(readableFilename)"
             }
             records.append(
-                ResourceRecord(id: resource.id, resource: resource.payload, originalPath: originalPath)
+                ResourceRecord(
+                    id: resource.id,
+                    resource: resource.payload,
+                    originalPath: originalPath,
+                    readablePath: readablePath
+                )
             )
         }
         try write(records, to: resourcesDirectory.appendingPathComponent("resources.json"))
@@ -488,12 +532,14 @@ actor EpistoriaExportService {
     private func exportKnowledge(to root: URL) async throws {
         async let versions = store.list(SourceVersionPayload.self)
         async let evidence = store.list(EvidencePayload.self)
+        async let transcriptCorrections = store.list(TranscriptCorrectionPayload.self)
         async let concepts = store.list(ConceptPayload.self)
         async let conceptEvidence = store.list(ConceptEvidenceRelationPayload.self)
         async let links = store.list(ConceptLinkPayload.self)
         let value = try await KnowledgeRecords(
             sourceVersions: versions.map { Record(id: $0.id, payload: $0.payload) },
             evidence: evidence.map { Record(id: $0.id, payload: $0.payload) },
+            transcriptCorrections: transcriptCorrections.map { Record(id: $0.id, payload: $0.payload) },
             concepts: concepts.map { Record(id: $0.id, payload: $0.payload) },
             conceptEvidence: conceptEvidence.map { Record(id: $0.id, payload: $0.payload) },
             conceptLinks: links.map { Record(id: $0.id, payload: $0.payload) }
@@ -581,12 +627,27 @@ actor EpistoriaExportService {
             return
         }
         let entities = try await database.entities(type: .aiArtifact)
+        let acceptedTranscriptChunkIds = Set(
+            entities.compactMap { entity -> MediaTranscriptionManifest? in
+                guard let manifest = try? CanonicalJSON.decode(
+                    MediaTranscriptionManifest.self,
+                    from: entity.content
+                ), manifest.reviewState == .accepted || manifest.reviewState == .edited
+                else { return nil }
+                return manifest
+            }.flatMap(\.chunkEntityIds)
+        )
         let records: [[String: Any]] = try entities.compactMap { entity in
             let digest = try? CanonicalJSON.decode(SessionDigestArtifact.self, from: entity.content)
             let learning = try? CanonicalJSON.decode(LearningGenerationArtifact.self, from: entity.content)
+            let transcription = try? CanonicalJSON.decode(
+                MediaTranscriptionManifest.self,
+                from: entity.content
+            )
             let accepted = digest.map { $0.reviewState == .accepted || $0.reviewState == .edited }
                 ?? learning.map { $0.reviewState == .accepted || $0.reviewState == .edited }
-                ?? false
+                ?? transcription.map { $0.reviewState == .accepted || $0.reviewState == .edited }
+                ?? acceptedTranscriptChunkIds.contains(entity.id)
             guard accepted else { return nil }
             guard let content = try JSONSerialization.jsonObject(with: entity.content) as? [String: Any]
             else { throw EpistoriaExportError.invalidJSON("ai-artifacts.json") }
@@ -660,16 +721,16 @@ actor EpistoriaExportService {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         let metadata = try decoder.decode(Metadata.self, from: metadataData)
-        guard ["epistoria-export/1", "epistoria-export/2", "epistoria-export/3"].contains(metadata.formatVersion),
+        guard ["epistoria-export/1", "epistoria-export/2", "epistoria-export/3", "epistoria-export/4"].contains(metadata.formatVersion),
               metadata.mode == "DECRYPTED",
               metadata.accountId == accountId
         else {
             throw EpistoriaExportError.validationFailed("unsupported metadata version or mode")
         }
-        if metadata.formatVersion == "epistoria-export/2" || metadata.formatVersion == "epistoria-export/3" {
+        if ["epistoria-export/2", "epistoria-export/3", "epistoria-export/4"].contains(metadata.formatVersion) {
             required.append("notes/canvas-assets.json")
         }
-        if metadata.formatVersion == "epistoria-export/3" {
+        if metadata.formatVersion == "epistoria-export/3" || metadata.formatVersion == "epistoria-export/4" {
             required.append(contentsOf: ["taxonomy.json", "knowledge.json", "learning.json"])
         }
         for path in required where !fileManager.fileExists(

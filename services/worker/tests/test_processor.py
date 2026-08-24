@@ -13,6 +13,7 @@ from epistoria_worker import base64url
 from epistoria_worker.api import APIError
 from epistoria_worker.asset_crypto import encrypt_bytes, plaintext_dedupe_tag
 from epistoria_worker.canonical import json_bytes
+from epistoria_worker.cost_ledger import CostLedger
 from epistoria_worker.crypto import (
     EncryptedEnvelope,
     decrypt_payload,
@@ -22,8 +23,16 @@ from epistoria_worker.crypto import (
 )
 from epistoria_worker.models import (
     AIJobLease,
+    AutomationAuthorizationV1,
+    FeedbackEvidenceExcerptV1,
+    FreeResponseFeedbackArtifactV1,
+    FreeResponseFeedbackRequestV1,
+    KnownConceptReferenceV1,
     LearningGenerationArtifactV1,
     LearningGenerationRequestV1,
+    MediaTranscriptionChunkV1,
+    MediaTranscriptionManifestV1,
+    MediaTranscriptionRequestV1,
     PDFExtractionManifestV1,
     PDFExtractionRequestV1,
     SessionDigestArtifactV1,
@@ -31,17 +40,24 @@ from epistoria_worker.models import (
     SourceExcerptV1,
     SourceKind,
 )
+from epistoria_worker.models import TestGenerationPlanV1 as GenerationPlanV1
 from epistoria_worker.outbox import EncryptedOutbox
 from epistoria_worker.processor import WorkerProcessor
 from epistoria_worker.providers.fake import DeterministicDigestProvider
 
 ACCOUNT_ID = UUID("11111111-1111-4111-8111-111111111111")
 ACCOUNT_KEY = bytes(range(32))
+TRANSCRIPTION_WAVE = b"RIFF\x04\x00\x00\x00WAVE"
 
 
 def lease_for(
     job_type: Literal[
-        "SESSION_DIGEST", "PDF_EXTRACTION", "FLASHCARD_DRAFTS", "TEST_GENERATION"
+        "SESSION_DIGEST",
+        "PDF_EXTRACTION",
+        "TRANSCRIPTION",
+        "FLASHCARD_DRAFTS",
+        "TEST_GENERATION",
+        "FREE_RESPONSE_FEEDBACK",
     ],
     payload: bytes,
     job_id: UUID | None = None,
@@ -105,6 +121,31 @@ class CountingProvider(DeterministicDigestProvider):
         return super().generate(request)
 
 
+class TranscriptionCountingProvider(DeterministicDigestProvider):
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def transcribe_media(self, **kwargs):
+        self.calls += 1
+        return super().transcribe_media(**kwargs)
+
+
+class LearningCountingProvider(DeterministicDigestProvider):
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def generate_learning(self, request: LearningGenerationRequestV1):
+        self.calls += 1
+        return super().generate_learning(request)
+
+
+class UnknownConceptLinkProvider(DeterministicDigestProvider):
+    def generate_learning(self, request: LearningGenerationRequestV1):
+        response, trace = super().generate_learning(request)
+        response.concept_links[0].source_concept_id = uuid4()
+        return response, trace
+
+
 def decrypt_artifact(mutation: dict[str, Any]) -> bytes:
     wire = mutation["envelope"]
     envelope = EncryptedEnvelope(
@@ -153,6 +194,42 @@ def processor(api: FakeAPI, outbox_path: Path, provider=None) -> WorkerProcessor
         outbox=EncryptedOutbox(outbox_path),
         digest_provider=provider,
         maximum_asset_bytes=10_000_000,
+    )
+
+
+def automated_learning_request(
+    job_id: UUID,
+    *,
+    grant_id: UUID,
+    topic_id: UUID,
+    expires_at: datetime,
+    spending_limit_minor_units: int = 500,
+) -> LearningGenerationRequestV1:
+    return LearningGenerationRequestV1(
+        account_id=ACCOUNT_ID,
+        job_id=job_id,
+        job_type="FLASHCARD_DRAFTS",
+        topic_id=topic_id,
+        sources=[SourceExcerptV1(
+            source_id=uuid4(),
+            source_kind=SourceKind.NOTE_BLOCK,
+            title="Synthetic algebra",
+            locator="block 1",
+            excerpt="A difference of squares uses conjugate factors.",
+        )],
+        automation_authorization=AutomationAuthorizationV1(
+            grant_id=grant_id,
+            topic_ids=[topic_id],
+            job_types=["FLASHCARD_DRAFTS"],
+            minimum_interval_hours=24,
+            expires_at=expires_at,
+            spending_limit_minor_units=spending_limit_minor_units,
+            currency_code="USD",
+            authorized_at=datetime.now(UTC),
+            scope_key=f"{topic_id}:FLASHCARD_DRAFTS",
+            input_fingerprint="a" * 64,
+        ),
+        disclosure_acknowledged=True,
     )
 
 
@@ -207,6 +284,335 @@ def test_learning_draft_is_cited_encrypted_and_reviewable(tmp_path) -> None:
     assert artifact.response.items
     assert artifact.response.items[0].cited_source_ids == [source_id]
     assert api.completed == [(job_id, artifact_id(api.pushed[0]))]
+
+
+def test_legacy_generic_transcription_draft_remains_readable(tmp_path) -> None:
+    job_id = uuid4()
+    source_id = uuid4()
+    topic_id = uuid4()
+    request = LearningGenerationRequestV1(
+        account_id=ACCOUNT_ID,
+        job_id=job_id,
+        job_type="TRANSCRIPTION",
+        topic_id=topic_id,
+        sources=[SourceExcerptV1(
+            source_id=source_id,
+            source_kind=SourceKind.NOTE_BLOCK,
+            title="Legacy recording notes",
+            locator="block 1",
+            excerpt="An older queued transcript draft remains recoverable.",
+        )],
+        disclosure_acknowledged=True,
+    )
+    api = FakeAPI([lease_for("TRANSCRIPTION", json_bytes(request), job_id)])
+    worker = processor(api, tmp_path / "outbox", DeterministicDigestProvider())
+
+    assert worker.process_once()
+    artifact = LearningGenerationArtifactV1.model_validate_json(
+        decrypt_artifact(api.pushed[0])
+    )
+    assert artifact.job_type == "TRANSCRIPTION"
+    assert artifact.source_ids == [source_id]
+    assert api.completed == [(job_id, artifact_id(api.pushed[0]))]
+
+
+def test_automatic_learning_requires_ledger_and_honors_frequency(tmp_path) -> None:
+    grant_id = uuid4()
+    topic_id = uuid4()
+    first_job = uuid4()
+    first_request = automated_learning_request(
+        first_job,
+        grant_id=grant_id,
+        topic_id=topic_id,
+        expires_at=datetime.now(UTC) + timedelta(days=2),
+    )
+    missing_ledger_api = FakeAPI([
+        lease_for("FLASHCARD_DRAFTS", json_bytes(first_request), first_job)
+    ])
+    missing_ledger_provider = LearningCountingProvider()
+    without_ledger = processor(
+        missing_ledger_api,
+        tmp_path / "missing-ledger-outbox",
+        missing_ledger_provider,
+    )
+    assert without_ledger.process_once()
+    assert missing_ledger_provider.calls == 0
+    assert missing_ledger_api.failed == [
+        (first_job, "AUTOMATION_LEDGER_REQUIRED", False)
+    ]
+
+    ledger = CostLedger(tmp_path / "costs.json", soft_budget_usd=100)
+    valid_api = FakeAPI([lease_for(
+        "FLASHCARD_DRAFTS", json_bytes(first_request), first_job
+    )])
+    provider = LearningCountingProvider()
+    valid_worker = WorkerProcessor(
+        account_id=ACCOUNT_ID,
+        account_key=ACCOUNT_KEY,
+        api=valid_api,  # type: ignore[arg-type]
+        outbox=EncryptedOutbox(tmp_path / "valid-outbox"),
+        digest_provider=provider,
+        maximum_asset_bytes=10_000_000,
+        cost_ledger=ledger,
+    )
+    assert valid_worker.process_once()
+    assert provider.calls == 1
+    assert valid_api.completed
+
+    second_job = uuid4()
+    second_request = automated_learning_request(
+        second_job,
+        grant_id=grant_id,
+        topic_id=topic_id,
+        expires_at=datetime.now(UTC) + timedelta(days=2),
+    )
+    frequency_api = FakeAPI([lease_for(
+        "FLASHCARD_DRAFTS", json_bytes(second_request), second_job
+    )])
+    frequency_worker = WorkerProcessor(
+        account_id=ACCOUNT_ID,
+        account_key=ACCOUNT_KEY,
+        api=frequency_api,  # type: ignore[arg-type]
+        outbox=EncryptedOutbox(tmp_path / "frequency-outbox"),
+        digest_provider=provider,
+        maximum_asset_bytes=10_000_000,
+        cost_ledger=ledger,
+    )
+    assert frequency_worker.process_once()
+    assert provider.calls == 1
+    assert frequency_api.failed == [
+        (second_job, "AUTOMATION_FREQUENCY_LIMIT", False)
+    ]
+
+
+def test_automatic_learning_honors_expiration_and_recorded_spending(tmp_path) -> None:
+    topic_id = uuid4()
+    grant_id = uuid4()
+    provider = LearningCountingProvider()
+    ledger = CostLedger(tmp_path / "costs.json", soft_budget_usd=100)
+
+    expired_job = uuid4()
+    expired = automated_learning_request(
+        expired_job,
+        grant_id=grant_id,
+        topic_id=topic_id,
+        expires_at=datetime.now(UTC) - timedelta(seconds=1),
+    )
+    expired_api = FakeAPI([lease_for(
+        "FLASHCARD_DRAFTS", json_bytes(expired), expired_job
+    )])
+    expired_worker = WorkerProcessor(
+        account_id=ACCOUNT_ID,
+        account_key=ACCOUNT_KEY,
+        api=expired_api,  # type: ignore[arg-type]
+        outbox=EncryptedOutbox(tmp_path / "expired-outbox"),
+        digest_provider=provider,
+        maximum_asset_bytes=10_000_000,
+        cost_ledger=ledger,
+    )
+    assert expired_worker.process_once()
+    assert provider.calls == 0
+    assert expired_api.failed == [(expired_job, "AUTOMATION_GRANT_INVALID", False)]
+
+    scope_key = f"{topic_id}:FLASHCARD_DRAFTS"
+    ledger.record(
+        job_id=uuid4(),
+        provider="synthetic",
+        model="fixture-v1",
+        prompt_version="learning-generation/v1",
+        input_tokens=1,
+        output_tokens=1,
+        estimated_cost_usd=5,
+        provider_request_id="spent-limit-event",
+        automation_grant_id=grant_id,
+        automation_scope_key=scope_key,
+        recorded_at=datetime.now(UTC) - timedelta(days=2),
+    )
+    spending_job = uuid4()
+    spending = automated_learning_request(
+        spending_job,
+        grant_id=grant_id,
+        topic_id=topic_id,
+        expires_at=datetime.now(UTC) + timedelta(days=2),
+        spending_limit_minor_units=500,
+    )
+    spending_api = FakeAPI([lease_for(
+        "FLASHCARD_DRAFTS", json_bytes(spending), spending_job
+    )])
+    spending_worker = WorkerProcessor(
+        account_id=ACCOUNT_ID,
+        account_key=ACCOUNT_KEY,
+        api=spending_api,  # type: ignore[arg-type]
+        outbox=EncryptedOutbox(tmp_path / "spending-outbox"),
+        digest_provider=provider,
+        maximum_asset_bytes=10_000_000,
+        cost_ledger=ledger,
+    )
+    assert spending_worker.process_once()
+    assert provider.calls == 0
+    assert spending_api.failed == [
+        (spending_job, "AUTOMATION_SPENDING_LIMIT", False)
+    ]
+
+
+def test_test_plan_survives_worker_and_reports_objective_gaps(tmp_path) -> None:
+    job_id = uuid4()
+    source_id = uuid4()
+    topic_id = uuid4()
+    plan = GenerationPlanV1(
+        mode="COMPREHENSIVE",
+        question_count=1,
+        time_limit_minutes=10,
+        coverage_dimensions=["CONCEPTUAL", "INTEGRATED"],
+        objective_titles=["Difference of squares", "Factoring by grouping"],
+    )
+    request = LearningGenerationRequestV1(
+        account_id=ACCOUNT_ID,
+        job_id=job_id,
+        job_type="TEST_GENERATION",
+        topic_id=topic_id,
+        sources=[SourceExcerptV1(
+            source_id=source_id,
+            source_kind=SourceKind.NOTE_BLOCK,
+            title="Synthetic algebra",
+            locator="block 1",
+            excerpt="Difference of squares and grouping are factoring methods.",
+        )],
+        objective_titles=plan.objective_titles,
+        test_plan=plan,
+        disclosure_acknowledged=True,
+    )
+    api = FakeAPI([lease_for("TEST_GENERATION", json_bytes(request), job_id)])
+    worker = processor(api, tmp_path / "outbox", DeterministicDigestProvider())
+
+    assert worker.process_once()
+    artifact = LearningGenerationArtifactV1.model_validate_json(
+        decrypt_artifact(api.pushed[0])
+    )
+    assert artifact.schema_version == "ai-artifact/learning-generation/v2"
+    assert artifact.test_plan == plan
+    assert len(artifact.response.items) == 1
+    assert artifact.response.items[0].objective_titles == ["Difference of squares"]
+    assert artifact.response.coverage_gaps == [
+        "No generated question covers objective: Factoring by grouping",
+        "No generated question covers dimension: Integrated",
+    ]
+
+
+def test_concept_suggestions_return_cited_reviewable_links(tmp_path) -> None:
+    job_id = uuid4()
+    source_id = uuid4()
+    topic_id = uuid4()
+    known_concept_id = uuid4()
+    request = LearningGenerationRequestV1(
+        account_id=ACCOUNT_ID,
+        job_id=job_id,
+        job_type="CONCEPT_SUGGESTIONS",
+        topic_id=topic_id,
+        sources=[SourceExcerptV1(
+            source_id=source_id,
+            source_kind=SourceKind.NOTE_BLOCK,
+            title="Synthetic algebra",
+            locator="block 1",
+            excerpt="Factoring exposes the roots of a polynomial.",
+        )],
+        known_concepts=[KnownConceptReferenceV1(
+            id=known_concept_id,
+            name="Factorization",
+        )],
+        disclosure_acknowledged=True,
+    )
+    api = FakeAPI([lease_for("CONCEPT_SUGGESTIONS", json_bytes(request), job_id)])
+    worker = processor(api, tmp_path / "concept-outbox", DeterministicDigestProvider())
+
+    assert worker.process_once()
+    artifact = LearningGenerationArtifactV1.model_validate_json(
+        decrypt_artifact(api.pushed[0])
+    )
+    assert artifact.known_concept_ids == [known_concept_id]
+    assert len(artifact.response.concept_links) == 1
+    link = artifact.response.concept_links[0]
+    assert link.source_concept_id == known_concept_id
+    assert link.target_concept_id is None
+    assert link.relation == "RELATED"
+    assert link.cited_source_ids == [source_id]
+
+
+def test_concept_suggestions_reject_unknown_concept_ids(tmp_path) -> None:
+    job_id = uuid4()
+    source_id = uuid4()
+    topic_id = uuid4()
+    request = LearningGenerationRequestV1(
+        account_id=ACCOUNT_ID,
+        job_id=job_id,
+        job_type="CONCEPT_SUGGESTIONS",
+        topic_id=topic_id,
+        sources=[SourceExcerptV1(
+            source_id=source_id,
+            source_kind=SourceKind.NOTE_BLOCK,
+            title="Synthetic algebra",
+            locator="block 1",
+            excerpt="Factoring exposes the roots of a polynomial.",
+        )],
+        known_concepts=[KnownConceptReferenceV1(id=uuid4(), name="Factorization")],
+        disclosure_acknowledged=True,
+    )
+    api = FakeAPI([lease_for("CONCEPT_SUGGESTIONS", json_bytes(request), job_id)])
+    worker = processor(api, tmp_path / "invalid-concept-outbox", UnknownConceptLinkProvider())
+
+    assert worker.process_once()
+    assert api.pushed == []
+    assert api.failed == [(job_id, "PROVIDER_CONCEPT_INVALID", True)]
+
+
+def test_free_response_feedback_is_cited_encrypted_and_linked(tmp_path) -> None:
+    job_id = uuid4()
+    attempt_id = uuid4()
+    response_id = uuid4()
+    question_id = uuid4()
+    topic_id = uuid4()
+    request = FreeResponseFeedbackRequestV1(
+        account_id=ACCOUNT_ID,
+        job_id=job_id,
+        attempt_id=attempt_id,
+        response_id=response_id,
+        question_id=question_id,
+        topic_id=topic_id,
+        question_kind="EXPLANATION",
+        prompt="Explain why a difference of squares factors.",
+        rubric="Identify the conjugate factors and verify by expansion.",
+        reference_answer="The middle terms cancel when the conjugates are expanded.",
+        user_response="The middle terms cancel when the conjugates are expanded.",
+        confidence=4,
+        evidence=[FeedbackEvidenceExcerptV1(
+            source_id=question_id,
+            source_kind="QUESTION_SNAPSHOT",
+            title="Frozen question and grading guide",
+            locator=f"attempt {attempt_id}, question {question_id}",
+            excerpt="The frozen grading guide requires a cancellation explanation.",
+        )],
+        disclosure_acknowledged=True,
+    )
+    api = FakeAPI([lease_for("FREE_RESPONSE_FEEDBACK", json_bytes(request), job_id)])
+    worker = processor(api, tmp_path / "outbox", DeterministicDigestProvider())
+
+    assert worker.process_once()
+    artifact = FreeResponseFeedbackArtifactV1.model_validate_json(
+        decrypt_artifact(api.pushed[0])
+    )
+    assert artifact.attempt_id == attempt_id
+    assert artifact.response_id == response_id
+    assert artifact.question_id == question_id
+    assert artifact.topic_id == topic_id
+    assert artifact.response.proposed_score == 1
+    assert artifact.response.cited_source_ids == [question_id]
+    assert artifact.source_ids == [question_id]
+    assert api.pushed[0]["parentId"] == str(attempt_id)
+    assert set(api.pushed[0]["relationIds"]) == {
+        str(attempt_id), str(response_id), str(question_id), str(topic_id)
+    }
+    assert api.completed == [(job_id, artifact_id(api.pushed[0]))]
+    assert not api.failed
 
 
 def artifact_id(mutation: dict[str, Any]) -> UUID:
@@ -266,3 +672,107 @@ def test_pdf_job_decrypts_in_memory_and_syncs_manifest(tmp_path) -> None:
     assert manifest.character_count > 0
     assert manifest.chunk_entity_ids == [artifact_id(api.pushed[0])]
     assert api.completed == [(job_id, artifact_id(api.pushed[-1]))]
+
+
+def transcription_request(
+    job_id: UUID,
+    *,
+    asset_key: bytes,
+    media: bytes,
+    expected_size: int | None = None,
+    expected_tag: str | None = None,
+) -> MediaTranscriptionRequestV1:
+    return MediaTranscriptionRequestV1(
+        account_id=ACCOUNT_ID,
+        job_id=job_id,
+        source_id=uuid4(),
+        source_version_id=uuid4(),
+        source_type="AUDIO",
+        asset_id=uuid4(),
+        asset_key=base64url.encode(asset_key),
+        expected_dedupe_tag=expected_tag
+        or plaintext_dedupe_tag(media, account_key=ACCOUNT_KEY, account_id=ACCOUNT_ID),
+        expected_plaintext_bytes=expected_size or len(media),
+        filename="lecture.wav",
+        mime_type="audio/wav",
+        language="en",
+        disclosure_acknowledged=True,
+    )
+
+
+def test_transcription_job_decrypts_media_and_syncs_timestamped_chunks(tmp_path) -> None:
+    job_id = uuid4()
+    asset_key = bytes(reversed(range(32)))
+    media = TRANSCRIPTION_WAVE
+    request = transcription_request(job_id, asset_key=asset_key, media=media)
+    api = FakeAPI(
+        [lease_for("TRANSCRIPTION", json_bytes(request), job_id)],
+        encrypted_asset=encrypt_bytes(media, key=asset_key),
+    )
+    provider = TranscriptionCountingProvider()
+    worker = processor(api, tmp_path / "outbox", provider)
+
+    assert worker.process_once()
+    assert provider.calls == 1
+    assert len(api.pushed) == 2
+    chunk = MediaTranscriptionChunkV1.model_validate_json(decrypt_artifact(api.pushed[0]))
+    manifest = MediaTranscriptionManifestV1.model_validate_json(
+        decrypt_artifact(api.pushed[-1])
+    )
+    assert chunk.source_id == request.source_id
+    assert chunk.source_version_id == request.source_version_id
+    assert chunk.segments[0].start_seconds == 0
+    assert chunk.segments[0].end_seconds == 1
+    assert manifest.source_id == request.source_id
+    assert manifest.source_version_id == request.source_version_id
+    assert manifest.segment_count == 1
+    assert manifest.chunk_entity_ids == [artifact_id(api.pushed[0])]
+    assert manifest.trace.estimated_cost_usd == 0
+    assert b"Synthetic transcript" not in json_bytes(api.pushed)
+    assert api.completed == [(job_id, artifact_id(api.pushed[-1]))]
+
+
+@pytest.mark.parametrize("failure", ["size", "dedupe"])
+def test_transcription_rejects_asset_mismatch_before_provider(tmp_path, failure: str) -> None:
+    job_id = uuid4()
+    asset_key = bytes(reversed(range(32)))
+    media = TRANSCRIPTION_WAVE
+    request = transcription_request(
+        job_id,
+        asset_key=asset_key,
+        media=media,
+        expected_size=len(media) - 1 if failure == "size" else None,
+        expected_tag="0" * 64 if failure == "dedupe" else None,
+    )
+    api = FakeAPI(
+        [lease_for("TRANSCRIPTION", json_bytes(request), job_id)],
+        encrypted_asset=encrypt_bytes(media, key=asset_key),
+    )
+    provider = TranscriptionCountingProvider()
+    worker = processor(api, tmp_path / "outbox", provider)
+
+    assert worker.process_once()
+    assert provider.calls == 0
+    assert api.pushed == []
+    expected = "TRANSCRIPTION_MEDIA_SIZE_MISMATCH" if failure == "size" else "ASSET_DEDUPE_MISMATCH"
+    assert api.failed == [(job_id, expected, False)]
+
+
+def test_transcription_rejects_spoofed_media_before_provider(tmp_path) -> None:
+    job_id = uuid4()
+    asset_key = bytes(reversed(range(32)))
+    media = b"not-a-wave-file"
+    request = transcription_request(job_id, asset_key=asset_key, media=media)
+    api = FakeAPI(
+        [lease_for("TRANSCRIPTION", json_bytes(request), job_id)],
+        encrypted_asset=encrypt_bytes(media, key=asset_key),
+    )
+    provider = TranscriptionCountingProvider()
+    worker = processor(api, tmp_path / "outbox", provider)
+
+    assert worker.process_once()
+    assert provider.calls == 0
+    assert api.pushed == []
+    assert api.failed == [
+        (job_id, "TRANSCRIPTION_MEDIA_IDENTITY_MISMATCH", False)
+    ]

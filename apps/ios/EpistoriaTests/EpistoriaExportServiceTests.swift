@@ -74,6 +74,52 @@ final class EpistoriaExportServiceTests: XCTestCase {
         try pdf.write(to: pdfURL, options: .atomic)
         let imported = try await fixture.assetManager.importPDF(from: pdfURL)
         let asset = try await fixture.store.payload(AssetPayload.self, id: imported.assetId)
+        let csv = Data("objective,status\nFactorization,ready\n".utf8)
+        let csvURL = fixture.root.appendingPathComponent("plan.csv")
+        try csv.write(to: csvURL, options: .atomic)
+        let importedCSV = try await fixture.assetManager.importSource(from: csvURL)
+        let webHTML = Data(
+            "<html><head><title>Exported page</title></head><body><p>Readable theorem</p><script>ignored()</script></body></html>".utf8
+        )
+        let webURL = fixture.root.appendingPathComponent("captured.html")
+        try webHTML.write(to: webURL, options: .atomic)
+        let importedHTML = try await fixture.assetManager.importSource(from: webURL)
+        let canonicalWebURL = try XCTUnwrap(URL(string: "https://example.com/theorem"))
+        let webSourceId = try await fixture.store.createSource(
+            type: .website,
+            title: "Exported page",
+            originalAssetId: importedHTML.assetId,
+            canonicalURL: canonicalWebURL,
+            capturedURL: canonicalWebURL
+        )
+        let googleDocument = try XCTUnwrap(Data(base64Encoded:
+            "UEsDBBQAAAAIALwgFl0FejLKdgAAAI8AAAATABwAW0NvbnRlbnRfVHlwZXNdLnhtbFVUCQADhHSJaoR0iWp1eAsAAQT1AQAABAAAAAA9jjEOwjAMRXdOUWVFJBdIu7ADAxewEgdZiu3ICQVuTysk5v/+04v3T8O+xOuKZpRxuoGNCzDOLjCQ+DdXN51VBsrY2dlBa5USDFIJq2SvDWWjihrD6CcthRJmTU/eLv6llptpwt5JHlz9f9n1x10flhh+GYcvUEsDBAoAAAAAALwgFl0AAAAAAAAAAAAAAAAFABwAd29yZC9VVAkAA4R0iWqHdIlqdXgLAAEE9QEAAAQAAAAAUEsDBBQAAAAIALwgFl0GDEA/VAAAAHIAAAARABwAd29yZC9kb2N1bWVudC54bWxVVAkAA4R0iWqEdIlqdXgLAAEE9QEAAAQAAAAAsym3SslPLs1NzStRqMjNySu2KrdVKs8vSlGysym3SspPqQTRBSCiCESU2AWlJqYkJuWkKrjn56cDqZKM1Pyi1FwbfZAkiCwCkwVgEmKAPsISOy4AUEsBAh4DFAAAAAgAvCAWXQV6Msp2AAAAjwAAABMAGAAAAAAAAQAAAKSBAAAAAFtDb250ZW50X1R5cGVzXS54bWxVVAUAA4R0iWp1eAsAAQT1AQAABAAAAABQSwECHgMKAAAAAAC8IBZdAAAAAAAAAAAAAAAABQAYAAAAAAAAABAA7UHDAAAAd29yZC9VVAUAA4R0iWp1eAsAAQT1AQAABAAAAABQSwECHgMUAAAACAC8IBZdBgxAP1QAAAByAAAAEQAYAAAAAAABAAAApIECAQAAd29yZC9kb2N1bWVudC54bWxVVAUAA4R0iWp1eAsAAQT1AQAABAAAAABQSwUGAAAAAAMAAwD7AAAAoQEAAAAA"
+        ))
+        let googleDocumentURL = fixture.root.appendingPathComponent("google-export.docx")
+        try googleDocument.write(to: googleDocumentURL, options: .atomic)
+        let importedGoogleDocument = try await fixture.assetManager.importSource(
+            from: googleDocumentURL
+        )
+        let googleShareURL = try XCTUnwrap(URL(
+            string: "https://docs.google.com/document/d/export-test"
+        ))
+        let googleSourceId = try await fixture.store.createSource(
+            type: .googleDocument,
+            title: "Google theorem",
+            originalAssetId: importedGoogleDocument.assetId,
+            canonicalURL: googleShareURL,
+            capturedURL: try GoogleWorkspaceReference(url: googleShareURL).exportURL
+        )
+        let youtubeURL = try XCTUnwrap(URL(
+            string: "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+        ))
+        let youtubeSourceId = try await fixture.store.createSource(
+            type: .youtube,
+            title: "Video reference",
+            canonicalURL: youtubeURL,
+            capturedURL: youtubeURL,
+            identifiers: ["youtube:dQw4w9WgXcQ"]
+        )
 
         var annotation = AnnotationPayload(
             resourceId: imported.resourceId,
@@ -89,6 +135,21 @@ final class EpistoriaExportServiceTests: XCTestCase {
             sourceVersionId: try XCTUnwrap(importedSource.payload.currentVersionId)
         )
         let annotationId = annotationResult.annotationId
+        let firstConceptId = try await fixture.store.createConcept(
+            name: "Factorization",
+            topicIds: [topicId]
+        )
+        let secondConceptId = try await fixture.store.createConcept(
+            name: "Roots",
+            topicIds: [topicId]
+        )
+        let conceptLinkId = try await fixture.store.createConceptLink(
+            sourceConceptId: firstConceptId,
+            targetConceptId: secondConceptId,
+            relation: .applies,
+            rationale: "Factoring can expose roots.",
+            evidenceIds: [annotationResult.evidenceId]
+        )
 
         let package = try await fixture.service.prepareDecryptedDirectoryForTesting(
             includingDerivedAI: false
@@ -103,6 +164,51 @@ final class EpistoriaExportServiceTests: XCTestCase {
                 "resources/originals/\(imported.assetId.uuidString.lowercased()).pdf"
             )),
             pdf
+        )
+        XCTAssertEqual(
+            try Data(contentsOf: package.appendingPathComponent(
+                "resources/readable/\(importedCSV.resourceId.uuidString.lowercased()).csv"
+            )),
+            csv
+        )
+        XCTAssertEqual(
+            try Data(contentsOf: package.appendingPathComponent(
+                "resources/originals/\(importedHTML.assetId.uuidString.lowercased()).html"
+            )),
+            webHTML
+        )
+        XCTAssertEqual(
+            try String(
+                contentsOf: package.appendingPathComponent(
+                    "resources/readable/\(webSourceId.uuidString.lowercased()).txt"
+                ),
+                encoding: .utf8
+            ),
+            "Readable theorem"
+        )
+        XCTAssertEqual(
+            try Data(contentsOf: package.appendingPathComponent(
+                "resources/originals/\(importedGoogleDocument.assetId.uuidString.lowercased()).docx"
+            )),
+            googleDocument
+        )
+        XCTAssertEqual(
+            try String(
+                contentsOf: package.appendingPathComponent(
+                    "resources/readable/\(googleSourceId.uuidString.lowercased()).txt"
+                ),
+                encoding: .utf8
+            ),
+            "Readable Google theorem"
+        )
+        XCTAssertEqual(
+            try String(
+                contentsOf: package.appendingPathComponent(
+                    "resources/readable/\(youtubeSourceId.uuidString.lowercased()).txt"
+                ),
+                encoding: .utf8
+            ),
+            "Video reference\n\nYouTube URL: https://www.youtube.com/watch?v=dQw4w9WgXcQ\n"
         )
         XCTAssertEqual(
             try Data(contentsOf: package.appendingPathComponent(
@@ -147,9 +253,11 @@ final class EpistoriaExportServiceTests: XCTestCase {
         let taxonomy = try String(contentsOf: package.appendingPathComponent("taxonomy.json"), encoding: .utf8)
         let knowledge = try String(contentsOf: package.appendingPathComponent("knowledge.json"), encoding: .utf8)
         let learning = try String(contentsOf: package.appendingPathComponent("learning.json"), encoding: .utf8)
-        XCTAssertTrue(metadata.contains("epistoria-export/3"))
+        XCTAssertTrue(metadata.contains("epistoria-export/4"))
         XCTAssertTrue(taxonomy.lowercased().contains(topicId.uuidString.lowercased()))
         XCTAssertTrue(knowledge.lowercased().contains(annotationResult.evidenceId.uuidString.lowercased()))
+        XCTAssertTrue(knowledge.lowercased().contains(conceptLinkId.uuidString.lowercased()))
+        XCTAssertTrue(knowledge.contains("Factoring can expose roots."))
         XCTAssertTrue(learning.contains("Review factoring"))
 
         let exportedBytes = try recursiveFileData(in: package)
@@ -164,6 +272,92 @@ final class EpistoriaExportServiceTests: XCTestCase {
 
         try EpistoriaExportService.removeTemporaryArchive(result.archiveURL)
         XCTAssertFalse(FileManager.default.fileExists(atPath: result.archiveURL.path))
+    }
+
+    func testAcceptedTranscriptManifestAndChunksExportAsDerivedData() async throws {
+        let fixture = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let sourceId = try await fixture.store.createSource(
+            type: .audio,
+            title: "Synthetic lecture"
+        )
+        let source = try await fixture.store.payload(SourcePayload.self, id: sourceId)
+        let sourceVersionId = try XCTUnwrap(source.payload.currentVersionId)
+        let jobId = UUID()
+        let chunkId = UUID()
+        let chunk = MediaTranscriptionChunk(
+            jobId: jobId,
+            sourceId: sourceId,
+            sourceVersionId: sourceVersionId,
+            chunkIndex: 0,
+            segments: [TranscriptSegment(
+                index: 0,
+                startSeconds: 0,
+                endSeconds: 2,
+                text: "Accepted transcript text."
+            )]
+        )
+        _ = try await fixture.database.saveLocal(
+            id: chunkId,
+            entityType: .aiArtifact,
+            parentId: sourceId,
+            relationIds: [sourceId, sourceVersionId],
+            content: try CanonicalJSON.encode(chunk),
+            search: SearchDocument(title: "", body: "")
+        )
+        var manifest = MediaTranscriptionManifest(
+            jobId: jobId,
+            sourceId: sourceId,
+            sourceVersionId: sourceVersionId,
+            generatedAt: Date(timeIntervalSince1970: 1_800_000_000),
+            language: "en",
+            durationSeconds: 2,
+            characterCount: 25,
+            segmentCount: 1,
+            trace: ProviderTrace(
+                provider: "deterministic-test",
+                model: "fixture-transcription-v1",
+                promptVersion: "media-transcription/v1"
+            ),
+            chunkEntityIds: [chunkId]
+        )
+        manifest.reviewState = .accepted
+        manifest.reviewedAt = Date(timeIntervalSince1970: 1_800_000_100)
+        let manifestId = try await fixture.store.save(
+            payload: manifest,
+            parentId: sourceId,
+            relationIds: [sourceId, sourceVersionId, chunkId]
+        )
+        let correctionId = try await fixture.store.createTranscriptCorrection(
+            transcriptionArtifactId: manifestId,
+            segmentIndex: 0,
+            correctedText: "Owner-corrected transcript text.",
+            reason: "Checked against the recording."
+        )
+        let evidenceId = try await fixture.store.createTranscriptEvidence(
+            transcriptionArtifactId: manifestId,
+            segmentIndexes: [0]
+        )
+
+        let package = try await fixture.service.prepareDecryptedDirectoryForTesting(
+            includingDerivedAI: true
+        )
+        defer { try? FileManager.default.removeItem(at: package.deletingLastPathComponent()) }
+        let artifacts = try String(
+            contentsOf: package.appendingPathComponent("ai-artifacts.json"),
+            encoding: .utf8
+        )
+        let knowledge = try String(
+            contentsOf: package.appendingPathComponent("knowledge.json"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(artifacts.lowercased().contains(manifestId.uuidString.lowercased()))
+        XCTAssertTrue(artifacts.lowercased().contains(chunkId.uuidString.lowercased()))
+        XCTAssertTrue(artifacts.contains("Accepted transcript text."))
+        XCTAssertFalse(artifacts.contains("Owner-corrected transcript text."))
+        XCTAssertTrue(knowledge.lowercased().contains(correctionId.uuidString.lowercased()))
+        XCTAssertTrue(knowledge.lowercased().contains(evidenceId.uuidString.lowercased()))
+        XCTAssertTrue(knowledge.contains("Owner-corrected transcript text."))
     }
 
     func testValidationRejectsTamperingDuplicateEntriesHiddenFilesAndOtherAccounts() async throws {

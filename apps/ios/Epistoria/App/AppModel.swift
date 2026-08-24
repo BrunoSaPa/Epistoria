@@ -88,6 +88,7 @@ final class AppModel {
     private var automaticSyncTask: Task<Void, Never>?
     private var automaticSyncToken: UUID?
     private var periodicSyncTask: Task<Void, Never>?
+    private var proactiveAutomationTask: Task<Void, Never>?
     private var syncAttemptTask: Task<SyncReport, Error>?
     private var exportTask: Task<EpistoriaExportResult, Error>?
     private var notePDFExportTask: Task<NotePDFExportResult, Error>?
@@ -200,6 +201,8 @@ final class AppModel {
         automaticSyncToken = nil
         periodicSyncTask?.cancel()
         periodicSyncTask = nil
+        proactiveAutomationTask?.cancel()
+        proactiveAutomationTask = nil
         pathMonitor?.pathUpdateHandler = nil
         pathMonitor?.cancel()
         pathMonitor = nil
@@ -259,6 +262,7 @@ final class AppModel {
         unresolvedConflictCount = 0
         try? EpistoriaExportService.removeAllTemporaryExports()
         try? NotePDFExportService.removeAllTemporaryPDFs()
+        try? ProtectedVideoFileStore.removeAllTemporaryFiles()
         configuration = configurationStore.load()
         phase = nextPhase
         isLocking = false
@@ -639,6 +643,7 @@ final class AppModel {
         guard !isLocking, case .ready = phase else { return }
         Task { await refreshDataHealth() }
         scheduleAutomaticSync()
+        scheduleProactiveAutomation(delay: .seconds(10))
     }
 
     func refreshDataHealth() async {
@@ -763,6 +768,7 @@ final class AppModel {
     }
 
     private func beginReadyWork() async {
+        try? ProtectedVideoFileStore.removeAllTemporaryFiles()
         let generation = sessionGeneration
         do {
             try await pendingSaves.flushAll()
@@ -774,6 +780,7 @@ final class AppModel {
         guard generation == sessionGeneration, !isLocking, case .ready = phase else { return }
         if let pendingSaveWarning { syncError = pendingSaveWarning }
         resumeSyncSchedulingIfNeeded()
+        scheduleProactiveAutomation()
     }
 
     private func startPeriodicSync() {
@@ -784,7 +791,37 @@ final class AppModel {
                 catch { return }
                 guard !Task.isCancelled, let self else { return }
                 await self.synchronize(reportMissingServer: false)
+                await self.runProactiveAutomation(reportErrors: false)
             }
+        }
+    }
+
+    private func scheduleProactiveAutomation(delay: Duration = .seconds(5)) {
+        guard aiJobs != nil, !isLocking, case .ready = phase else { return }
+        proactiveAutomationTask?.cancel()
+        let generation = sessionGeneration
+        proactiveAutomationTask = Task { [weak self] in
+            do { try await Task.sleep(for: delay) }
+            catch { return }
+            guard !Task.isCancelled, let self, generation == self.sessionGeneration else { return }
+            await self.runProactiveAutomation(reportErrors: false)
+        }
+    }
+
+    private func runProactiveAutomation(reportErrors: Bool) async {
+        guard !isLocking, case .ready = phase, let aiJobs else { return }
+        do {
+            let outcomes = try await aiJobs.runDueAutomations()
+            if outcomes.contains(where: {
+                if case .queued = $0 { return true }
+                return false
+            }) {
+                noteLocalMutation()
+            }
+        } catch where reportErrors {
+            syncError = "Automatic processing paused safely. \(error.localizedDescription)"
+        } catch {
+            // Automatic processing is optional. A failure must not interrupt local notebook use.
         }
     }
 
@@ -794,6 +831,8 @@ final class AppModel {
         automaticSyncToken = nil
         periodicSyncTask?.cancel()
         periodicSyncTask = nil
+        proactiveAutomationTask?.cancel()
+        proactiveAutomationTask = nil
         pathMonitor?.pathUpdateHandler = nil
         pathMonitor?.cancel()
         pathMonitor = nil

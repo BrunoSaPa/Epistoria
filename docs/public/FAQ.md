@@ -53,12 +53,12 @@ relationship shape.
 
 ## Does Epistoria use AI automatically?
 
-No. AI features require a configured provider and an explicit user action. Normal notebook use
-does not require AI.
+Not by default. AI features require a configured provider. Normal notebook use and Study Next do
+not require AI.
 
-A planned proactive mode will allow the user to approve selected material, task types, frequency,
-expiration, and a spending limit in advance. It will be optional, pausable, and limited to that
-approved scope. Opening the app will not itself approve or send notebook content.
+You can create a separate recurring permission for selected Topics and supported tasks, with a
+minimum interval, expiration, and spending limit. You can pause or revoke it. Automatic results
+remain drafts until you review and accept them. Opening the app does not create permission.
 
 ## Can Epistoria create flashcards and practice tests?
 
@@ -84,8 +84,8 @@ test later will not change the old result.
 Yes. Open the Topic, select **Create test**, list the supported objectives, and add questions. You
 can also use Topic Studio to request a cited test draft for the current Topic.
 
-The current manual interface creates a Comprehensive test and reports uncovered objectives. Quick
-Check and Custom creation interfaces remain on the roadmap.
+The current interface supports Comprehensive, Quick Check, and Custom test plans and reports
+uncovered objectives or provider-reported constraints.
 
 If the notebook or requested duration cannot support full coverage, Epistoria will show what is
 missing. It will not silently omit those topics or claim the test is comprehensive.
@@ -106,6 +106,21 @@ flashcard results, confidence, unresolved questions, source coverage, and recent
 Each recommendation states its reason. The base queue works on the iPad without a paid AI request.
 You can pin it, snooze it for one day, dismiss it, or mark it as irrelevant.
 
+## Does the weekly review use AI?
+
+No. Open **Study → Week** to calculate the review from durable sessions, card reviews, test
+attempts, responses, goals, questions, and schedules stored on the iPad. It shows the previous
+seven days, the next seven days, and up to three current Study Next actions.
+
+The optional automated weekly-review draft is a separate AI task. It runs only under an active
+recurring permission and remains a reviewable draft.
+
+## Can I import a CSV spreadsheet?
+
+Yes. Import a UTF-8 CSV from Today, Library, or a Topic. Epistoria validates it locally, encrypts
+the unchanged original, and displays it as a scrollable table. Quoted fields and CRLF are
+supported. XLSX files can also be imported and read as extracted local text.
+
 ## What information is sent for an AI question?
 
 The approved request can include the selected note text, bounded images of selected handwriting
@@ -116,6 +131,50 @@ before it queues the request.
 
 No. Generated results are stored separately. You can review, edit, accept, reject, or insert an
 answer as new text. The original selected content remains unchanged.
+
+## Does listening to a recording use AI or upload it?
+
+No. Supported audio files are validated, encrypted, decrypted for local playback, and played on
+the iPad. Playback does not create a provider request.
+
+Transcription is separate and optional. For a supported local MP3, M4A, WAV, or MP4 Source up to
+25 MB, Epistoria shows a disclosure before the trusted Mac decrypts the media and sends its bytes
+to the configured AI provider. The timestamped result is encrypted and bound to the current
+Source Version.
+
+## Does watching an imported video upload it?
+
+No. MP4, M4V, and MOV files are validated and encrypted before Source creation. Playback happens
+on the iPad. Epistoria uses a protected, backup-excluded playback file because the system video
+player requires a file URL, then removes it after use. Watching a video does not create an AI job.
+
+## Can I add and transcribe a YouTube video?
+
+You can add one YouTube video as a link. Epistoria loads YouTube's privacy-enhanced online player
+only after you select **Load video**. It does not download or cache the video, captions,
+thumbnail, or metadata.
+
+A YouTube reference cannot be transcribed by the trusted Mac. Import a local media file that you
+own or are permitted to process when a transcript is needed.
+
+## Can I save a webpage for offline study?
+
+Yes. In Library, select **Add Source → Capture webpage** and enter a complete HTTPS
+address. Epistoria stores one encrypted HTML response and presents its readable text offline.
+Refresh is manual and creates a new immutable version with a readable-text change summary.
+
+Web capture does not sign in, retain cookies, run JavaScript, crawl links, or copy external page
+assets. A page that depends on those features may not be complete.
+
+## Can I add a Google Doc, Slides presentation, or Sheet?
+
+Yes. Set the Google file so anyone with the link can view it. In Library, select **Add Source →
+Google Docs, Slides, or Sheets** and paste the `docs.google.com` link.
+
+Epistoria does not sign in to Google. It downloads a DOCX, PPTX, or XLSX export, validates it,
+encrypts the exact downloaded file, and provides extracted text offline. Manual refresh creates a
+new immutable version. Private files, comments, revision history, and the live Google editor layout
+are not captured.
 
 ## What happens if two devices edit the same content?
 
@@ -129,8 +188,13 @@ synchronized history also requires access to the encrypted account data.
 
 ## Can I export my data?
 
-Yes. The current beta can create a readable package with standard data files, original PDFs and
-images, Pencil data, and checksums.
+Yes. The current beta can create a readable package with standard data files, original Sources,
+local text copies for supported Source types, readable YouTube links, images, Pencil data, and
+checksums. Accepted transcript data is included when derived AI records are selected.
+
+Transcript corrections and timestamped Evidence are owner records. They are included in the
+readable knowledge file. Generated transcript chunks remain in the derived AI file and are
+included only when reviewed AI data is selected.
 
 The current app cannot import that package into a clean installation.
 

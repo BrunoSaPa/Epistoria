@@ -81,8 +81,19 @@ struct PracticeTestDetailView: View {
     var body: some View {
         List {
             Section {
-                LabeledContent("Questions", value: "\(questions.count)")
+                if let blueprint {
+                    LabeledContent("Mode", value: blueprint.payload.mode.detailDisplayName)
+                }
+                LabeledContent(
+                    "Questions",
+                    value: blueprint.map { "\(questions.count) of \($0.payload.requestedQuestionCount) planned" } ?? "\(questions.count)"
+                )
                 LabeledContent("Objectives", value: "\(blueprint?.payload.objectives.count ?? 0)")
+                if let minutes = blueprint?.payload.timeLimitMinutes {
+                    LabeledContent("Time limit", value: "\(minutes) min")
+                } else {
+                    LabeledContent("Time limit", value: "None")
+                }
                 if let gaps = blueprint?.payload.uncoveredObjectives.count, gaps > 0 {
                     LabeledContent("Coverage gaps", value: "\(gaps)")
                 } else {
@@ -92,6 +103,31 @@ struct PracticeTestDetailView: View {
                    let previous = attempts.first(where: { $0.payload.state == .submitted || $0.payload.state == .scored }) {
                     Button("Retake full test") { Task { await beginRetake(previous.id, missedOnly: false) } }
                     Button("Retake missed objectives") { Task { await beginRetake(previous.id, missedOnly: true) } }
+                }
+            }
+            if let blueprint {
+                Section("Objectives") {
+                    ForEach(blueprint.payload.objectives) { objective in
+                        HStack(alignment: .top) {
+                            Image(systemName: blueprint.payload.uncoveredObjectives.contains(objective.id)
+                                  ? "exclamationmark.circle" : "checkmark.circle")
+                                .foregroundStyle(.secondary)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(objective.title)
+                                Text(objective.dimensions.map(\.detailDisplayName).joined(separator: " · "))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+                if !(blueprint.payload.coverageNotes ?? []).isEmpty {
+                    Section("Coverage report") {
+                        ForEach(blueprint.payload.coverageNotes ?? [], id: \.self) { note in
+                            Label(note, systemImage: "info.circle")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
                 }
             }
             Section {
@@ -164,6 +200,20 @@ struct PracticeTestDetailView: View {
     }
 }
 
+private extension TestMode {
+    var detailDisplayName: String {
+        switch self {
+        case .comprehensive: "Comprehensive"
+        case .quickCheck: "Quick Check"
+        case .custom: "Custom"
+        }
+    }
+}
+
+private extension TestCoverageDimension {
+    var detailDisplayName: String { rawValue.replacingOccurrences(of: "_", with: " ").capitalized }
+}
+
 struct TestAttemptView: View {
     private enum ReviewFilter: String, CaseIterable, Identifiable {
         case all = "All"
@@ -184,6 +234,8 @@ struct TestAttemptView: View {
     @State private var saveTask: Task<Void, Never>?
     @State private var saveMessage = "Saved locally"
     @State private var showScoreOverride = false
+    @State private var feedbackContext: FeedbackReviewContext?
+    @State private var questionScoreContext: QuestionScoreOverrideContext?
     @State private var errorMessage: String?
 
     var body: some View {
@@ -250,18 +302,100 @@ struct TestAttemptView: View {
                 }
             }
         }
+        .sheet(item: $feedbackContext) { context in
+            FreeResponseFeedbackReviewView(
+                model: model,
+                attemptId: attemptId,
+                responseId: context.responseId,
+                question: context.question
+            ) {
+                await load()
+            }
+        }
+        .sheet(item: $questionScoreContext) { context in
+            QuestionScoreOverrideView(response: context.response.payload) { score, reason in
+                Task {
+                    await applyQuestionScoreOverride(
+                        responseId: context.response.id,
+                        score: score,
+                        reason: reason
+                    )
+                }
+            }
+        }
         .alert("Attempt error", isPresented: .constant(errorMessage != nil)) {
             Button("Dismiss", role: .cancel) { errorMessage = nil }
         } message: { Text(errorMessage ?? "") }
     }
 
     @ViewBuilder private func reviewFeedback(_ question: FrozenQuestionSnapshot) -> some View {
-        let response = responses[question.questionId]?.payload
+        let identified = responses[question.questionId]
+        let response = identified?.payload
         VStack(alignment: .leading, spacing: 8) {
             Label(response?.isCorrect == true ? "Correct" : "Review needed", systemImage: response?.isCorrect == true ? "checkmark.circle" : "xmark.circle")
                 .font(.headline)
             Text("Expected answer: \(question.correctAnswer)")
             Text(question.rubric).font(.caption).foregroundStyle(.secondary)
+            if let feedback = response?.feedback {
+                Divider()
+                Label("Accepted cited feedback", systemImage: "checkmark.seal")
+                    .font(.headline)
+                if let proposed = response?.score {
+                    LabeledContent(
+                        response?.scoreOverride == nil ? "Proposed question score" : "AI proposal",
+                        value: proposed.formatted(.percent.precision(.fractionLength(0)))
+                    )
+                }
+                if let scoreOverride = response?.scoreOverride {
+                    LabeledContent(
+                        "Owner override",
+                        value: scoreOverride.formatted(.percent.precision(.fractionLength(0)))
+                    )
+                    if let reason = response?.scoreOverrideReason {
+                        Text(reason).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                Text(feedback)
+                if let strengths = response?.feedbackStrengths, !strengths.isEmpty {
+                    Text("Strengths").font(.subheadline.weight(.semibold))
+                    ForEach(strengths, id: \.self) { Text("• \($0)") }
+                }
+                if let improvements = response?.feedbackImprovements, !improvements.isEmpty {
+                    Text("Improvements").font(.subheadline.weight(.semibold))
+                    ForEach(improvements, id: \.self) { Text("• \($0)") }
+                }
+                if let uncertainty = response?.feedbackUncertainty {
+                    Label(uncertainty, systemImage: "questionmark.circle")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Label(
+                    "\(response?.feedbackCitedSourceIds?.count ?? 0) cited record\((response?.feedbackCitedSourceIds?.count ?? 0) == 1 ? "" : "s")",
+                    systemImage: "link"
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+            if let identified, !identified.payload.isSkipped,
+               !identified.payload.response.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                HStack {
+                    Button(
+                        identified.payload.feedback == nil ? "Request cited feedback" : "Review or request feedback",
+                        systemImage: "sparkles"
+                    ) {
+                        feedbackContext = FeedbackReviewContext(
+                            responseId: identified.id,
+                            question: question
+                        )
+                    }
+                    Button("Question score", systemImage: "slider.horizontal.3") {
+                        questionScoreContext = QuestionScoreOverrideContext(response: identified)
+                    }
+                }
+                Text("AI feedback is a proposal. It cannot replace your saved answer, the original calculated result, or your score override.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 
@@ -385,6 +519,344 @@ struct TestAttemptView: View {
             showScoreOverride = false
         } catch { errorMessage = error.localizedDescription }
     }
+
+    private func applyQuestionScoreOverride(
+        responseId: UUID,
+        score: Double?,
+        reason: String?
+    ) async {
+        guard let store = model.store else { return }
+        do {
+            try await store.setTestResponseScoreOverride(
+                id: responseId,
+                score: score,
+                reason: reason
+            )
+            model.noteLocalMutation()
+            questionScoreContext = nil
+            await load()
+        } catch { errorMessage = error.localizedDescription }
+    }
+}
+
+private struct FeedbackReviewContext: Identifiable {
+    let responseId: UUID
+    let question: FrozenQuestionSnapshot
+    var id: UUID { responseId }
+}
+
+private struct QuestionScoreOverrideContext: Identifiable {
+    let response: IdentifiedPayload<TestResponsePayload>
+    var id: UUID { response.id }
+}
+
+private struct FreeResponseFeedbackReviewView: View {
+    @Bindable var model: AppModel
+    @Environment(\.dismiss) private var dismiss
+    let attemptId: UUID
+    let responseId: UUID
+    let question: FrozenQuestionSnapshot
+    let onChanged: () async -> Void
+
+    @State private var prepared: PreparedFreeResponseFeedbackRequest?
+    @State private var submittedJob: AIJobSummary?
+    @State private var artifact: IdentifiedPayload<FreeResponseFeedbackArtifact>?
+    @State private var feedback = ""
+    @State private var strengths = ""
+    @State private var improvements = ""
+    @State private var proposedScore = 0.0
+    @State private var uncertainty = ""
+    @State private var isWorking = false
+    @State private var errorMessage: String?
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Saved response") {
+                    Text(question.prompt).font(.headline)
+                    LabeledContent("Question type", value: question.kind.feedbackDisplayName)
+                    Text("The submitted answer stays unchanged throughout this review.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                if artifact == nil, prepared == nil, submittedJob == nil {
+                    Section("Cited feedback") {
+                        Text("Prepare a request to see exactly what will leave this iPad before paid processing is allowed.")
+                        Button("Review what leaves your Mac", systemImage: "doc.text.magnifyingglass") {
+                            Task { await prepare() }
+                        }
+                        .disabled(isWorking)
+                    }
+                }
+
+                if let prepared {
+                    Section("Review before sending") {
+                        LabeledContent("Evidence records", value: prepared.evidenceCount.formatted())
+                        LabeledContent("Approximate tokens", value: prepared.approximateTokens.formatted())
+                        DisclosureGroup("Exact data included") {
+                            Text("The frozen question, grading guide, reference answer, your submitted response, confidence, and the readable Evidence linked to this question.")
+                            ForEach(prepared.request.evidence, id: \.sourceId) { item in
+                                LabeledContent(item.title, value: item.sourceKind.feedbackDisplayName)
+                            }
+                        }
+                        Label("Paid provider processing requires this one-time approval", systemImage: "hand.raised")
+                            .font(.subheadline)
+                        Button("Approve and queue", systemImage: "desktopcomputer") {
+                            Task { await submit() }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(EpistoriaDesign.ink)
+                        .disabled(isWorking)
+                    }
+                }
+
+                if let submittedJob, artifact == nil {
+                    Section("Queued") {
+                        LabeledContent("Status", value: submittedJob.status.capitalized)
+                        Text("Your trusted Mac processes the encrypted request. Sync after it finishes, then refresh this sheet.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                if let artifact {
+                    Section("Review generated feedback") {
+                        TextField("Feedback", text: $feedback, axis: .vertical)
+                            .disabled(artifact.payload.reviewState == .accepted)
+                        TextField("Strengths, one per line", text: $strengths, axis: .vertical)
+                            .disabled(artifact.payload.reviewState == .accepted)
+                        TextField("Improvements, one per line", text: $improvements, axis: .vertical)
+                            .disabled(artifact.payload.reviewState == .accepted)
+                        LabeledContent(
+                            "Proposed score",
+                            value: proposedScore.formatted(.percent.precision(.fractionLength(0)))
+                        )
+                        Slider(value: $proposedScore, in: 0...1, step: 0.01)
+                            .disabled(artifact.payload.reviewState == .accepted)
+                        TextField("Uncertainty", text: $uncertainty, axis: .vertical)
+                            .disabled(artifact.payload.reviewState == .accepted)
+                        Label(
+                            "\(reviewedResponse.citedSourceIds.count) citation\(reviewedResponse.citedSourceIds.count == 1 ? "" : "s")",
+                            systemImage: "link"
+                        )
+                        .foregroundStyle(.secondary)
+
+                        if artifact.payload.reviewState == .accepted {
+                            Label("Accepted and stored with this response", systemImage: "checkmark.circle.fill")
+                            Button("Prepare another review", systemImage: "arrow.clockwise") {
+                                startAnotherReview()
+                            }
+                        } else if artifact.payload.reviewState == .rejected {
+                            Label("Rejected. The generated artifact remains encrypted for provenance.", systemImage: "xmark.circle")
+                            Button("Prepare another review", systemImage: "arrow.clockwise") {
+                                startAnotherReview()
+                            }
+                        } else {
+                            Button("Save edits locally", systemImage: "square.and.arrow.down") {
+                                Task { await saveReview() }
+                            }
+                            Button("Accept feedback", systemImage: "checkmark.circle") {
+                                Task { await accept() }
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .tint(EpistoriaDesign.ink)
+                            Button("Reject", systemImage: "xmark.circle", role: .destructive) {
+                                Task { await reject() }
+                            }
+                        }
+                        Text("Acceptance copies the reviewed proposal to the durable response record. It does not overwrite your answer or the original calculated score.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                if let errorMessage {
+                    Section { Text(errorMessage).foregroundStyle(.red) }
+                }
+            }
+            .navigationTitle("Cited feedback")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } }
+                ToolbarItem(placement: .primaryAction) {
+                    Button("Refresh", systemImage: "arrow.clockwise") { Task { await loadArtifact() } }
+                }
+            }
+            .task { await loadArtifact() }
+        }
+    }
+
+    private var reviewedResponse: FreeResponseFeedbackResponse {
+        FreeResponseFeedbackResponse(
+            feedback: feedback,
+            strengths: strengths.nonEmptyLines,
+            improvements: improvements.nonEmptyLines,
+            proposedScore: proposedScore,
+            uncertainty: uncertainty,
+            citedSourceIds: artifact?.payload.response.citedSourceIds ?? []
+        )
+    }
+
+    private func prepare() async {
+        guard let aiJobs = model.aiJobs else {
+            errorMessage = "Connect the private server and pair your trusted Mac in Settings first."
+            return
+        }
+        isWorking = true
+        defer { isWorking = false }
+        do {
+            prepared = try await aiJobs.prepareFreeResponseFeedback(
+                attemptId: attemptId,
+                responseId: responseId
+            )
+            errorMessage = nil
+        } catch { errorMessage = error.localizedDescription }
+    }
+
+    private func submit() async {
+        guard let aiJobs = model.aiJobs, let prepared else { return }
+        isWorking = true
+        defer { isWorking = false }
+        do {
+            submittedJob = try await aiJobs.submitFreeResponseFeedback(prepared)
+            self.prepared = nil
+            errorMessage = nil
+        } catch { errorMessage = error.localizedDescription }
+    }
+
+    private func loadArtifact() async {
+        do {
+            artifact = try await model.aiJobs?.latestFreeResponseFeedback(
+                attemptId: attemptId,
+                responseId: responseId
+            )
+            configureReview()
+            errorMessage = nil
+        } catch { errorMessage = error.localizedDescription }
+    }
+
+    private func configureReview() {
+        guard let artifact else { return }
+        let response = artifact.payload.editedResponse ?? artifact.payload.response
+        feedback = response.feedback
+        strengths = response.strengths.joined(separator: "\n")
+        improvements = response.improvements.joined(separator: "\n")
+        proposedScore = response.proposedScore
+        uncertainty = response.uncertainty
+    }
+
+    private func saveReview() async {
+        guard let store = model.store, let artifact else { return }
+        isWorking = true
+        defer { isWorking = false }
+        do {
+            try await store.saveFreeResponseFeedbackDraftReview(
+                id: artifact.id,
+                response: reviewedResponse
+            )
+            model.noteLocalMutation()
+            errorMessage = nil
+            await loadArtifact()
+        } catch { errorMessage = error.localizedDescription }
+    }
+
+    private func accept() async {
+        guard let store = model.store, let artifact else { return }
+        isWorking = true
+        defer { isWorking = false }
+        do {
+            try await store.saveFreeResponseFeedbackDraftReview(
+                id: artifact.id,
+                response: reviewedResponse
+            )
+            try await store.reviewFreeResponseFeedbackArtifact(id: artifact.id, state: .accepted)
+            model.noteLocalMutation()
+            errorMessage = nil
+            await loadArtifact()
+            await onChanged()
+        } catch { errorMessage = error.localizedDescription }
+    }
+
+    private func reject() async {
+        guard let store = model.store, let artifact else { return }
+        isWorking = true
+        defer { isWorking = false }
+        do {
+            try await store.reviewFreeResponseFeedbackArtifact(id: artifact.id, state: .rejected)
+            model.noteLocalMutation()
+            errorMessage = nil
+            await loadArtifact()
+        } catch { errorMessage = error.localizedDescription }
+    }
+
+    private func startAnotherReview() {
+        artifact = nil
+        prepared = nil
+        submittedJob = nil
+        feedback = ""
+        strengths = ""
+        improvements = ""
+        proposedScore = 0
+        uncertainty = ""
+        Task { await prepare() }
+    }
+}
+
+private struct QuestionScoreOverrideView: View {
+    @Environment(\.dismiss) private var dismiss
+    let response: TestResponsePayload
+    let onSave: (Double?, String?) -> Void
+    @State private var percent: Double
+    @State private var reason: String
+
+    init(response: TestResponsePayload, onSave: @escaping (Double?, String?) -> Void) {
+        self.response = response
+        self.onSave = onSave
+        let initial = response.scoreOverride ?? response.score ?? (response.isCorrect == true ? 1 : 0)
+        _percent = State(initialValue: initial * 100)
+        _reason = State(initialValue: response.scoreOverrideReason ?? "")
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Question score") {
+                    if let proposal = response.score {
+                        LabeledContent(
+                            "AI proposal",
+                            value: proposal.formatted(.percent.precision(.fractionLength(0)))
+                        )
+                    }
+                    LabeledContent("Override", value: "\(Int(percent.rounded()))%")
+                    Slider(value: $percent, in: 0...100, step: 1)
+                    TextField("Reason for correction", text: $reason, axis: .vertical)
+                    Text("This stores an owner override. The submitted answer, calculated result, and AI proposal remain in history.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    if response.scoreOverride != nil {
+                        Button("Clear override", role: .destructive) {
+                            onSave(nil, nil)
+                            dismiss()
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Question score")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        onSave(
+                            percent / 100,
+                            reason.trimmingCharacters(in: .whitespacesAndNewlines)
+                        )
+                        dismiss()
+                    }
+                    .disabled(reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+        }
+    }
 }
 
 private struct ScoreOverrideView: View {
@@ -432,6 +904,23 @@ private extension Collection {
 
 private extension String {
     var trimmedForScoring: String { trimmingCharacters(in: .whitespacesAndNewlines).folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current) }
+    var nonEmptyLines: [String] {
+        components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+    }
+}
+
+private extension TestQuestionKind {
+    var feedbackDisplayName: String {
+        rawValue.replacingOccurrences(of: "_", with: " ").capitalized
+    }
+}
+
+private extension FeedbackEvidenceKind {
+    var feedbackDisplayName: String {
+        rawValue.replacingOccurrences(of: "_", with: " ").capitalized
+    }
 }
 
 private extension FlashcardRating {

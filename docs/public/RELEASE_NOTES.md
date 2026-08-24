@@ -1,5 +1,191 @@
 # Release notes
 
+## Note organization
+
+- Added confirmed **Remove from List** and **Remove from Session** actions.
+- Kept the note, its other memberships, and Session activity history unchanged.
+- Added compatibility for older notes that were created inside a Session.
+
+## Timestamped Evidence and transcript corrections
+
+- Added continuous transcript-range selection and timestamped Evidence creation.
+- Added exact Source Version, start and end time, segment index, and correction provenance to
+  transcript Evidence.
+- Added durable owner corrections that preserve generated text and prior correction history.
+- Added correction supersession and retraction without deleting correction content.
+- Added explicit correction conflict review. The owner can keep either synced candidate or restore
+  generated text; no correction is selected automatically.
+- Added direct navigation from a transcript segment, Evidence, or local search result to the saved
+  media position.
+- Added readable export version 4 with transcript corrections in `knowledge.json` while generated
+  transcript chunks remain in the optional AI artifact file.
+- Verified 77 Core tests, the complete unsigned iPad Simulator build, and 43 app and UI tests.
+
+## Source comparison and Concept connections
+
+- Added a full-screen workspace for comparing two Sources or two immutable versions of one Source.
+- Added independent Source and version selection, PDF navigation, scrolling, and local media
+  controls for each comparison pane.
+- Kept comparison local. It does not refresh Sources or load the YouTube player automatically.
+- Added durable typed Concept connections with manual creation, optional Evidence, editing,
+  explicit removal, direction, and provenance.
+- Added reviewed AI proposals for Concept connections. Proposed endpoints, relationship, reason,
+  and citations remain editable or excludable before acceptance.
+- Added deterministic worker and encrypted-store coverage for allowed Concept IDs, citations,
+  idempotent manual links, reviewed acceptance, Evidence, and generator attribution.
+
+## Evidence cards and backlinks
+
+- Added a note-side Evidence shelf filtered to the note's Topic.
+- Added drag and Insert actions that place a non-editable Evidence card on a notebook page.
+- Reused the existing Evidence record. The card retains its exact Source Version and locator.
+- Added an action that opens the saved Source Version, page, and excerpt from a selected card.
+- Added local backlinks for notes, Concepts, flashcards, and test questions.
+- Added readable Evidence citations to note PDF export.
+- Added durability, reuse, backlink, Source Version, and PDF-output tests.
+
+## YouTube references and local media transcription
+
+- Added normalized YouTube video references with optional start times and no downloaded media,
+  captions, thumbnails, or metadata.
+- Added an explicitly loaded privacy-enhanced YouTube player backed by a nonpersistent web view.
+- Added trusted-Mac transcription for local MP3, M4A, WAV, and MP4 Sources up to 25 MB after a
+  provider disclosure.
+- Added timestamped encrypted transcript chunks and a durable manifest bound to the exact Source
+  Version.
+- Added transcript search, accept and reject review states, and accepted-transcript export as
+  optional derived data.
+- Added readable YouTube URL files to the portable export.
+- Added URL, unsafe-link, no-media-asset, no-partial-record, transcript contract, worker identity,
+  size, dedupe, legacy compatibility, durable retrieval, and export coverage.
+
+## Shared Google file Sources
+
+- Added direct capture for native Google Docs, Slides, and Sheets share links that allow anyone
+  with the link to view.
+- Added credential-free export requests through an ephemeral session without cookies, stored
+  credentials, or a Google SDK.
+- Added bounded streaming and DOCX, PPTX, or XLSX package validation before Source creation.
+- Preserved the exact Google export as an encrypted original and immutable Source Version.
+- Added offline readable text, manual refresh, readable-text change summaries, and earlier-version
+  selection.
+- Added exact-byte, URL, endpoint, privacy-header, access-denied, malformed, oversized, offline,
+  persistence, refresh, no-partial-record, and readable-export tests.
+
+## Webpage Sources
+
+- Added manual HTTPS webpage capture from Library.
+- Added bounded streaming, response-status and content-type checks, URL validation, and HTML
+  validation before any Source record is created.
+- Added local readable-text extraction that excludes scripts, styles, and inactive page content.
+- Preserved the exact HTML response as an encrypted original with canonical and captured URLs.
+- Added manual refresh with immutable versions, readable paragraph changes, and earlier-version
+  selection.
+- Added malformed, binary, empty, unsupported, oversized, offline, exact-byte, refresh, and
+  no-partial-record tests.
+
+## Local video Sources
+
+- Added MP4, M4V, and MOV import from every Source entry point.
+- Added bounded ISO media-container validation and required system video decoding before any
+  Source record is created.
+- Added local playback with the standard iPad video controls.
+- Added protected, backup-excluded playback files with cleanup on reader close, notebook lock,
+  and interrupted-session recovery.
+- Preserved exact video bytes as encrypted originals and immutable Source Versions.
+- Added decoder, spoof, truncation, exact-byte, protected-file isolation, encrypted import, and
+  no-partial-record tests.
+
+## Local audio Sources
+
+- Added MP3, M4A, AAC, WAV, and CAF import from every Source entry point.
+- Added bounded format validation and system decoding before any Source record is created.
+- Added local playback with play, pause, seeking, 15-second skip, elapsed time, remaining time,
+  VoiceOver labels, and no decorative playback animation.
+- Preserved exact recordings as encrypted originals and immutable Source Versions.
+- Kept transcription separate from playback. Import and listening do not require a provider or a
+  paired Mac.
+
+## Packaged document Sources
+
+- Added local import for EPUB, DOCX, ODT, PPTX, ODP, and XLSX files.
+- Added bounded archive validation before Source creation. Imports reject unsafe paths, links,
+  duplicate entries, invalid checksums, excessive expansion, missing package parts, and incorrect
+  document identities.
+- Added local readable-text views for books, word-processing documents, presentations, and
+  spreadsheets. Large parsing work runs outside the interface rendering path.
+- Preserved the exact original file as an encrypted Source and immutable Source Version.
+- Added readable text derivatives for supported Sources to the full notebook export.
+
+## CSV Sources
+
+- Added CSV import from Today, Library, and Topic dashboards.
+- Added validation for UTF-8, quoted fields, embedded commas and newlines, escaped quotes, row and
+  column limits, and a 32 MB file limit before any Source record is created.
+- Added a local scrollable table with a pinned header, row numbers, text selection, and
+  accessibility row labels.
+- Preserved the exact CSV file as an encrypted original and created an immutable Source Version.
+- Added CSV refresh with the same type and validation checks used during import.
+
+## Local weekly review
+
+- Added a weekly review in Study that is calculated on the iPad without AI.
+- Added totals for focused time, completed sessions, card reviews, submitted tests, and average
+  test score from the last seven days.
+- Added Topic-level difficult-material signals from Hard or Again card ratings, incorrect test
+  answers, and low-confidence test answers.
+- Added open questions, overdue and upcoming goals, card reviews due within seven days, and three
+  suggested next actions.
+- Added direct links from each review row to its Topic, goal, unresolved question, or recommended
+  work item.
+
+## Scoped proactive automation
+
+- Added explicit recurring permissions for selected Topics and supported AI tasks.
+- Added per-Topic/task cadence, expiration, and recorded USD spending limits.
+- Added pause, resume, edit, permanent revocation, queue history, and cost status.
+- Added automatic checks after local changes and during normal periodic synchronization.
+- Added deterministic job identities and unchanged-input suppression.
+- Added trusted-Mac validation for Topic, task, cadence, expiration, and spending limits before
+  provider processing.
+- Kept every automatic result in the existing cited draft review flow.
+
+## Cited written-response feedback
+
+- Added an optional feedback request for submitted written test responses.
+- Added a preflight disclosure for the frozen question, grading guide, reference answer,
+  submitted response, confidence, linked Evidence, and approximate token count.
+- Added source-cited feedback with strengths, improvements, uncertainty, and a proposed score.
+- Added local editing, acceptance, rejection, repeated requests, and durable citation storage.
+- Added a separate per-question owner score override with a required reason.
+- Preserved the submitted response, deterministic correctness result, original attempt score, and
+  immutable provider response.
+
+## Study Next destinations and history
+
+- Added direct destinations for due cards, paused sessions, unfinished attempts, tests, goals,
+  unresolved questions, and Topic fallback.
+- Added durable open events and a visible append-only response history.
+- Added Restore for pinned, snoozed, dismissed, and not-relevant responses without deleting the
+  earlier action.
+- Added response snapshots for title, kind, Topic, and target while retaining v1 response reads.
+- Prevented persisted local response anchors from returning as stale duplicate recommendations.
+- Fixed non-local recommendations to use their declared target instead of their recommendation
+  record ID.
+
+## Test planning and coverage
+
+- Added Comprehensive, Quick Check, and Custom modes for manual and generated tests.
+- Added local objective detection from Topic Concepts, Sources, notes, and unresolved questions.
+- Added pre-generation review for objectives, question count, time limit, coverage dimensions,
+  excerpt count, and approximate token count.
+- Added a versioned encrypted test plan that survives worker processing and accepted-test
+  materialization.
+- Added planned-versus-generated question counts, objective-level coverage state, and retained
+  provider coverage notes in saved test details.
+- Added case-insensitive objective matching so capitalization changes during review do not create
+  duplicate objective keys or crash acceptance.
+
 ## Item-level AI draft review
 
 - Added item-by-item selection and exclusion for generated cards, test questions, and Concepts.
@@ -61,7 +247,8 @@ Release date: Not published.
 
 ### Sources
 
-- Added encrypted PDF, image, plain-text, Markdown, and HTML import.
+- Added encrypted PDF, image, plain-text, Markdown, HTML, CSV, XLSX, DOCX, PPTX, EPUB, ODT, and
+  ODP import.
 - Added Library Inbox, type filters, Topic filters, and immutable Source refresh versions.
 - Added page navigation and separate annotations.
 - Added reusable Evidence linked to the exact Source Version.

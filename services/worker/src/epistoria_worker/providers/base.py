@@ -3,8 +3,11 @@ from __future__ import annotations
 from typing import Protocol
 
 from ..models import (
+    FreeResponseFeedbackRequestV1,
+    FreeResponseFeedbackResponseV1,
     LearningGenerationRequestV1,
     LearningGenerationResponseV1,
+    MediaTranscriptionResponseV1,
     NoteQueryRequestV1,
     NoteQueryResponseV1,
     ProviderTraceV1,
@@ -35,4 +38,21 @@ class DigestProvider(Protocol):
         self, request: NoteQueryRequestV1
     ) -> tuple[NoteQueryResponseV1, ProviderTraceV1]:
         """Answer a focused question about a lasso-selected note region."""
+        ...
+
+    def generate_free_response_feedback(
+        self, request: FreeResponseFeedbackRequestV1
+    ) -> tuple[FreeResponseFeedbackResponseV1, ProviderTraceV1]:
+        """Return source-cited proposed feedback without changing a saved response or score."""
+        ...
+
+    def transcribe_media(
+        self,
+        *,
+        filename: str,
+        mime_type: str,
+        media: bytes,
+        language: str | None,
+    ) -> tuple[MediaTranscriptionResponseV1, ProviderTraceV1]:
+        """Transcribe one approved local media asset and return ordered timestamped segments."""
         ...

@@ -34,6 +34,25 @@ final class NotePDFExportServiceTests: XCTestCase {
             placement: NoteCanvasPlacement(x: 48, y: 72, width: 360, height: 120),
             pageIndex: 1
         )
+        let sourceID = try await fixture.store.createSource(
+            type: .pastedText,
+            title: "Algebra source"
+        )
+        let source = try await fixture.store.payload(SourcePayload.self, id: sourceID)
+        let sourceVersionID = try XCTUnwrap(source.payload.currentVersionId)
+        let evidenceID = try await fixture.store.createEvidence(
+            sourceId: sourceID,
+            sourceVersionId: sourceVersionID,
+            kind: .excerpt,
+            locator: SourceLocator(kind: .plainText, startOffset: 0, endOffset: 28),
+            excerpt: "Factor each term before grouping."
+        )
+        _ = try await fixture.store.appendCanvasEvidence(
+            noteId: noteID,
+            evidenceId: evidenceID,
+            placement: NoteCanvasPlacement(x: 48, y: 220, width: 360, height: 150),
+            pageIndex: 0
+        )
         let imageURL = fixture.root.appendingPathComponent("factor-tree.png")
         let imageData = UIGraphicsImageRenderer(size: CGSize(width: 80, height: 60)).pngData {
             UIColor.black.setFill()
@@ -85,6 +104,8 @@ final class NotePDFExportServiceTests: XCTestCase {
         XCTAssertEqual(firstPage.bounds(for: .mediaBox).width, 792, accuracy: 0.01)
         XCTAssertEqual(firstPage.bounds(for: .mediaBox).height, 612, accuracy: 0.01)
         XCTAssertTrue(firstPage.string?.contains("Common factor evidence") == true)
+        XCTAssertTrue(firstPage.string?.contains("Factor each term before grouping.") == true)
+        XCTAssertTrue(firstPage.string?.contains("Algebra source · Saved excerpt · Version 1") == true)
         XCTAssertTrue(secondPage.string?.contains("Difference of squares evidence") == true)
         XCTAssertTrue(secondPage.string?.contains("∫") == true)
         XCTAssertGreaterThan(result.byteCount, 0)

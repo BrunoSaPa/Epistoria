@@ -228,6 +228,11 @@ struct ConflictResolutionView: View {
             value = (try? CanonicalJSON.decode(AssetPayload.self, from: content).originalFilename) ?? "Encrypted asset"
         case .annotation:
             value = (try? CanonicalJSON.decode(AnnotationPayload.self, from: content).comment) ?? "Annotation"
+        case .transcriptCorrection:
+            value = (try? CanonicalJSON.decode(
+                TranscriptCorrectionPayload.self,
+                from: content
+            ).correctedText) ?? "Transcript correction"
         case .aiArtifact:
             if let digest = try? CanonicalJSON.decode(SessionDigestArtifact.self, from: content) {
                 value = digest.editedDigest?.summary ?? digest.digest.summary

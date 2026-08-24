@@ -8,6 +8,40 @@ public struct ImportedResource: Equatable, Sendable {
     public var reusedExistingAsset: Bool
 }
 
+public struct RefreshedWebSnapshot: Equatable, Sendable {
+    public var versionId: UUID
+    public var capturedURL: URL
+    public var difference: WebSnapshotDifference
+
+    public init(versionId: UUID, capturedURL: URL, difference: WebSnapshotDifference) {
+        self.versionId = versionId
+        self.capturedURL = capturedURL
+        self.difference = difference
+    }
+}
+
+public struct RefreshedGoogleWorkspaceSnapshot: Equatable, Sendable {
+    public var versionId: UUID
+    public var capturedURL: URL
+    public var difference: WebSnapshotDifference
+
+    public init(versionId: UUID, capturedURL: URL, difference: WebSnapshotDifference) {
+        self.versionId = versionId
+        self.capturedURL = capturedURL
+        self.difference = difference
+    }
+}
+
+public struct ImportedYouTubeReference: Equatable, Sendable {
+    public var sourceId: UUID
+    public var videoID: String
+
+    public init(sourceId: UUID, videoID: String) {
+        self.sourceId = sourceId
+        self.videoID = videoID
+    }
+}
+
 public struct ImportedImage: Equatable, Sendable {
     public var assetId: UUID
     public var reusedExistingAsset: Bool
@@ -63,13 +97,17 @@ public actor AssetManager {
     private var api: EpistoriaAPIClient?
     private let crypto = EntityCrypto()
     private let assetCrypto = AssetCrypto()
+    private let webSnapshotCapture: any WebSnapshotCapturing
+    private let googleWorkspaceCapture: any GoogleWorkspaceCapturing
 
     public init(
         accountId: UUID,
         accountKey: Data,
         store: EpistoriaStore,
         directory: URL,
-        api: EpistoriaAPIClient? = nil
+        api: EpistoriaAPIClient? = nil,
+        webSnapshotCapture: any WebSnapshotCapturing = WebSnapshotCaptureService(),
+        googleWorkspaceCapture: any GoogleWorkspaceCapturing = GoogleWorkspaceCaptureService()
     ) {
         self.accountId = accountId
         self.accountKey = accountKey
@@ -77,6 +115,8 @@ public actor AssetManager {
         database = store.database
         self.directory = directory
         self.api = api
+        self.webSnapshotCapture = webSnapshotCapture
+        self.googleWorkspaceCapture = googleWorkspaceCapture
     }
 
     public func setAPIClient(_ api: EpistoriaAPIClient?) {
@@ -170,7 +210,7 @@ public actor AssetManager {
         )
     }
 
-    public func importPhaseOneSource(
+    public func importSource(
         from sourceURL: URL,
         topicId: UUID? = nil,
         sessionId: UUID? = nil
@@ -195,14 +235,18 @@ public actor AssetManager {
         }
         let accessed = sourceURL.startAccessingSecurityScopedResource()
         defer { if accessed { sourceURL.stopAccessingSecurityScopedResource() } }
-        let adapter = try PhaseOneSourceAdapterRegistry().adapter(for: sourceURL.lastPathComponent)
+        let adapter = try SourceAdapterRegistry().adapter(for: sourceURL.lastPathComponent)
         let values = try sourceURL.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
         guard values.isRegularFile == true else { throw SourceAdapterError.malformed }
         if let size = values.fileSize, size > adapter.maximumBytes { throw SourceAdapterError.tooLarge }
         let plaintext = try Data(contentsOf: sourceURL, options: .mappedIfSafe)
         let mimeType = UTType(filenameExtension: sourceURL.pathExtension)?.preferredMIMEType
             ?? "application/octet-stream"
-        try adapter.validate(data: plaintext, filename: sourceURL.lastPathComponent, mimeType: mimeType)
+        try await adapter.validateForImport(
+            data: plaintext,
+            filename: sourceURL.lastPathComponent,
+            mimeType: mimeType
+        )
         let imported = try await importAsset(
             plaintext: plaintext,
             mimeType: mimeType,
@@ -222,8 +266,178 @@ public actor AssetManager {
         )
     }
 
+    public func importWebSnapshot(
+        from url: URL,
+        topicId: UUID? = nil,
+        sessionId: UUID? = nil
+    ) async throws -> ImportedResource {
+        let snapshot = try await webSnapshotCapture.capture(url: url)
+        let adapter = WebSnapshotSourceAdapter()
+        try adapter.validate(
+            data: snapshot.data,
+            filename: "snapshot.epistoriaweb",
+            mimeType: snapshot.mimeType
+        )
+        let imported = try await importAsset(
+            plaintext: snapshot.data,
+            mimeType: snapshot.mimeType,
+            originalFilename: webSnapshotFilename(for: snapshot.capturedURL)
+        )
+        let sourceId = try await store.createSource(
+            type: .website,
+            title: snapshot.title,
+            originalAssetId: imported.assetId,
+            canonicalURL: snapshot.requestedURL,
+            capturedURL: snapshot.capturedURL,
+            primaryTopicId: topicId,
+            sessionId: sessionId
+        )
+        return ImportedResource(
+            resourceId: sourceId,
+            assetId: imported.assetId,
+            reusedExistingAsset: imported.reusedExistingAsset
+        )
+    }
+
+    public func refreshWebSnapshot(id sourceId: UUID) async throws -> RefreshedWebSnapshot {
+        let source = try await store.payload(SourcePayload.self, id: sourceId).payload
+        guard source.sourceType == .website, let canonicalURL = source.canonicalURL else {
+            throw SourceAdapterError.unsupportedType
+        }
+
+        var previousText: String?
+        if let previousAssetId = source.originalAssetId,
+           let previousData = try? await decryptedData(assetId: previousAssetId) {
+            previousText = try? WebSnapshotSourceAdapter().extractText(data: previousData)
+        }
+
+        let snapshot = try await webSnapshotCapture.capture(url: canonicalURL)
+        let adapter = WebSnapshotSourceAdapter()
+        try adapter.validate(
+            data: snapshot.data,
+            filename: "snapshot.epistoriaweb",
+            mimeType: snapshot.mimeType
+        )
+        let imported = try await importAsset(
+            plaintext: snapshot.data,
+            mimeType: snapshot.mimeType,
+            originalFilename: webSnapshotFilename(for: snapshot.capturedURL)
+        )
+        let versionId = try await store.refreshSource(
+            id: sourceId,
+            originalAssetId: imported.assetId,
+            capturedURL: snapshot.capturedURL
+        )
+        return RefreshedWebSnapshot(
+            versionId: versionId,
+            capturedURL: snapshot.capturedURL,
+            difference: WebSnapshotDifference(
+                previousText: previousText,
+                currentText: snapshot.readableText
+            )
+        )
+    }
+
+    public func importGoogleWorkspaceSnapshot(
+        from url: URL,
+        topicId: UUID? = nil,
+        sessionId: UUID? = nil
+    ) async throws -> ImportedResource {
+        let snapshot = try await googleWorkspaceCapture.capture(url: url)
+        let adapter = GoogleWorkspaceSourceAdapter(kind: snapshot.kind)
+        try adapter.validate(
+            data: snapshot.data,
+            filename: googleWorkspaceFilename(for: snapshot),
+            mimeType: snapshot.mimeType
+        )
+        let imported = try await importAsset(
+            plaintext: snapshot.data,
+            mimeType: snapshot.mimeType,
+            originalFilename: googleWorkspaceFilename(for: snapshot)
+        )
+        let sourceId = try await store.createSource(
+            type: snapshot.kind.sourceType,
+            title: snapshot.title,
+            originalAssetId: imported.assetId,
+            canonicalURL: snapshot.canonicalURL,
+            capturedURL: snapshot.capturedURL,
+            primaryTopicId: topicId,
+            sessionId: sessionId
+        )
+        return ImportedResource(
+            resourceId: sourceId,
+            assetId: imported.assetId,
+            reusedExistingAsset: imported.reusedExistingAsset
+        )
+    }
+
+    public func refreshGoogleWorkspaceSnapshot(
+        id sourceId: UUID
+    ) async throws -> RefreshedGoogleWorkspaceSnapshot {
+        let source = try await store.payload(SourcePayload.self, id: sourceId).payload
+        guard source.sourceType.isGoogleWorkspaceSource, let canonicalURL = source.canonicalURL else {
+            throw SourceAdapterError.unsupportedType
+        }
+
+        let currentAdapter = try SourceAdapterRegistry().adapter(for: source.sourceType)
+        var previousText: String?
+        if let previousAssetId = source.originalAssetId,
+           let previousData = try? await decryptedData(assetId: previousAssetId) {
+            previousText = try? currentAdapter.extractText(data: previousData)
+        }
+
+        let snapshot = try await googleWorkspaceCapture.capture(url: canonicalURL)
+        guard snapshot.kind.sourceType == source.sourceType else {
+            throw SourceAdapterError.unsupportedType
+        }
+        let adapter = GoogleWorkspaceSourceAdapter(kind: snapshot.kind)
+        try adapter.validate(
+            data: snapshot.data,
+            filename: googleWorkspaceFilename(for: snapshot),
+            mimeType: snapshot.mimeType
+        )
+        let imported = try await importAsset(
+            plaintext: snapshot.data,
+            mimeType: snapshot.mimeType,
+            originalFilename: googleWorkspaceFilename(for: snapshot)
+        )
+        let versionId = try await store.refreshSource(
+            id: sourceId,
+            originalAssetId: imported.assetId,
+            capturedURL: snapshot.capturedURL
+        )
+        return RefreshedGoogleWorkspaceSnapshot(
+            versionId: versionId,
+            capturedURL: snapshot.capturedURL,
+            difference: WebSnapshotDifference(
+                previousText: previousText,
+                currentText: snapshot.readableText
+            )
+        )
+    }
+
+    public func importYouTubeReference(
+        from url: URL,
+        title: String? = nil,
+        topicId: UUID? = nil,
+        sessionId: UUID? = nil
+    ) async throws -> ImportedYouTubeReference {
+        let reference = try YouTubeReference(url: url)
+        let cleanTitle = title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let sourceId = try await store.createSource(
+            type: .youtube,
+            title: cleanTitle.isEmpty ? "YouTube video" : String(cleanTitle.prefix(240)),
+            canonicalURL: reference.canonicalURL,
+            capturedURL: reference.playbackURL,
+            identifiers: ["youtube:\(reference.videoID)"],
+            primaryTopicId: topicId,
+            sessionId: sessionId
+        )
+        return ImportedYouTubeReference(sourceId: sourceId, videoID: reference.videoID)
+    }
+
     @discardableResult
-    public func refreshPhaseOneSource(id sourceId: UUID, from sourceURL: URL) async throws -> UUID {
+    public func refreshSource(id sourceId: UUID, from sourceURL: URL) async throws -> UUID {
         let source = try await store.payload(SourcePayload.self, id: sourceId).payload
         let ext = sourceURL.pathExtension.lowercased()
         if ext == "pdf" {
@@ -249,14 +463,18 @@ public actor AssetManager {
         }
         let accessed = sourceURL.startAccessingSecurityScopedResource()
         defer { if accessed { sourceURL.stopAccessingSecurityScopedResource() } }
-        let adapter = try PhaseOneSourceAdapterRegistry().adapter(for: sourceURL.lastPathComponent)
+        let adapter = try SourceAdapterRegistry().adapter(for: sourceURL.lastPathComponent)
         guard adapter.sourceType == source.sourceType else { throw SourceAdapterError.unsupportedType }
         let values = try sourceURL.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
         guard values.isRegularFile == true else { throw SourceAdapterError.malformed }
         if let size = values.fileSize, size > adapter.maximumBytes { throw SourceAdapterError.tooLarge }
         let data = try Data(contentsOf: sourceURL, options: .mappedIfSafe)
         let mimeType = UTType(filenameExtension: ext)?.preferredMIMEType ?? "application/octet-stream"
-        try adapter.validate(data: data, filename: sourceURL.lastPathComponent, mimeType: mimeType)
+        try await adapter.validateForImport(
+            data: data,
+            filename: sourceURL.lastPathComponent,
+            mimeType: mimeType
+        )
         let imported = try await importAsset(
             plaintext: data,
             mimeType: mimeType,
@@ -272,6 +490,18 @@ public actor AssetManager {
             local = cached
         } else {
             local = try await cacheAsset(assetId: assetId, metadata: metadata.payload)
+        }
+        let encrypted = try Data(contentsOf: local.encryptedFileURL, options: .mappedIfSafe)
+        return try verifiedPlaintext(encrypted: encrypted, metadata: metadata.payload)
+    }
+
+    /// Decrypts an already cached Asset without starting a network restore. Use this for
+    /// secondary previews and comparison surfaces where opening the view is not approval to
+    /// download missing data.
+    public func decryptedLocalData(assetId: UUID) async throws -> Data {
+        let metadata = try await assetMetadata(id: assetId)
+        guard let local = try await usableLocalAsset(id: assetId, metadata: metadata.payload) else {
+            throw AssetManagerError.encryptedAssetUnavailable
         }
         let encrypted = try Data(contentsOf: local.encryptedFileURL, options: .mappedIfSafe)
         return try verifiedPlaintext(encrypted: encrypted, metadata: metadata.payload)
@@ -435,6 +665,24 @@ public actor AssetManager {
         if let number = value as? NSNumber { return number.intValue }
         if let value = value as? Int { return value }
         return nil
+    }
+
+    private func webSnapshotFilename(for url: URL) -> String {
+        let host = (url.host ?? "webpage")
+            .lowercased()
+            .map { character in
+                character.isLetter || character.isNumber || character == "-" || character == "."
+                    ? character
+                    : "-"
+            }
+        let cleanHost = String(host).trimmingCharacters(in: CharacterSet(charactersIn: ".-"))
+        return "\(cleanHost.isEmpty ? "webpage" : cleanHost)-snapshot.html"
+    }
+
+    private func googleWorkspaceFilename(for snapshot: GoogleWorkspaceSnapshot) -> String {
+        let identifier = (try? GoogleWorkspaceReference(url: snapshot.canonicalURL).fileID)
+            .map { String($0.prefix(80)) } ?? "workspace"
+        return "google-\(identifier).\(snapshot.kind.exportFormat)"
     }
 
     private func createResource(

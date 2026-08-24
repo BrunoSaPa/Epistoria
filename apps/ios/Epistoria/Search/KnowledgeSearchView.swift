@@ -135,6 +135,7 @@ struct KnowledgeSearchView: View {
             return (try? CanonicalJSON.decode(AcademicTermPayload.self, from: content).name) ?? "Academic term"
         case .noteBlock: return "Note excerpt"
         case .annotation: return "Annotation"
+        case .transcriptCorrection: return "Transcript correction"
         case .asset:
             return (try? CanonicalJSON.decode(AssetPayload.self, from: content).originalFilename) ?? "Asset"
         case .aiArtifact: return "AI artifact"
@@ -152,7 +153,7 @@ struct KnowledgeSearchView: View {
         case .studySession: "timer"
         case .resource, .asset: "books.vertical"
         case .course, .institution, .academicTerm: "building.columns"
-        case .annotation: "note.text"
+        case .annotation, .transcriptCorrection: "note.text"
         case .aiArtifact: "sparkles"
         default: "link"
         }
@@ -204,6 +205,34 @@ private struct SearchDestination: View {
             } else {
                 SearchRecordView(hit: hit)
             }
+        case .transcriptCorrection:
+            if let correction = try? CanonicalJSON.decode(
+                TranscriptCorrectionPayload.self,
+                from: hit.entity.content
+            ) {
+                ResourceDetailView(
+                    model: model,
+                    resourceId: correction.sourceId,
+                    initialSourceVersionId: correction.sourceVersionId,
+                    highlightText: correction.correctedText,
+                    initialMediaTimeSeconds: correction.startSeconds
+                )
+            } else {
+                SearchRecordView(hit: hit)
+            }
+        case .evidence:
+            if let evidence = try? CanonicalJSON.decode(EvidencePayload.self, from: hit.entity.content) {
+                ResourceDetailView(
+                    model: model,
+                    resourceId: evidence.sourceId,
+                    initialSourceVersionId: evidence.sourceVersionId,
+                    initialPageNumber: evidence.locator.page,
+                    highlightText: evidence.excerpt,
+                    initialMediaTimeSeconds: evidence.locator.startSeconds
+                )
+            } else {
+                SearchRecordView(hit: hit)
+            }
         case .aiArtifact:
             if let artifact = try? CanonicalJSON.decode(SessionDigestArtifact.self, from: hit.entity.content) {
                 SessionDetailView(model: model, sessionId: artifact.sessionId)
@@ -217,6 +246,11 @@ private struct SearchDestination: View {
                 )
             } else if let manifest = try? CanonicalJSON.decode(PDFExtractionManifest.self, from: hit.entity.content) {
                 ResourceDetailView(model: model, resourceId: manifest.resourceId)
+            } else if let manifest = try? CanonicalJSON.decode(
+                MediaTranscriptionManifest.self,
+                from: hit.entity.content
+            ) {
+                ResourceDetailView(model: model, resourceId: manifest.sourceId)
             } else {
                 SearchRecordView(hit: hit)
             }

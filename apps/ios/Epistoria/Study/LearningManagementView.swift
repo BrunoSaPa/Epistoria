@@ -1,8 +1,21 @@
 import EpistoriaCore
 import SwiftUI
 
+enum LearningManagementTarget: Hashable, Identifiable {
+    case goal(UUID)
+    case question(UUID)
+
+    var id: String {
+        switch self {
+        case .goal(let id): "goal:\(id.uuidString)"
+        case .question(let id): "question:\(id.uuidString)"
+        }
+    }
+}
+
 struct LearningManagementView: View {
     @Bindable var model: AppModel
+    let initialTarget: LearningManagementTarget?
     @State private var topics: [IdentifiedPayload<TopicPayload>] = []
     @State private var decks: [IdentifiedPayload<FlashcardDeckPayload>] = []
     @State private var cards: [IdentifiedPayload<FlashcardPayload>] = []
@@ -11,8 +24,18 @@ struct LearningManagementView: View {
     @State private var questions: [IdentifiedPayload<UnresolvedQuestionPayload>] = []
     @State private var concepts: [IdentifiedPayload<ConceptPayload>] = []
     @State private var tests: [IdentifiedPayload<PracticeTestPayload>] = []
+    @State private var automationGrants: [IdentifiedPayload<AutomationGrantPayload>] = []
     @State private var showNewDeck = false
+    @State private var showNewAutomation = false
+    @State private var automationMessage: String?
+    @State private var openedTarget: LearningManagementTarget?
+    @State private var openedInitialTarget = false
     @State private var errorMessage: String?
+
+    init(model: AppModel, initialTarget: LearningManagementTarget? = nil) {
+        self.model = model
+        self.initialTarget = initialTarget
+    }
 
     var body: some View {
         List {
@@ -82,7 +105,12 @@ struct LearningManagementView: View {
                 if concepts.isEmpty { Text("No Concepts").foregroundStyle(.secondary) }
                 ForEach(concepts, id: \.id) { concept in
                     NavigationLink {
-                        ConceptEditorView(model: model, concept: concept, topics: topics) { Task { await load() } }
+                        ConceptEditorView(
+                            model: model,
+                            concept: concept,
+                            topics: topics,
+                            concepts: concepts
+                        ) { Task { await load() } }
                     } label: {
                         managementRow(
                             concept.payload.name,
@@ -106,13 +134,59 @@ struct LearningManagementView: View {
                     }
                 }
             }
+            Section("Proactive automation") {
+                Text("Study Next suggestions remain local. Automatic provider work runs only under an active permission listed here.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                if automationGrants.isEmpty {
+                    Text("No automatic processing permissions").foregroundStyle(.secondary)
+                }
+                ForEach(automationGrants, id: \.id) { grant in
+                    NavigationLink {
+                        AutomationGrantEditorView(
+                            model: model,
+                            grant: grant,
+                            topics: topics
+                        ) { Task { await load() } }
+                    } label: {
+                        managementRow(
+                            grant.payload.jobTypes.map(\.displayName).joined(separator: ", "),
+                            detail: "\(grant.payload.topicIds.count) Topic\(grant.payload.topicIds.count == 1 ? "" : "s") · \(grantStatus(grant.payload))",
+                            symbol: "bolt.shield"
+                        )
+                    }
+                }
+                Button("New permission", systemImage: "plus") { showNewAutomation = true }
+                Button("Run due automations", systemImage: "play") {
+                    Task { await runDueAutomations() }
+                }
+                .disabled(automationGrants.allSatisfy { !$0.payload.isActive(at: .now) })
+                if let automationMessage {
+                    Text(automationMessage).font(.caption).foregroundStyle(.secondary)
+                }
+            }
         }
         .navigationTitle("Manage Learning")
         .epistoriaPageBackground()
-        .task { await load() }
+        .task {
+            await load()
+            if !openedInitialTarget {
+                openedInitialTarget = true
+                openedTarget = initialTarget
+            }
+        }
         .refreshable { await load() }
+        .navigationDestination(item: $openedTarget) { target in
+            learningTargetDestination(target)
+        }
         .sheet(isPresented: $showNewDeck) {
             NewDeckView(model: model, topics: topics) { Task { await load() } }
+        }
+        .sheet(isPresented: $showNewAutomation) {
+            AutomationGrantEditorView(model: model, grant: nil, topics: topics) {
+                showNewAutomation = false
+                Task { await load() }
+            }
         }
         .alert("Learning error", isPresented: .constant(errorMessage != nil)) {
             Button("Dismiss", role: .cancel) { errorMessage = nil }
@@ -142,6 +216,34 @@ struct LearningManagementView: View {
         return topicName(card.topicId)
     }
 
+    private func grantStatus(_ grant: AutomationGrantPayload) -> String {
+        if grant.revokedAt != nil { return "Revoked" }
+        if grant.expiresAt <= .now { return "Expired" }
+        if grant.pausedAt != nil { return "Paused" }
+        if (grant.estimatedSpentMinorUnits ?? 0) >= grant.spendingLimitMinorUnits {
+            return "Budget reached"
+        }
+        return "Active"
+    }
+
+    @ViewBuilder
+    private func learningTargetDestination(_ target: LearningManagementTarget) -> some View {
+        switch target {
+        case .goal(let id):
+            if let goal = goals.first(where: { $0.id == id }) {
+                GoalEditorView(model: model, goal: goal) { Task { await load() } }
+            } else {
+                ContentUnavailableView("Goal unavailable", systemImage: "target")
+            }
+        case .question(let id):
+            if let question = questions.first(where: { $0.id == id }) {
+                QuestionEditorView(model: model, item: question) { Task { await load() } }
+            } else {
+                ContentUnavailableView("Question unavailable", systemImage: "questionmark.circle")
+            }
+        }
+    }
+
     private func load() async {
         guard let store = model.store else { return }
         do {
@@ -153,7 +255,8 @@ struct LearningManagementView: View {
             async let f = store.list(UnresolvedQuestionPayload.self)
             async let g = store.list(ConceptPayload.self)
             async let h = store.list(PracticeTestPayload.self)
-            let values = try await (a, b, c, d, e, f, g, h)
+            async let i = store.list(AutomationGrantPayload.self)
+            let values = try await (a, b, c, d, e, f, g, h, i)
             topics = values.0.filter { !$0.payload.archived }
             decks = values.1.sorted { $0.payload.name < $1.payload.name }
             cards = values.2.sorted { $0.payload.updatedAt > $1.payload.updatedAt }
@@ -162,7 +265,31 @@ struct LearningManagementView: View {
             questions = values.5.sorted { $0.payload.updatedAt > $1.payload.updatedAt }
             concepts = values.6.sorted { $0.payload.name < $1.payload.name }
             tests = values.7.sorted { $0.payload.updatedAt > $1.payload.updatedAt }
+            automationGrants = values.8.sorted { $0.payload.updatedAt > $1.payload.updatedAt }
             errorMessage = nil
+        } catch { errorMessage = error.localizedDescription }
+    }
+
+    private func runDueAutomations() async {
+        guard let aiJobs = model.aiJobs else {
+            errorMessage = "Connect the private server and pair your trusted Mac first."
+            return
+        }
+        do {
+            let outcomes = try await aiJobs.runDueAutomations()
+            let queued = outcomes.filter {
+                if case .queued = $0 { return true }
+                return false
+            }.count
+            let unchanged = outcomes.filter {
+                if case .unchanged = $0 { return true }
+                return false
+            }.count
+            automationMessage = queued > 0
+                ? "Queued \(queued) reviewed draft\(queued == 1 ? "" : "s")."
+                : unchanged > 0 ? "Nothing queued because the allowed material is unchanged." : "No permission is due."
+            model.noteLocalMutation()
+            await load()
         } catch { errorMessage = error.localizedDescription }
     }
 }
@@ -414,16 +541,31 @@ private struct ConceptEditorView: View {
     @Bindable var model: AppModel
     let concept: IdentifiedPayload<ConceptPayload>
     let topics: [IdentifiedPayload<TopicPayload>]
+    let concepts: [IdentifiedPayload<ConceptPayload>]
     let onSaved: () -> Void
     @State private var name: String
     @State private var details: String
     @State private var aliases: String
     @State private var selectedTopics: Set<UUID>
     @State private var archived: Bool
+    @State private var links: [IdentifiedPayload<ConceptLinkPayload>] = []
+    @State private var isCreatingLink = false
+    @State private var editingLink: IdentifiedPayload<ConceptLinkPayload>?
+    @State private var pendingLinkRemoval: IdentifiedPayload<ConceptLinkPayload>?
     @State private var errorMessage: String?
 
-    init(model: AppModel, concept: IdentifiedPayload<ConceptPayload>, topics: [IdentifiedPayload<TopicPayload>], onSaved: @escaping () -> Void) {
-        self.model = model; self.concept = concept; self.topics = topics; self.onSaved = onSaved
+    init(
+        model: AppModel,
+        concept: IdentifiedPayload<ConceptPayload>,
+        topics: [IdentifiedPayload<TopicPayload>],
+        concepts: [IdentifiedPayload<ConceptPayload>],
+        onSaved: @escaping () -> Void
+    ) {
+        self.model = model
+        self.concept = concept
+        self.topics = topics
+        self.concepts = concepts
+        self.onSaved = onSaved
         _name = State(initialValue: concept.payload.name)
         _details = State(initialValue: concept.payload.conceptDescription)
         _aliases = State(initialValue: concept.payload.aliases.joined(separator: ", "))
@@ -447,11 +589,98 @@ private struct ConceptEditorView: View {
                     ))
                 }
             }
+            Section("Connections") {
+                if links.isEmpty {
+                    Text("No Concept connections").foregroundStyle(.secondary)
+                }
+                ForEach(links, id: \.id) { link in
+                    Button {
+                        editingLink = link
+                    } label: {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(connectionTitle(link.payload))
+                                .foregroundStyle(.primary)
+                            HStack(spacing: 6) {
+                                Text(link.payload.relation.displayName)
+                                Text("·")
+                                Text(link.payload.provenance == .user ? "Manual" : "Reviewed AI")
+                                if !link.payload.evidenceIds.isEmpty {
+                                    Text("· \(link.payload.evidenceIds.count) Evidence")
+                                }
+                            }
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            if let rationale = link.payload.rationale {
+                                Text(rationale)
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(3)
+                            }
+                        }
+                    }
+                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                        Button("Remove", systemImage: "trash", role: .destructive) {
+                            pendingLinkRemoval = link
+                        }
+                    }
+                }
+                Button("Add connection", systemImage: "link.badge.plus") {
+                    isCreatingLink = true
+                }
+                .disabled(concepts.filter { $0.id != concept.id && $0.payload.state == .active }.isEmpty)
+            }
             Toggle("Archived", isOn: $archived)
             lifecycleError(errorMessage)
         }
         .navigationTitle("Edit Concept")
         .toolbar { Button("Save") { Task { await save() } }.disabled(name.trimmed.isEmpty || selectedTopics.isEmpty) }
+        .task { await loadLinks() }
+        .sheet(isPresented: $isCreatingLink) {
+            ConceptLinkEditorView(
+                model: model,
+                sourceConceptId: concept.id,
+                concepts: concepts,
+                link: nil
+            ) {
+                isCreatingLink = false
+                Task { await loadLinks() }
+            }
+        }
+        .sheet(
+            isPresented: Binding(
+                get: { editingLink != nil },
+                set: { if !$0 { editingLink = nil } }
+            )
+        ) {
+            if let editingLink {
+                ConceptLinkEditorView(
+                    model: model,
+                    sourceConceptId: concept.id,
+                    concepts: concepts,
+                    link: editingLink
+                ) {
+                    self.editingLink = nil
+                    Task { await loadLinks() }
+                }
+            }
+        }
+        .confirmationDialog(
+            "Remove this Concept connection?",
+            isPresented: Binding(
+                get: { pendingLinkRemoval != nil },
+                set: { if !$0 { pendingLinkRemoval = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Remove connection", role: .destructive) {
+                guard let pendingLinkRemoval else { return }
+                Task { await removeLink(pendingLinkRemoval.id) }
+                self.pendingLinkRemoval = nil
+            }
+            Button("Cancel", role: .cancel) { pendingLinkRemoval = nil }
+        } message: {
+            Text("The Concepts and their Evidence remain in the notebook.")
+        }
     }
 
     private func save() async {
@@ -466,6 +695,175 @@ private struct ConceptEditorView: View {
                 state: archived ? .archived : .active
             )
             model.noteLocalMutation(); onSaved()
+        } catch { errorMessage = error.localizedDescription }
+    }
+
+    private func loadLinks() async {
+        guard let store = model.store else { return }
+        do {
+            links = try await store.conceptLinks(conceptId: concept.id)
+        } catch { errorMessage = error.localizedDescription }
+    }
+
+    private func removeLink(_ id: UUID) async {
+        guard let store = model.store else { return }
+        do {
+            try await store.removeConceptLink(id: id)
+            model.noteLocalMutation()
+            await loadLinks()
+        } catch { errorMessage = error.localizedDescription }
+    }
+
+    private func connectionTitle(_ link: ConceptLinkPayload) -> String {
+        let isOutgoing = link.sourceConceptId == concept.id
+        let otherId = isOutgoing ? link.targetConceptId : link.sourceConceptId
+        let otherName = concepts.first { $0.id == otherId }?.payload.name ?? "Concept"
+        return isOutgoing ? "\(concept.payload.name) → \(otherName)" : "\(otherName) → \(concept.payload.name)"
+    }
+}
+
+private struct ConceptLinkEditorView: View {
+    @Bindable var model: AppModel
+    @Environment(\.dismiss) private var dismiss
+    let sourceConceptId: UUID
+    let concepts: [IdentifiedPayload<ConceptPayload>]
+    let link: IdentifiedPayload<ConceptLinkPayload>?
+    let onSaved: () -> Void
+
+    @State private var targetConceptId: UUID?
+    @State private var relation: ConceptLinkKind
+    @State private var rationale: String
+    @State private var selectedEvidenceIds: Set<UUID>
+    @State private var evidence: [IdentifiedPayload<EvidencePayload>] = []
+    @State private var isWorking = false
+    @State private var errorMessage: String?
+
+    init(
+        model: AppModel,
+        sourceConceptId: UUID,
+        concepts: [IdentifiedPayload<ConceptPayload>],
+        link: IdentifiedPayload<ConceptLinkPayload>?,
+        onSaved: @escaping () -> Void
+    ) {
+        self.model = model
+        self.sourceConceptId = sourceConceptId
+        self.concepts = concepts
+        self.link = link
+        self.onSaved = onSaved
+        let firstTarget = concepts.first { $0.id != sourceConceptId && $0.payload.state == .active }?.id
+        _targetConceptId = State(initialValue: link?.payload.targetConceptId ?? firstTarget)
+        _relation = State(initialValue: link?.payload.relation ?? .related)
+        _rationale = State(initialValue: link?.payload.rationale ?? "")
+        _selectedEvidenceIds = State(initialValue: Set(link?.payload.evidenceIds ?? []))
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Concepts") {
+                    if let link {
+                        LabeledContent("From", value: conceptName(link.payload.sourceConceptId))
+                        LabeledContent("To", value: conceptName(link.payload.targetConceptId))
+                        Text("Endpoints remain fixed so the connection keeps a stable meaning. Create another connection to use different Concepts.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        LabeledContent("From", value: conceptName(sourceConceptId))
+                        Picker("To", selection: $targetConceptId) {
+                            ForEach(concepts.filter { $0.id != sourceConceptId && $0.payload.state == .active }, id: \.id) {
+                                Text($0.payload.name).tag(Optional($0.id))
+                            }
+                        }
+                    }
+                    Picker("Relationship", selection: $relation) {
+                        ForEach(ConceptLinkKind.allCases, id: \.self) { kind in
+                            Text(kind.displayName).tag(kind)
+                        }
+                    }
+                    TextField("Why are these Concepts connected?", text: $rationale, axis: .vertical)
+                }
+
+                Section("Supporting Evidence") {
+                    if evidence.isEmpty {
+                        Text("No reusable Evidence is available yet.")
+                            .foregroundStyle(.secondary)
+                    }
+                    ForEach(evidence, id: \.id) { item in
+                        Toggle(isOn: Binding(
+                            get: { selectedEvidenceIds.contains(item.id) },
+                            set: { selected in
+                                if selected { selectedEvidenceIds.insert(item.id) }
+                                else { selectedEvidenceIds.remove(item.id) }
+                            }
+                        )) {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(item.payload.excerpt).lineLimit(3)
+                                Text(item.payload.kind.rawValue.replacingOccurrences(of: "_", with: " ").capitalized)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    Text("Evidence stays bound to its exact immutable Source Version.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                if let errorMessage {
+                    Section { Text(errorMessage).foregroundStyle(.red) }
+                }
+            }
+            .navigationTitle(link == nil ? "Add Connection" : "Edit Connection")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") { Task { await save() } }
+                        .disabled(isWorking || (link == nil && targetConceptId == nil))
+                }
+            }
+            .task { await loadEvidence() }
+        }
+    }
+
+    private func conceptName(_ id: UUID) -> String {
+        concepts.first { $0.id == id }?.payload.name ?? "Concept"
+    }
+
+    private func loadEvidence() async {
+        guard let store = model.store else { return }
+        do {
+            evidence = try await store.list(EvidencePayload.self)
+                .sorted { $0.payload.updatedAt > $1.payload.updatedAt }
+        } catch { errorMessage = error.localizedDescription }
+    }
+
+    private func save() async {
+        guard let store = model.store else { return }
+        isWorking = true
+        defer { isWorking = false }
+        do {
+            if let link {
+                try await store.updateConceptLink(
+                    id: link.id,
+                    relation: relation,
+                    rationale: rationale,
+                    evidenceIds: Array(selectedEvidenceIds)
+                )
+            } else if let targetConceptId {
+                _ = try await store.createConceptLink(
+                    sourceConceptId: sourceConceptId,
+                    targetConceptId: targetConceptId,
+                    relation: relation,
+                    rationale: rationale,
+                    evidenceIds: Array(selectedEvidenceIds)
+                )
+            }
+            model.noteLocalMutation()
+            onSaved()
+            dismiss()
         } catch { errorMessage = error.localizedDescription }
     }
 }
@@ -505,6 +903,233 @@ private struct PracticeTestEditorView: View {
     }
 }
 
+private struct AutomationGrantEditorView: View {
+    @Bindable var model: AppModel
+    @Environment(\.dismiss) private var dismiss
+    let grant: IdentifiedPayload<AutomationGrantPayload>?
+    let topics: [IdentifiedPayload<TopicPayload>]
+    let onSaved: () -> Void
+
+    @State private var selectedTopics: Set<UUID>
+    @State private var selectedJobs: Set<AutomationJobKind>
+    @State private var intervalHours: Int
+    @State private var expiresAt: Date
+    @State private var budgetDollars: Int
+    @State private var acknowledged = false
+    @State private var showRevokeConfirmation = false
+    @State private var isWorking = false
+    @State private var errorMessage: String?
+
+    private let availableJobs: [AutomationJobKind] = [
+        .topicSynthesis, .flashcardDrafts, .conceptSuggestions, .sourceDiscovery, .weeklyReview,
+    ]
+
+    init(
+        model: AppModel,
+        grant: IdentifiedPayload<AutomationGrantPayload>?,
+        topics: [IdentifiedPayload<TopicPayload>],
+        onSaved: @escaping () -> Void
+    ) {
+        self.model = model
+        self.grant = grant
+        self.topics = topics
+        self.onSaved = onSaved
+        _selectedTopics = State(initialValue: Set(grant?.payload.topicIds ?? []))
+        _selectedJobs = State(initialValue: Set(grant?.payload.jobTypes.filter {
+            $0.learningJobType != nil
+        } ?? []))
+        _intervalHours = State(initialValue: grant?.payload.minimumIntervalHours ?? 168)
+        _expiresAt = State(initialValue: grant?.payload.expiresAt ?? .now.addingTimeInterval(30 * 86_400))
+        _budgetDollars = State(initialValue: max((grant?.payload.spendingLimitMinorUnits ?? 500) / 100, 1))
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Allowed Topics") {
+                    ForEach(topics, id: \.id) { topic in
+                        Toggle(topic.payload.name, isOn: membershipBinding(topic.id, in: $selectedTopics))
+                    }
+                }
+                Section("Allowed tasks") {
+                    ForEach(availableJobs, id: \.self) { job in
+                        Toggle(job.displayName, isOn: membershipBinding(job, in: $selectedJobs))
+                    }
+                    Text("Every result returns as a draft. Nothing is accepted into the notebook automatically.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Section("Limits") {
+                    Stepper(
+                        "At most once every \(intervalHours) hour\(intervalHours == 1 ? "" : "s") per Topic and task",
+                        value: $intervalHours,
+                        in: 1...8_760
+                    )
+                    DatePicker(
+                        "Expires",
+                        selection: $expiresAt,
+                        in: Date.now.addingTimeInterval(3_600)...,
+                        displayedComponents: [.date, .hourAndMinute]
+                    )
+                    Stepper("Spending limit: $\(budgetDollars) USD", value: $budgetDollars, in: 1...10_000)
+                    if let payload = grant?.payload {
+                        LabeledContent(
+                            "Recorded estimate",
+                            value: (Double(payload.estimatedSpentMinorUnits ?? 0) / 100)
+                                .formatted(.currency(code: "USD"))
+                        )
+                        LabeledContent("Queued jobs", value: (payload.queuedJobIds?.count ?? 0).formatted())
+                        if let history = payload.lastQueuedAtByScope, !history.isEmpty {
+                            DisclosureGroup("Queue history") {
+                                ForEach(history.keys.sorted(), id: \.self) { key in
+                                    LabeledContent(
+                                        automationScopeLabel(key),
+                                        value: history[key]?.formatted(date: .abbreviated, time: .shortened) ?? "Unknown"
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    Text("The trusted Mac stops new automatic work when the recorded provider estimate reaches this limit. It also enforces the Topic, task, cadence, and expiration fields.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Section("Approval") {
+                    Toggle("I approve recurring processing for this exact scope", isOn: $acknowledged)
+                    Text("Opening a note or Study does not create this permission. Pause or revoke it here at any time.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                if let payload = grant?.payload {
+                    Section("State") {
+                        if payload.revokedAt != nil {
+                            Label("Revoked", systemImage: "xmark.circle")
+                        } else {
+                            Button(payload.pausedAt == nil ? "Pause" : "Resume") {
+                                Task { await setPaused(payload.pausedAt == nil) }
+                            }
+                            .disabled(isWorking)
+                            Button("Revoke permission", role: .destructive) {
+                                showRevokeConfirmation = true
+                            }
+                            .disabled(isWorking)
+                        }
+                        Text("Pause and revocation stop new queueing and request cancellation for nonterminal jobs. Completed drafts remain reviewable.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                lifecycleError(errorMessage)
+            }
+            .navigationTitle(grant == nil ? "New automation" : "Automation permission")
+            .toolbar {
+                if grant == nil {
+                    ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") { Task { await save() } }
+                        .disabled(
+                            isWorking || !acknowledged || selectedTopics.isEmpty
+                                || selectedJobs.isEmpty || expiresAt <= .now
+                                || grant?.payload.revokedAt != nil
+                        )
+                }
+            }
+            .confirmationDialog(
+                "Revoke this permission?",
+                isPresented: $showRevokeConfirmation,
+                titleVisibility: .visible
+            ) {
+                Button("Revoke", role: .destructive) { Task { await revoke() } }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("This cannot be undone. Create a new permission if you want automation later.")
+            }
+        }
+    }
+
+    private func membershipBinding<Value: Hashable>(
+        _ value: Value,
+        in selection: Binding<Set<Value>>
+    ) -> Binding<Bool> {
+        Binding(
+            get: { selection.wrappedValue.contains(value) },
+            set: { included in
+                if included { selection.wrappedValue.insert(value) }
+                else { selection.wrappedValue.remove(value) }
+            }
+        )
+    }
+
+    private func save() async {
+        guard let store = model.store else { return }
+        isWorking = true
+        defer { isWorking = false }
+        do {
+            if let grant {
+                try await store.updateAutomationGrant(
+                    id: grant.id,
+                    topicIds: Array(selectedTopics),
+                    jobTypes: Array(selectedJobs),
+                    minimumIntervalHours: intervalHours,
+                    expiresAt: expiresAt,
+                    spendingLimitMinorUnits: budgetDollars * 100
+                )
+            } else {
+                _ = try await store.createAutomationGrant(
+                    topicIds: Array(selectedTopics),
+                    jobTypes: Array(selectedJobs),
+                    minimumIntervalHours: intervalHours,
+                    expiresAt: expiresAt,
+                    spendingLimitMinorUnits: budgetDollars * 100
+                )
+            }
+            model.noteLocalMutation()
+            onSaved()
+            if grant == nil { dismiss() }
+        } catch { errorMessage = error.localizedDescription }
+    }
+
+    private func setPaused(_ paused: Bool) async {
+        guard let id = grant?.id, let store = model.store else { return }
+        isWorking = true
+        defer { isWorking = false }
+        do {
+            if let aiJobs = model.aiJobs {
+                try await aiJobs.setAutomationGrantPaused(id: id, paused: paused)
+            } else {
+                _ = try await store.setAutomationGrantPaused(id: id, paused: paused)
+            }
+            model.noteLocalMutation()
+            onSaved()
+            dismiss()
+        } catch { errorMessage = error.localizedDescription }
+    }
+
+    private func revoke() async {
+        guard let id = grant?.id, let store = model.store else { return }
+        isWorking = true
+        defer { isWorking = false }
+        do {
+            if let aiJobs = model.aiJobs {
+                try await aiJobs.revokeAutomationGrant(id: id)
+            } else {
+                _ = try await store.revokeAutomationGrant(id: id)
+            }
+            model.noteLocalMutation()
+            onSaved()
+            dismiss()
+        } catch { errorMessage = error.localizedDescription }
+    }
+
+    private func automationScopeLabel(_ key: String) -> String {
+        let parts = key.split(separator: ":", maxSplits: 1).map(String.init)
+        guard parts.count == 2, let topicId = UUID(uuidString: parts[0]) else { return key }
+        let topic = topics.first { $0.id == topicId }?.payload.name ?? "Topic"
+        return "\(topic) · \(parts[1].replacingOccurrences(of: "_", with: " ").capitalized)"
+    }
+}
+
 @ViewBuilder private func lifecycleError(_ message: String?) -> some View {
     if let message { Text(message).foregroundStyle(.red) }
 }
@@ -523,4 +1148,17 @@ private extension LearningRecordState {
 
 private extension PracticeTestState {
     var label: String { rawValue.capitalized }
+}
+
+private extension AutomationJobKind {
+    var displayName: String {
+        switch self {
+        case .topicSynthesis: "Topic synthesis"
+        case .flashcardDrafts: "Flashcard drafts"
+        case .conceptSuggestions: "Concept suggestions"
+        case .sourceDiscovery: "Source discovery"
+        case .weeklyReview: "Weekly review"
+        default: rawValue.replacingOccurrences(of: "_", with: " ").capitalized
+        }
+    }
 }

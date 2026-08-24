@@ -468,7 +468,7 @@ struct CourseDetailView: View {
         }
         .fileImporter(
             isPresented: $isImporting,
-            allowedContentTypes: [.pdf],
+            allowedContentTypes: EpistoriaSourceImportTypes.supported,
             allowsMultipleSelection: true
         ) { result in
             Task { await importFiles(result) }
@@ -484,7 +484,7 @@ struct CourseDetailView: View {
             Button("Archive course") { Task { await setArchived(true) } }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Its notes, PDFs, and sessions remain linked and can be restored with the course.")
+            Text("Its notes, Sources, and sessions remain linked and can be restored with the course.")
         }
         .safeAreaInset(edge: .bottom) {
             importStatus
@@ -563,7 +563,7 @@ struct CourseDetailView: View {
                 HStack(spacing: 10) {
                     courseAction("New note", symbol: "square.and.pencil") { showNewNote = true }
                     courseAction("Start session", symbol: "play.circle") { showNewSession = true }
-                    courseAction("Import PDF", symbol: "doc.badge.plus") { isImporting = true }
+                    courseAction("Import Source", symbol: "doc.badge.plus") { isImporting = true }
                 }
             }
         }
@@ -605,7 +605,7 @@ struct CourseDetailView: View {
     private func resourcesSection(_ course: IdentifiedPayload<CoursePayload>) -> some View {
         Section("Resources") {
             if resources.isEmpty {
-                Button("Import the first course PDF", systemImage: "doc.badge.plus") {
+                Button("Import the first Source", systemImage: "doc.badge.plus") {
                     isImporting = true
                 }
                 .disabled(course.payload.archived)
@@ -831,7 +831,7 @@ struct CourseDetailView: View {
             var lastResourceId: UUID?
             for (index, url) in urls.enumerated() {
                 importProgress = "Encrypting \(index + 1) of \(urls.count): \(url.lastPathComponent)"
-                let imported = try await assetManager.importPDF(from: url, courseId: courseId)
+                let imported = try await assetManager.importSource(from: url, topicId: courseId)
                 lastResourceId = imported.resourceId
             }
             model.noteLocalMutation()

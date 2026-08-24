@@ -24,6 +24,24 @@ public protocol SourceAdapter: Sendable {
     func readableExport(data: Data) throws -> Data
 }
 
+public protocol DecoderValidatedSourceAdapter: SourceAdapter {
+    func validateWithDecoder(data: Data, filename: String, mimeType: String) async throws
+}
+
+public extension SourceAdapter {
+    func validateForImport(data: Data, filename: String, mimeType: String) async throws {
+        if let decoderValidated = self as? any DecoderValidatedSourceAdapter {
+            try await decoderValidated.validateWithDecoder(
+                data: data,
+                filename: filename,
+                mimeType: mimeType
+            )
+        } else {
+            try validate(data: data, filename: filename, mimeType: mimeType)
+        }
+    }
+}
+
 public enum SourceAdapterError: Error, Equatable, LocalizedError {
     case unsupportedType
     case malformed
@@ -77,11 +95,146 @@ public struct PlainTextSourceAdapter: SourceAdapter {
     public func readableExport(data: Data) throws -> Data { data }
 }
 
-public struct PhaseOneSourceAdapterRegistry: Sendable {
+public struct CSVSourceDocument: Equatable, Sendable {
+    public var rows: [[String]]
+
+    public init(rows: [[String]]) {
+        self.rows = rows
+    }
+
+    public var maximumColumnCount: Int { rows.map(\.count).max() ?? 0 }
+}
+
+public struct CSVSourceAdapter: SourceAdapter {
+    public let sourceType = ResourceKind.csv
+    public let supportedExtensions: Set<String> = ["csv"]
+    public let maximumBytes = 32 * 1_024 * 1_024
+
+    public init() {}
+
+    public func validate(data: Data, filename _: String, mimeType _: String) throws {
+        guard data.count <= maximumBytes else { throw SourceAdapterError.tooLarge }
+        let document = try parse(data: data)
+        guard document.rows.contains(where: { row in
+            row.contains { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        }) else { throw SourceAdapterError.containsNoReadableText }
+    }
+
+    public func renderDescriptor(mimeType: String) -> SourceRenderDescriptor {
+        SourceRenderDescriptor(kind: .csv, mimeType: mimeType)
+    }
+
+    public func extractText(data: Data) throws -> String? {
+        let document = try parse(data: data)
+        return document.rows.map { row in
+            row.map {
+                $0.replacingOccurrences(of: "\t", with: " ")
+                    .replacingOccurrences(of: "\r", with: " ")
+                    .replacingOccurrences(of: "\n", with: " ")
+            }.joined(separator: "\t")
+        }.joined(separator: "\n")
+    }
+
+    public func thumbnail(data _: Data) throws -> Data? { nil }
+    public func readableExport(data: Data) throws -> Data { data }
+
+    public func parse(data: Data) throws -> CSVSourceDocument {
+        guard data.count <= maximumBytes else { throw SourceAdapterError.tooLarge }
+        var bytes = data
+        if bytes.starts(with: [0xEF, 0xBB, 0xBF]) { bytes.removeFirst(3) }
+        guard let decoded = String(data: bytes, encoding: .utf8),
+              !decoded.unicodeScalars.contains(where: { $0.value == 0 })
+        else { throw SourceAdapterError.malformed }
+        let text = decoded
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+
+        var rows: [[String]] = []
+        var row: [String] = []
+        var field = ""
+        var isQuoted = false
+        var closedQuote = false
+        var index = text.startIndex
+
+        func finishField() throws {
+            guard row.count < 10_000 else { throw SourceAdapterError.tooLarge }
+            row.append(field)
+            field = ""
+            closedQuote = false
+        }
+
+        func finishRow() throws {
+            try finishField()
+            guard rows.count < 100_000 else { throw SourceAdapterError.tooLarge }
+            rows.append(row)
+            row = []
+        }
+
+        while index < text.endIndex {
+            let character = text[index]
+            let next = text.index(after: index)
+            if isQuoted {
+                if character == "\"" {
+                    if next < text.endIndex, text[next] == "\"" {
+                        field.append("\"")
+                        index = text.index(after: next)
+                        continue
+                    }
+                    isQuoted = false
+                    closedQuote = true
+                } else {
+                    field.append(character)
+                }
+            } else if closedQuote {
+                if character == "," {
+                    try finishField()
+                } else if character == "\n" {
+                    try finishRow()
+                } else if character == "\r" {
+                    if next < text.endIndex, text[next] == "\n" { index = next }
+                    try finishRow()
+                } else {
+                    throw SourceAdapterError.malformed
+                }
+            } else if character == "\"" {
+                guard field.isEmpty else { throw SourceAdapterError.malformed }
+                isQuoted = true
+            } else if character == "," {
+                try finishField()
+            } else if character == "\n" {
+                try finishRow()
+            } else if character == "\r" {
+                if next < text.endIndex, text[next] == "\n" { index = next }
+                try finishRow()
+            } else {
+                field.append(character)
+            }
+            index = text.index(after: index)
+        }
+        guard !isQuoted else { throw SourceAdapterError.malformed }
+        if !field.isEmpty || !row.isEmpty || closedQuote { try finishRow() }
+        return CSVSourceDocument(rows: rows)
+    }
+}
+
+public struct SourceAdapterRegistry: Sendable {
     private let adapters: [any SourceAdapter] = [
         PlainTextSourceAdapter(sourceType: .pastedText, extensions: ["txt"]),
         PlainTextSourceAdapter(sourceType: .markdown, extensions: ["md", "markdown"]),
-        PlainTextSourceAdapter(sourceType: .html, extensions: ["html", "htm"]),
+        HTMLSourceAdapter(),
+        WebSnapshotSourceAdapter(),
+        CSVSourceAdapter(),
+        EPUBSourceAdapter(),
+        DOCXSourceAdapter(),
+        ODTSourceAdapter(),
+        PPTXSourceAdapter(),
+        ODPSourceAdapter(),
+        XLSXSourceAdapter(),
+        AudioSourceAdapter(),
+        VideoSourceAdapter(),
+        GoogleWorkspaceSourceAdapter(kind: .document),
+        GoogleWorkspaceSourceAdapter(kind: .slides),
+        GoogleWorkspaceSourceAdapter(kind: .sheet),
     ]
 
     public init() {}
@@ -94,7 +247,17 @@ public struct PhaseOneSourceAdapterRegistry: Sendable {
         return adapter
     }
 
+    public func adapter(for sourceType: ResourceKind) throws -> any SourceAdapter {
+        guard let adapter = adapters.first(where: { $0.sourceType == sourceType }) else {
+            throw SourceAdapterError.unsupportedType
+        }
+        return adapter
+    }
+
     public var supportedExtensions: Set<String> {
         adapters.reduce(into: Set<String>()) { $0.formUnion($1.supportedExtensions) }
     }
 }
+
+@available(*, deprecated, renamed: "SourceAdapterRegistry")
+public typealias PhaseOneSourceAdapterRegistry = SourceAdapterRegistry

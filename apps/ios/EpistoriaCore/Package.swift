@@ -16,6 +16,7 @@ let package = Package(
         .package(url: "https://github.com/jedisct1/swift-sodium.git", exact: "0.11.0"),
         // 0.2.5 requires Swift tools 6.1; Xcode 16.2 ships Swift 6.0.
         .package(url: "https://github.com/Kingpin-Apps/swift-mnemonic.git", exact: "0.2.4"),
+        .package(url: "https://github.com/weichsel/ZIPFoundation.git", exact: "0.9.20"),
     ],
     targets: [
         .target(
@@ -24,10 +25,13 @@ let package = Package(
                 .product(name: "SQLCipher", package: "SQLCipher.swift"),
                 .product(name: "Sodium", package: "swift-sodium"),
                 .product(name: "SwiftMnemonic", package: "swift-mnemonic"),
+                .product(name: "ZIPFoundation", package: "ZIPFoundation"),
             ],
             cSettings: [.define("SQLITE_HAS_CODEC")],
             linkerSettings: [
                 .linkedFramework("Foundation"),
+                .linkedFramework("AVFoundation"),
+                .linkedFramework("AVFAudio"),
                 .linkedFramework("ImageIO"),
                 .linkedFramework("Security"),
                 .linkedFramework("UniformTypeIdentifiers"),
@@ -35,7 +39,10 @@ let package = Package(
         ),
         .testTarget(
             name: "EpistoriaCoreTests",
-            dependencies: ["EpistoriaCore"],
+            dependencies: [
+                "EpistoriaCore",
+                .product(name: "ZIPFoundation", package: "ZIPFoundation"),
+            ],
             resources: [
                 .copy("Fixtures/crypto-vectors.json"),
             ]

@@ -18,7 +18,8 @@ Today provides the main actions and recent work:
 - **Quick note** creates and opens an unassigned note. You can organize it later.
 - **Start a session** asks for a Topic and starts a focused study session.
 - **Continue session** returns to an active session.
-- **Add Source** imports PDFs, images, plain text, Markdown, or HTML.
+- **Add Source** imports supported files, captures a webpage, or adds a shared Google file or
+  YouTube reference.
 - **Recent** opens recently used notes and resources.
 
 The status row reports whether work is saved on the iPad, waiting to sync, syncing, synced, or in
@@ -119,6 +120,11 @@ To organize an active note:
 To add an existing note from a session, open the session and select **Add existing notes**. Links
 do not duplicate the note. Edits appear everywhere that references it.
 
+To remove one link, open the List or Session, swipe the note or touch and hold it, then select
+**Remove from List** or **Remove from Session**. Confirm the action. The note stays in Notebook and
+in every other List or Session. Removing a Session link does not remove the Session activity
+history. Use the separate activity-row action when an activity entry was recorded by mistake.
+
 Archiving a note does not erase it. A note linked to a List can remain visible in that List after
 archive.
 
@@ -138,28 +144,81 @@ Topic Studio uses the current Topic by default. Turn on **Include connected know
 the request should also use Topics connected through the same Areas. Review the excerpt and token
 estimate before approving a paid request.
 
-When generated cards, questions, or Concepts return:
+For a generated test:
+
+1. Choose **Practice test** or **Test blueprint**.
+2. Choose **Comprehensive**, **Quick Check**, or **Custom**.
+3. Select **Detect objectives from Topic**.
+4. Review the proposed objectives. Detection reads local Concept, Source, note, and unresolved
+   question titles. It does not guarantee a complete curriculum.
+5. Add or remove objectives. Comprehensive keeps every detected objective. Quick Check starts with
+   three objectives. Custom allows an exact selection.
+6. Set the question count and optional time limit. Custom also allows exact coverage dimensions.
+7. Select **Review request**. Check the final mode, question count, objective count, dimensions,
+   time limit, excerpts, and approximate token count.
+8. Select **Approve and queue** only when the plan is correct.
+
+Comprehensive generation can use a broader or multi-part question for related objectives. The
+accepted test still lists objectives without a reviewed question and keeps provider-reported
+source, dimension, question-count, and time-limit constraints.
+
+When generated cards, questions, Concepts, or Concept connections return:
 
 1. Review every item and its citation count.
 2. Clear an item to exclude it, or select **Edit** to change its prompt, answer, rubric,
    objectives, or description.
 3. Keep citations fixed during review. Exclude an item when its evidence does not support it.
-4. Select **Accept selected**. Only selected items become cards, test questions, or Concepts.
+4. For Concept work, review each proposed typed connection and its cited reason. You can edit the
+   Concept names, relationship, or reason. Citations remain fixed during review.
+5. Select **Accept selected**. Only selected items and connections become durable records.
 
 The original generated response remains available for provenance. The reviewed selection is
 encrypted and remains available after relaunch. Acceptance cannot be repeated to create duplicates.
 
 ## Use Study
 
-Study contains Study Next, Sessions, Flashcards, Tests, and History.
+Study contains Study Next, Week, Sessions, Flashcards, Tests, and History.
 
 - Study Next runs on the iPad and explains why an item is recommended.
+- Select a Study Next row to open the recommended due card, paused session, unfinished attempt,
+  test, goal, or unresolved question. If the target is no longer available, Epistoria opens its
+  Topic.
+- Use the recommendation menu to pin, snooze for one day, dismiss, or mark an item not relevant.
+  Opening and menu actions are stored as response history.
+- Review **Response history** below the current recommendation. Select **Restore** to append a new
+  active response for a pinned, snoozed, dismissed, or irrelevant item. Earlier responses remain
+  in history.
+- Select **Week** to review the previous seven days. The summary uses completed sessions, card
+  reviews, submitted tests, test responses, goals, unresolved questions, and current card due
+  dates stored on this iPad.
+- Use **Completed work** to compare activity by Topic. Use **Difficult material** to find Topics
+  with Hard or Again card ratings, incorrect test answers, or low-confidence test answers.
+- Use **Open questions** and **Next seven days** to open the exact question, goal, or Topic. Overdue
+  goals and cards are labeled separately from later work.
+- Use **Suggested next actions** to open up to three current Study Next items. Opening an action
+  records the same append-only response as opening it from Study Next.
+- The weekly review is calculated locally. It does not queue the optional AI weekly-review draft
+  task or incur a provider charge.
 - Flashcard reviews remain available offline. Each rating adds a history event and updates the
   versioned schedule.
 - Tests start from an objective list. Enter manual questions as `question | correct answer`.
+- A manual test can use Comprehensive, Quick Check, or Custom mode. Custom mode allows exact
+  coverage dimensions. A test can have an optional time limit.
+- Open a saved test to compare planned and available questions, review objective coverage, and
+  read coverage notes before starting an attempt.
 - Starting a test freezes the question, correct answer, rubric, and scope for that attempt.
 - Responses autosave. Add a confidence level before moving to the next question.
 - After submission, filter the review by All, Incorrect, Skipped, or Low Confidence.
+- To request feedback for a written response, open that question and select **Request cited
+  feedback**. Select **Review what leaves your Mac**. The disclosure lists the frozen question,
+  grading guide, reference answer, submitted response, confidence, and linked readable Evidence.
+  Select **Approve and queue** only after checking that scope.
+- When feedback returns, select **Refresh**, edit the feedback, strengths, improvements, proposed
+  score, or uncertainty, then accept or reject it. Citations cannot be replaced during review.
+  Accepted feedback is stored with the response. The submitted answer and original calculated
+  result do not change.
+- Select **Question score** to store a separate owner score and required reason, or clear an
+  existing owner override. The generated proposal remains in history.
 - Use **Retake full test** or **Retake missed objectives** from the test detail. The new attempt
   keeps a link to the earlier result.
 - Use **Override score** after submission to store a separate corrected score and required reason.
@@ -173,16 +232,147 @@ does not delete the underlying item.
 Library contains Inbox, All Sources, Recent, type filters, and Topic filters. Inbox contains
 Sources that do not yet have a Topic.
 
+Use **Add Source → Import files** in Library, or an import action from Today or a Topic, to select PDFs, images, plain text, Markdown,
+HTML, CSV, XLSX, DOCX, PPTX, EPUB, ODT, ODP, MP3, M4A, AAC, WAV, CAF, MP4, M4V, or MOV files. CSV
+files must use UTF-8 and can be up to 32 MB. Quoted commas, quoted line breaks, escaped quotes,
+CRLF, and a UTF-8 byte-order mark are supported. Packaged documents are checked for valid
+document identity, required parts, checksums, safe paths, and bounded expanded size. Invalid
+input fails before Epistoria creates a partial Source.
+
+Open a CSV Source to use the scrollable local table. The first row stays available as the table
+header. Row numbers are display aids and do not change the file. Select **Refresh Source** to
+choose another CSV. Refresh creates a new immutable Source Version and retains the old file for
+existing citations.
+
+Open an EPUB, word-processing document, presentation, or spreadsheet to read extracted text on
+the iPad. This view does not reproduce the original layout. The encrypted original remains in the
+readable notebook export and can be opened with a compatible app.
+
+Open an audio Source to play it on the iPad. Use the center button to play or pause, drag the
+position control to seek, or use the 15-second buttons. Playback uses the local decrypted copy.
+Importing or listening does not send the recording to a provider.
+
+Open a video Source to use the standard iPad playback controls. Epistoria decrypts the video into
+an app-owned file protected by iOS complete file protection. The file is excluded from backup and
+removed when you close the reader, lock the notebook, or reopen after an interrupted session.
+Importing or watching does not send the video to a provider.
+
+To transcribe a supported local recording or video:
+
+1. Open an MP3, M4A, WAV, or MP4 Source no larger than 25 MB.
+2. Open **Source details** and select **Transcribe on trusted Mac…**.
+3. Review the filename, size, optional language, and provider disclosure.
+4. Select **Approve and transcribe**.
+5. Run the trusted Mac worker and synchronize the iPad.
+6. Open **Read timestamped transcript**. Compare it with the original media.
+7. Select the play button on a segment to return to the local player at that timestamp.
+8. Select the pencil button to correct a segment. Enter the corrected text and an optional reason,
+   then select **Save**. The generated text remains visible and unchanged.
+9. Select one segment. Select a second segment to extend the selection to a continuous range.
+10. Select **Create timestamped Evidence**, review the frozen excerpt, add an optional note, and
+    select **Create**.
+11. Accept or reject the transcript if you did not already correct it.
+
+The trusted Mac decrypts the selected Source only for the approved job. The configured AI
+provider receives the media bytes. Transcript segments are encrypted, searchable in the
+transcript reader, and bound to the exact Source Version. Accepting a transcript allows it to
+appear when derived AI records are included in a readable export. Rejecting it keeps it out of
+that export. Neither action changes the original media.
+
+A correction is a separate encrypted owner record. It does not replace the provider transcript
+chunk. Saving another correction supersedes the active correction and keeps the earlier entry in
+history. Select **Use generated text** to retract the active correction without deleting it.
+
+If two devices save different corrections before synchronization, the transcript reader shows a
+**Correction conflicts** section. Select **Keep this correction** for one candidate or **Use
+generated text**. Epistoria keeps the other correction records in history. You cannot create
+Evidence from the affected transcript until the conflict is resolved.
+
+Timestamped Evidence requires an accepted or corrected transcript. The Evidence stores the
+reviewed excerpt, exact Source Version, start and end time, selected segment indexes, and applied
+correction IDs. Later correction changes do not alter an existing Evidence excerpt.
+
+To capture a webpage:
+
+1. Open Library and select **Add Source → Capture webpage**.
+2. Enter a complete HTTPS address. Addresses with embedded usernames or passwords are
+   rejected.
+3. Choose a Topic or leave the Source in Inbox.
+4. Select **Capture**.
+
+Epistoria downloads one bounded HTML response without keeping cookies or a browsing session. It
+stores the exact captured response as an encrypted original and shows extracted readable text.
+Scripts and styles are excluded from the reader. Linked images, stylesheets, embedded media, and
+content that requires JavaScript are not copied.
+
+Select **Refresh webpage** to request a new snapshot. Refresh is never automatic. Epistoria adds
+a new immutable version and shows counts and examples for added and removed readable paragraphs.
+Use **Source details** to select and read an earlier version.
+
+To add a Google file:
+
+1. In Google Docs, Slides, or Sheets, set General access to **Anyone with the link** and Viewer.
+2. In Epistoria, open Library and select **Add Source → Google Docs, Slides, or Sheets**.
+3. Paste the complete `docs.google.com` share link.
+4. Choose a Topic or leave the Source in Inbox.
+5. Select **Add**.
+
+Epistoria does not sign in to Google. It requests the file's DOCX, PPTX, or XLSX export through an
+ephemeral connection without cookies or stored credentials. It validates the downloaded package
+before creating the Source. The downloaded bytes become the encrypted original. The local reader
+shows extracted text and does not reproduce the original Google layout.
+
+Select **Refresh Google file** to request a new export. Refresh is never automatic. It creates a
+new immutable version and shows readable-text changes. Open **Source details** to read an earlier
+version. Changing or removing Google sharing access can prevent later refresh without changing
+versions already stored in Epistoria.
+
+To add a YouTube video:
+
+1. In Library, select **Add Source → YouTube video**.
+2. Paste one complete YouTube video link. Optional start times are supported.
+3. Add an optional title and Topic.
+4. Select **Add**.
+5. Open the Source and select **Load video** when you want to connect to YouTube.
+
+Epistoria stores a normalized link and does not download the YouTube video, captions, thumbnail,
+or metadata. Playback uses YouTube's privacy-enhanced online player in a nonpersistent web view.
+It requires a network connection and follows YouTube's terms and privacy controls. Select
+**Unload video** to stop the player and clear that web view. YouTube references are not eligible
+for trusted-Mac transcription. Import a local media file that you own or are permitted to process
+when a transcript is needed.
+
 Use **Archived** to review and restore archived Sources. Open a Source and select **Edit Source**
 to change its title, primary Topic, related Topics, Lists, or archive state. These changes do not
 rewrite Source Versions or existing citations.
+
+To compare Sources:
+
+1. Open a Source and select **Compare Sources**.
+2. Choose the Source for each side from the two menus in the toolbar.
+3. Choose an immutable version inside each pane. If the starting Source has an earlier version,
+   Epistoria selects the current and previous versions first.
+4. Read, scroll, change PDF pages, or use local media controls independently on each side.
+5. Select **Done** to return to the Source.
+
+Comparison decrypts available files on this iPad. It does not refresh a Source or load a YouTube
+player. A version that is not stored on this device remains unavailable until its encrypted asset
+has been restored through the normal Source workflow.
 
 - Use the page controls to navigate.
 - Open the inspector for extraction and annotation details.
 - Add or edit an annotation without changing the original PDF.
 - A saved annotation also creates reusable Evidence linked to the current Source Version.
-- Select **Refresh Source** to import a replacement file as a new immutable version. Existing
-  citations, cards, tests, and attempts continue to use the earlier version.
+- To reuse the excerpt in a note, open the note and select **Evidence** in the tool rail. Drag an
+  Evidence item to a page or select **Insert**. The inserted card cannot be edited as ordinary
+  text. Moving, resizing, or removing the card does not change the original Evidence.
+- Select an Evidence card, then open **Notebook actions** and select **Open Evidence source** to
+  return to the saved Source Version, page, and excerpt.
+- In the Evidence shelf, select **Backlinks** to list notes, Concepts, flashcards, and test
+  questions that use the same Evidence record.
+- Select **Refresh Source**, **Refresh webpage**, or **Refresh Google file** to create a new
+  immutable version. Existing citations, cards, tests, and attempts continue to use the earlier
+  version.
 - Use temporary undo before leaving the PDF.
 
 If a restored PDF is not yet on the iPad, the app needs a connection the first time you open it.
@@ -200,9 +390,35 @@ Open **Study**, then select **Manage learning records** in the toolbar.
 - Suspend a card to remove it from due reviews without deleting it. Archive it to remove it from
   active card lists.
 - Edit and archive Concepts and tests. Test attempts remain available after a test is archived.
+- Open a Concept to review incoming and outgoing connections. Select **Add connection**, choose the
+  other Concept and relationship, explain the connection, and optionally select supporting
+  Evidence. Open an existing connection to change its relationship, explanation, or Evidence.
+  Removing a connection does not remove either Concept or the Evidence.
 
 In Notebook, use **Archived Lists** to restore a List. Open a List and select **Edit List** to
 rename it, move it under another List, or archive it. Linked notes and Sources are not deleted.
+
+## Manage proactive automation
+
+Study Next suggestions run locally and do not need AI. Recurring provider work is off until you
+create a separate permission.
+
+1. Open **Study → Manage learning records → Proactive automation**.
+2. Select **New permission**.
+3. Select the exact Topics and tasks that may run automatically.
+4. Set the minimum interval for each Topic/task pair, expiration, and USD spending limit.
+5. Read the recurring-processing statement and enable the approval toggle.
+6. Select **Save**.
+
+Epistoria checks active permissions after local changes, during normal periodic synchronization,
+and when **Run due automations** is selected. An unchanged input is not regenerated. A queued
+result returns to Topic Studio as a cited draft and is never accepted automatically.
+
+Open a permission to view its state, recorded cost estimate, queue count, and last queue time for
+each Topic/task pair. Use **Pause** to stop new work temporarily. Use **Resume** after reviewing
+the scope again. Use **Revoke permission** to stop it permanently. Pausing or revoking records the
+local state immediately and requests cancellation for nonterminal server jobs when reachable.
+Already completed drafts remain available for review.
 
 ## Search
 
@@ -260,8 +476,11 @@ location.
 6. Select **Save or share export**.
 7. Select **Done** after saving the destination copy.
 
-The export contains standard data files, original PDFs and images, original Pencil data, and
-checksums. The current app cannot import this export.
+The export contains standard data files, original Sources and images, local readable text copies
+for supported Source types, readable YouTube reference files, original Pencil data, and
+checksums. Accepted transcript data is included only when derived AI records are selected.
+Transcript corrections and timestamped Evidence are included as owner records in the knowledge
+file. The current app cannot import this export.
 
 ## Restore on another iPad
 

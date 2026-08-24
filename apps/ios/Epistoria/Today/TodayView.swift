@@ -99,7 +99,7 @@ struct TodayView: View {
             }
             .fileImporter(
                 isPresented: $isImporting,
-                allowedContentTypes: [.pdf, .image, .plainText, .html, UTType(filenameExtension: "md") ?? .plainText],
+                allowedContentTypes: EpistoriaSourceImportTypes.supported,
                 allowsMultipleSelection: true
             ) { result in
                 Task { await importFiles(result) }
@@ -341,7 +341,7 @@ struct TodayView: View {
                             recentRow(
                                 title: resource.payload.title,
                                 detail: "Imported \(resource.payload.importedAt.formatted(.relative(presentation: .named)))",
-                                symbol: resource.payload.resourceType == .pdf ? "doc.richtext" : "link",
+                                symbol: resource.payload.resourceType.epistoriaSymbol,
                                 pending: resource.syncState != .synced
                             )
                         }
@@ -522,7 +522,7 @@ struct TodayView: View {
             var lastResourceId: UUID?
             for (index, url) in urls.enumerated() {
                 importProgress = "Encrypting \(index + 1) of \(urls.count): \(url.lastPathComponent)"
-                let imported = try await assetManager.importPhaseOneSource(from: url)
+                let imported = try await assetManager.importSource(from: url)
                 lastResourceId = imported.resourceId
             }
             model.noteLocalMutation()

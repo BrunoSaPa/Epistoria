@@ -71,6 +71,9 @@ struct NoteEditorView: View {
     @State private var note: IdentifiedPayload<NotePayload>?
     @State private var title = ""
     @State private var blocks: [IdentifiedPayload<NoteBlockPayload>] = []
+    @State private var evidence: [IdentifiedPayload<EvidencePayload>] = []
+    @State private var sourcesById: [UUID: IdentifiedPayload<SourcePayload>] = [:]
+    @State private var sourceVersionsById: [UUID: IdentifiedPayload<SourceVersionPayload>] = [:]
     @State private var imagePreviews: [UUID: UIImage] = [:]
     @State private var configuration = NoteCanvasConfiguration()
     @State private var currentPageIndex = 0
@@ -119,6 +122,10 @@ struct NoteEditorView: View {
     @State private var showNoteQuerySheet = false
     @State private var showNoteQueryArtifacts = false
     @State private var showOrganization = false
+    @State private var showEvidenceShelf = false
+    @State private var openedEvidenceId: UUID?
+    @State private var inspectedEvidenceId: UUID?
+    @State private var inspectedEvidenceBacklinks: [EvidenceBacklink] = []
     @State private var immersiveEditorID = UUID()
 
     init(
@@ -136,6 +143,160 @@ struct NoteEditorView: View {
     }
 
     var body: some View {
+        editorExportDialogs
+    }
+
+    private var editorChrome: some View {
+        editorCanvasContent
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { editorToolbar }
+            .toolbarBackground(.regularMaterial, for: .navigationBar)
+            .fileImporter(
+                isPresented: $isImportingImage,
+                allowedContentTypes: [.image],
+                allowsMultipleSelection: false
+            ) { result in
+                Task { await importImage(result) }
+            }
+            .overlay(alignment: .topLeading) { statusOverlay }
+            .safeAreaInset(edge: .leading, spacing: 0) { notebookToolRail }
+            .safeAreaInset(edge: .trailing, spacing: 0) {
+                if showEvidenceShelf { evidenceShelf }
+            }
+            .safeAreaInset(edge: .bottom, spacing: 0) { transientBottomMessage }
+            .sensoryFeedback(.selection, trigger: currentPageIndex)
+            .onChange(of: currentPageIndex) { _, _ in
+                Task { await currentPageDidChange() }
+            }
+            .task {
+                workspacePresentation?.beginImmersiveEditing(id: immersiveEditorID)
+                await load()
+            }
+            .onDisappear {
+                workspacePresentation?.endImmersiveEditing(id: immersiveEditorID)
+                pdfExportTask?.cancel()
+                pdfExportTask = nil
+                if let pdfExportResult {
+                    try? NotePDFExportService.removeTemporaryPDF(pdfExportResult.fileURL)
+                    self.pdfExportResult = nil
+                }
+                Task { await saveAll() }
+            }
+    }
+
+    private var editorSheets: some View {
+        editorChrome
+            .sheet(isPresented: $showNoteQuerySheet) {
+                NoteQuerySheetView(
+                    model: model,
+                    noteId: noteId,
+                    selection: lassoSelection,
+                    onDismiss: {
+                        showNoteQuerySheet = false
+                        mode = .select
+                        lassoSelection = LassoSelection()
+                    }
+                )
+            }
+            .sheet(isPresented: $showNoteQueryArtifacts) {
+                NoteQueryArtifactsView(
+                    model: model,
+                    noteId: noteId,
+                    blocks: blocks,
+                    onInsertBlock: { text in Task { await addText(content: text) } }
+                )
+            }
+            .sheet(isPresented: $showOrganization) {
+                NoteOrganizationView(model: model, noteId: noteId) {
+                    onLifecycleChanged?()
+                }
+            }
+            .sheet(isPresented: Binding(
+                get: { openedEvidenceId != nil },
+                set: { if !$0 { openedEvidenceId = nil } }
+            )) {
+                if let openedEvidenceId,
+                   let item = evidence.first(where: { $0.id == openedEvidenceId }) {
+                    NavigationStack {
+                        ResourceDetailView(
+                            model: model,
+                            resourceId: item.payload.sourceId,
+                            initialSourceVersionId: item.payload.sourceVersionId,
+                            initialPageNumber: item.payload.locator.page,
+                            highlightText: item.payload.excerpt,
+                            initialMediaTimeSeconds: item.payload.locator.startSeconds
+                        )
+                    }
+                }
+            }
+    }
+
+    private var editorDestructiveDialogs: some View {
+        editorSheets
+            .confirmationDialog(
+                "Remove this canvas item?",
+                isPresented: Binding(
+                    get: { pendingDeletion != nil },
+                    set: { if !$0 { pendingDeletion = nil } }
+                ),
+                titleVisibility: .visible
+            ) {
+                Button("Remove item", role: .destructive) {
+                    guard let pendingDeletion else { return }
+                    Task { await deleteBlock(pendingDeletion) }
+                    self.pendingDeletion = nil
+                }
+                Button("Cancel", role: .cancel) { pendingDeletion = nil }
+            } message: {
+                Text("The item can be restored while this notebook remains open. Original image bytes are not erased.")
+            }
+            .confirmationDialog(
+                "Clear ink from this page?",
+                isPresented: $showClearInkConfirmation,
+                titleVisibility: .visible
+            ) {
+                Button("Clear ink", role: .destructive) { clearInk() }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Text, images, and ink on other pages stay in place. You can undo from the tool rail before leaving the page.")
+            }
+            .confirmationDialog(
+                "Archive this note?",
+                isPresented: $showArchiveConfirmation,
+                titleVisibility: .visible
+            ) {
+                Button("Move to Archive") { Task { await setArchived(true) } }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("The note stays encrypted and can be restored from Notebook → Archived.")
+            }
+    }
+
+    private var editorExportDialogs: some View {
+        editorDestructiveDialogs
+            .confirmationDialog(
+                "Export this note as a readable PDF?",
+                isPresented: $showPDFExportConfirmation,
+                titleVisibility: .visible
+            ) {
+                Button("Create readable PDF") { startPDFExport() }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("The PDF contains readable personal content. Save it only to a location you trust. The encrypted note is not changed.")
+            }
+            .sheet(item: $pdfExportResult) { result in
+                NotePDFExportReadyView(result: result) {
+                    removePDFExport(result)
+                }
+            }
+            .alert("Notebook needs attention", isPresented: .constant(errorMessage != nil)) {
+                Button("Dismiss", role: .cancel) { errorMessage = nil }
+            } message: {
+                Text(errorMessage ?? "")
+            }
+    }
+
+    private var editorCanvasContent: some View {
         ZStack {
             notebookSurface
 
@@ -162,119 +323,6 @@ struct NoteEditorView: View {
                 .allowsHitTesting(false)
                 .accessibilityElement(children: .combine)
             }
-        }
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar { editorToolbar }
-        .toolbarBackground(.regularMaterial, for: .navigationBar)
-        .fileImporter(
-            isPresented: $isImportingImage,
-            allowedContentTypes: [.image],
-            allowsMultipleSelection: false
-        ) { result in
-            Task { await importImage(result) }
-        }
-        .overlay(alignment: .topLeading) { statusOverlay }
-        .safeAreaInset(edge: .leading, spacing: 0) { notebookToolRail }
-        .safeAreaInset(edge: .bottom, spacing: 0) { transientBottomMessage }
-        .sensoryFeedback(.selection, trigger: currentPageIndex)
-        .onChange(of: currentPageIndex) { _, _ in
-            Task { await currentPageDidChange() }
-        }
-        .task {
-            workspacePresentation?.beginImmersiveEditing(id: immersiveEditorID)
-            await load()
-        }
-        .onDisappear {
-            workspacePresentation?.endImmersiveEditing(id: immersiveEditorID)
-            pdfExportTask?.cancel()
-            pdfExportTask = nil
-            if let pdfExportResult {
-                try? NotePDFExportService.removeTemporaryPDF(pdfExportResult.fileURL)
-                self.pdfExportResult = nil
-            }
-            Task { await saveAll() }
-        }
-        .sheet(isPresented: $showNoteQuerySheet) {
-            NoteQuerySheetView(
-                model: model,
-                noteId: noteId,
-                selection: lassoSelection,
-                onDismiss: {
-                    showNoteQuerySheet = false
-                    mode = .select
-                    lassoSelection = LassoSelection()
-                }
-            )
-        }
-        .sheet(isPresented: $showNoteQueryArtifacts) {
-            NoteQueryArtifactsView(
-                model: model,
-                noteId: noteId,
-                blocks: blocks,
-                onInsertBlock: { text in Task { await addText(content: text) } }
-            )
-        }
-        .sheet(isPresented: $showOrganization) {
-            NoteOrganizationView(model: model, noteId: noteId) {
-                onLifecycleChanged?()
-            }
-        }
-        .confirmationDialog(
-            "Remove this canvas item?",
-            isPresented: Binding(
-                get: { pendingDeletion != nil },
-                set: { if !$0 { pendingDeletion = nil } }
-            ),
-            titleVisibility: .visible
-        ) {
-            Button("Remove item", role: .destructive) {
-                guard let pendingDeletion else { return }
-                Task { await deleteBlock(pendingDeletion) }
-                self.pendingDeletion = nil
-            }
-            Button("Cancel", role: .cancel) { pendingDeletion = nil }
-        } message: {
-            Text("The item can be restored while this notebook remains open. Original image bytes are not erased.")
-        }
-        .confirmationDialog(
-            "Clear ink from this page?",
-            isPresented: $showClearInkConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button("Clear ink", role: .destructive) { clearInk() }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("Text, images, and ink on other pages stay in place. You can undo from the tool rail before leaving the page.")
-        }
-        .confirmationDialog(
-            "Archive this note?",
-            isPresented: $showArchiveConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button("Move to Archive") { Task { await setArchived(true) } }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("The note stays encrypted and can be restored from Notebook → Archived.")
-        }
-        .confirmationDialog(
-            "Export this note as a readable PDF?",
-            isPresented: $showPDFExportConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button("Create readable PDF") { startPDFExport() }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("The PDF contains readable personal content. Save it only to a location you trust. The encrypted note is not changed.")
-        }
-        .sheet(item: $pdfExportResult) { result in
-            NotePDFExportReadyView(result: result) {
-                removePDFExport(result)
-            }
-        }
-        .alert("Notebook needs attention", isPresented: .constant(errorMessage != nil)) {
-            Button("Dismiss", role: .cancel) { errorMessage = nil }
-        } message: {
-            Text(errorMessage ?? "")
         }
     }
 
@@ -350,6 +398,13 @@ struct NoteEditorView: View {
             isReadOnly: isArchived
         )
         .accessibilityIdentifier("note.spatial-canvas.\(pageIndex + 1)")
+        .dropDestination(for: String.self) { values, _ in
+            guard let value = values.first, let evidenceId = UUID(uuidString: value),
+                  evidence.contains(where: { $0.id == evidenceId })
+            else { return false }
+            Task { await addEvidence(evidenceId, pageIndex: pageIndex) }
+            return true
+        }
     }
 
     private func canvasMode(on pageIndex: Int) -> SpatialNotebookMode {
@@ -400,6 +455,13 @@ struct NoteEditorView: View {
             canvasMenu
             Menu {
                 if let selectedBlock, !isArchived {
+                    if let evidenceId = selectedBlock.payload.evidenceId,
+                       let item = evidence.first(where: { $0.id == evidenceId }) {
+                        Button("Open Evidence source", systemImage: "arrow.up.right.square") {
+                            openedEvidenceId = item.id
+                        }
+                        Divider()
+                    }
                     Button("Bring forward", systemImage: "square.2.layers.3d.top.filled") {
                         moveLayer(selectedBlock, direction: 1)
                     }
@@ -674,6 +736,18 @@ struct NoteEditorView: View {
             .disabled(isArchived)
             .accessibilityIdentifier("note.tool.image")
 
+            railToolButton(
+                "Evidence",
+                systemImage: "quote.bubble",
+                selected: showEvidenceShelf
+            ) {
+                withAnimation(.snappy(duration: 0.24, extraBounce: 0)) {
+                    showEvidenceShelf.toggle()
+                }
+            }
+            .accessibilityHint("Shows reusable excerpts anchored to their original Source Version")
+            .accessibilityIdentifier("note.tool.evidence")
+
             if model.aiJobs != nil {
                 railToolButton(
                     lassoSelection.isEmpty ? "Ask" : "Send",
@@ -726,6 +800,132 @@ struct NoteEditorView: View {
         .background(.regularMaterial)
         .overlay(alignment: .trailing) { Divider() }
         .accessibilityElement(children: .contain)
+    }
+
+    private var evidenceShelf: some View {
+        VStack(spacing: 0) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Evidence").font(.headline)
+                    Text("Drag to a page or select Insert")
+                        .font(.caption)
+                        .foregroundStyle(EpistoriaDesign.mutedInk)
+                }
+                Spacer()
+                Button("Close", systemImage: "xmark") { showEvidenceShelf = false }
+                    .labelStyle(.iconOnly)
+            }
+            .padding(16)
+            Divider()
+
+            if evidence.isEmpty {
+                ContentUnavailableView(
+                    "No Evidence yet",
+                    systemImage: "quote.bubble",
+                    description: Text("Create an annotation from a Source. It will remain anchored to that exact version.")
+                )
+                .frame(maxHeight: .infinity)
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 10) {
+                        ForEach(evidence, id: \.id) { item in
+                            evidenceShelfCard(item)
+                                .draggable(item.id.uuidString) {
+                                    evidenceDragPreview(item)
+                                }
+                        }
+                    }
+                    .padding(12)
+                }
+            }
+        }
+        .frame(width: 310)
+        .frame(maxHeight: .infinity)
+        .background(.regularMaterial)
+        .overlay(alignment: .leading) { Divider() }
+        .popover(isPresented: Binding(
+            get: { inspectedEvidenceId != nil },
+            set: { if !$0 { inspectedEvidenceId = nil } }
+        ), arrowEdge: .trailing) {
+            evidenceBacklinksPopover
+                .presentationCompactAdaptation(.popover)
+        }
+        .accessibilityIdentifier("note.evidence-shelf")
+    }
+
+    private func evidenceShelfCard(_ item: IdentifiedPayload<EvidencePayload>) -> some View {
+        VStack(alignment: .leading, spacing: 9) {
+            Text(evidenceDisplayText(item.payload))
+                .font(.subheadline)
+                .lineLimit(5)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Text(evidenceCitation(item.payload))
+                .font(.caption)
+                .foregroundStyle(EpistoriaDesign.mutedInk)
+                .lineLimit(2)
+            HStack {
+                Button("Open source") { openedEvidenceId = item.id }
+                    .buttonStyle(.plain)
+                    .font(.caption.weight(.medium))
+                Button("Backlinks") { Task { await inspectEvidence(item.id) } }
+                    .buttonStyle(.plain)
+                    .font(.caption.weight(.medium))
+                Spacer()
+                Button("Insert") { Task { await addEvidence(item.id, pageIndex: currentPageIndex) } }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(isArchived)
+            }
+        }
+        .padding(12)
+        .background(EpistoriaDesign.page, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(EpistoriaDesign.border, lineWidth: 0.5)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("note.evidence.\(item.id.uuidString)")
+    }
+
+    private var evidenceBacklinksPopover: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Evidence backlinks").font(.headline)
+                Spacer()
+                Button("Close", systemImage: "xmark") { inspectedEvidenceId = nil }
+                    .labelStyle(.iconOnly)
+            }
+            if inspectedEvidenceBacklinks.isEmpty {
+                Text("This Evidence is not used by another note, Concept, card, or test question yet.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(inspectedEvidenceBacklinks) { backlink in
+                    Label {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(backlink.title).lineLimit(2)
+                            Text(backlink.kind.displayName)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    } icon: {
+                        Image(systemName: backlink.kind.symbol)
+                    }
+                }
+            }
+        }
+        .padding(16)
+        .frame(width: 340, alignment: .leading)
+    }
+
+    private func evidenceDragPreview(_ item: IdentifiedPayload<EvidencePayload>) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(evidenceDisplayText(item.payload)).font(.subheadline).lineLimit(3)
+            Text(evidenceCitation(item.payload)).font(.caption).foregroundStyle(.secondary)
+        }
+        .padding(12)
+        .frame(width: 260, alignment: .leading)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 
     private var pageJumpMenu: some View {
@@ -1180,6 +1380,14 @@ struct NoteEditorView: View {
             switch block.payload.blockType {
             case .text, .equation:
                 content = .text(decodeRichText(block.payload))
+            case .callout:
+                if let evidenceId = block.payload.evidenceId,
+                   let item = evidence.first(where: { $0.id == evidenceId }) {
+                    let citation = evidenceCitation(item.payload)
+                    content = .evidence(evidenceAttributedText(item.payload, citation: citation), citation: citation)
+                } else {
+                    content = .unsupported("Evidence unavailable")
+                }
             case .image:
                 if let image = imagePreviews[block.id] {
                     content = .image(image, filename: block.payload.plainText)
@@ -1279,7 +1487,10 @@ struct NoteEditorView: View {
         do {
             async let loadedNote = store.payload(NotePayload.self, id: noteId)
             async let loadedBlocks = store.list(NoteBlockPayload.self, parentId: noteId)
-            let result = try await (loadedNote, loadedBlocks)
+            async let loadedEvidence = store.list(EvidencePayload.self)
+            async let loadedSources = store.list(SourcePayload.self)
+            async let loadedVersions = store.list(SourceVersionPayload.self)
+            let result = try await (loadedNote, loadedBlocks, loadedEvidence, loadedSources, loadedVersions)
             note = result.0
             configuration = result.0.payload.canvas ?? NoteCanvasConfiguration()
             if title != result.0.payload.title {
@@ -1287,6 +1498,15 @@ struct NoteEditorView: View {
                 title = result.0.payload.title
             }
             blocks = result.1.sorted { $0.payload.orderKey < $1.payload.orderKey }
+            let availableSources = result.3.filter { source in
+                guard let topicId = result.0.payload.courseId else { return true }
+                return source.payload.primaryTopicId == topicId
+                    || source.payload.relatedTopicIds.contains(topicId)
+            }
+            sourcesById = Dictionary(uniqueKeysWithValues: availableSources.map { ($0.id, $0) })
+            sourceVersionsById = Dictionary(uniqueKeysWithValues: result.4.map { ($0.id, $0) })
+            evidence = result.2.filter { sourcesById[$0.payload.sourceId] != nil }
+                .sorted { $0.payload.updatedAt > $1.payload.updatedAt }
             if configuration.pageFormat == .infinite {
                 currentPageIndex = 0
             } else if isInitialLoad,
@@ -1432,6 +1652,38 @@ struct NoteEditorView: View {
         } catch { report(error) }
     }
 
+    private func addEvidence(_ evidenceId: UUID, pageIndex: Int) async {
+        guard !isArchived, evidence.contains(where: { $0.id == evidenceId }) else { return }
+        do {
+            try await flushTitle()
+            guard let store = model.store else {
+                throw NoteEditorSaveError.encryptedStoreUnavailable
+            }
+            let width = min(390.0, max((configuration.pageWidth ?? 480) - 72, 260))
+            let placement = placementCentered(width: width, height: 170, zIndex: nextZIndex)
+            let id = try await store.appendCanvasEvidence(
+                noteId: noteId,
+                evidenceId: evidenceId,
+                placement: placement,
+                pageIndex: pageIndex
+            )
+            model.noteLocalMutation()
+            try await refreshBlock(id)
+            currentPageIndex = pageIndex
+            selectedItemId = id
+            editingItemId = nil
+            mode = .select
+        } catch { report(error) }
+    }
+
+    private func inspectEvidence(_ evidenceId: UUID) async {
+        guard let store = model.store else { return }
+        do {
+            inspectedEvidenceBacklinks = try await store.evidenceBacklinks(evidenceId: evidenceId)
+            inspectedEvidenceId = evidenceId
+        } catch { report(error) }
+    }
+
     private func placeActiveTool(at point: CGPoint, pageIndex: Int) async {
         guard pageIndex == currentPageIndex else { return }
         switch mode {
@@ -1542,7 +1794,7 @@ struct NoteEditorView: View {
 
     private func savePlacement(id: UUID, placement: NoteCanvasPlacement) {
         guard !isArchived, var block = blocks.first(where: { $0.id == id }) else { return }
-        block.payload.schemaVersion = "note-block/v4"
+        block.payload.schemaVersion = "note-block/v5"
         block.payload.canvasPlacement = placement
         block.payload.updatedAt = .now
         replaceLocalBlock(block)
@@ -1561,7 +1813,7 @@ struct NoteEditorView: View {
                 from: NSRange(location: 0, length: attributedText.length),
                 documentAttributes: [.documentType: NSAttributedString.DocumentType.rtf]
             )
-            block.payload.schemaVersion = "note-block/v4"
+            block.payload.schemaVersion = "note-block/v5"
             block.payload.plainText = attributedText.string
             block.payload.richTextRtf = rtf
             block.payload.canvasPlacement = placement
@@ -1582,7 +1834,7 @@ struct NoteEditorView: View {
                 id: block.id,
                 payload: snapshot,
                 parentId: snapshot.noteId,
-                relationIds: [snapshot.noteId, snapshot.assetId].compactMap(\.self)
+                relationIds: [snapshot.noteId, snapshot.assetId, snapshot.evidenceId].compactMap(\.self)
             )
             model.noteLocalMutation()
         }
@@ -1615,7 +1867,7 @@ struct NoteEditorView: View {
         inkDataByPage[pageIndex] = value
         if pageIndex == currentPageIndex { inkSaveState = .saving }
         var snapshot = inkBlock.payload
-        snapshot.schemaVersion = "note-block/v4"
+        snapshot.schemaVersion = "note-block/v5"
         snapshot.drawingData = value
         snapshot.updatedAt = .now
         model.pendingSaves.stage(id: inkBlock.id) {
@@ -1788,7 +2040,7 @@ struct NoteEditorView: View {
                 id: deleted.id,
                 payload: deleted.payload,
                 parentId: noteId,
-                relationIds: [noteId, deleted.payload.assetId].compactMap(\.self)
+                relationIds: [noteId, deleted.payload.assetId, deleted.payload.evidenceId].compactMap(\.self)
             )
             recentlyDeleted = nil
             selectedItemId = deleted.id
@@ -2023,6 +2275,73 @@ struct NoteEditorView: View {
         return NSAttributedString(string: payload.plainText, attributes: [.font: font])
     }
 
+    private func evidenceDisplayText(_ payload: EvidencePayload) -> String {
+        let excerpt = payload.excerpt.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !excerpt.isEmpty { return excerpt }
+        return payload.note?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "Evidence"
+    }
+
+    private func evidenceCitation(_ payload: EvidencePayload) -> String {
+        let source = sourcesById[payload.sourceId]?.payload.title ?? "Source"
+        let version: String
+        if let number = sourceVersionsById[payload.sourceVersionId]?.payload.versionNumber {
+            version = "Version \(number)"
+        } else {
+            version = "Saved version"
+        }
+        return "\(source) · \(evidenceLocatorLabel(payload.locator)) · \(version)"
+    }
+
+    private func evidenceLocatorLabel(_ locator: SourceLocator) -> String {
+        switch locator.kind {
+        case .pdf: return locator.page.map { "Page \($0)" } ?? "PDF"
+        case .epub: return locator.chapter ?? "EPUB location"
+        case .web: return locator.heading ?? "Web excerpt"
+        case .media:
+            let start = evidenceMediaTimeLabel(locator.startSeconds ?? 0)
+            guard let end = locator.endSeconds, end > (locator.startSeconds ?? 0) else { return start }
+            return "\(start)–\(evidenceMediaTimeLabel(end))"
+        case .document: return locator.heading ?? locator.page.map { "Page \($0)" } ?? "Document excerpt"
+        case .image: return "Image region"
+        case .plainText: return "Text excerpt"
+        case .slide: return locator.slide.map { "Slide \($0)" } ?? "Slide excerpt"
+        case .sheet:
+            let value = [locator.sheet, locator.cellRange].compactMap(\.self).joined(separator: " · ")
+            return value.isEmpty ? "Sheet excerpt" : value
+        }
+    }
+
+    private func evidenceMediaTimeLabel(_ value: Double) -> String {
+        let seconds = max(Int(value.isFinite ? value.rounded(.down) : 0), 0)
+        let hours = seconds / 3_600
+        let minutes = (seconds % 3_600) / 60
+        let remainder = seconds % 60
+        return hours > 0
+            ? String(format: "%d:%02d:%02d", hours, minutes, remainder)
+            : String(format: "%d:%02d", minutes, remainder)
+    }
+
+    private func evidenceAttributedText(
+        _ payload: EvidencePayload,
+        citation: String
+    ) -> NSAttributedString {
+        let value = NSMutableAttributedString(
+            string: evidenceDisplayText(payload),
+            attributes: [
+                .font: UIFont.preferredFont(forTextStyle: .body),
+                .foregroundColor: UIColor.label,
+            ]
+        )
+        value.append(NSAttributedString(
+            string: "\n\n\(citation)",
+            attributes: [
+                .font: UIFont.preferredFont(forTextStyle: .caption1),
+                .foregroundColor: UIColor.secondaryLabel,
+            ]
+        ))
+        return value
+    }
+
     private func downsampledImage(_ data: Data) -> UIImage? {
         guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
         let options: [CFString: Any] = [
@@ -2038,6 +2357,26 @@ struct NoteEditorView: View {
 
     private func report(_ error: Error) {
         errorMessage = error.localizedDescription
+    }
+}
+
+private extension EvidenceBacklinkKind {
+    var displayName: String {
+        switch self {
+        case .note: "Note"
+        case .concept: "Concept"
+        case .flashcard: "Flashcard"
+        case .testQuestion: "Test question"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .note: "note.text"
+        case .concept: "point.3.connected.trianglepath.dotted"
+        case .flashcard: "rectangle.stack"
+        case .testQuestion: "checkmark.square"
+        }
     }
 }
 

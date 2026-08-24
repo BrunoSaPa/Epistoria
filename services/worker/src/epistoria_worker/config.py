@@ -42,6 +42,8 @@ class WorkerSettings:
     prompt_version: str = "session-digest/v1"
     input_usd_per_million: float | None = None
     output_usd_per_million: float | None = None
+    transcription_model: str = "whisper-1"
+    transcription_usd_per_minute: float | None = 0.006
     poll_seconds: float = 10.0
     maximum_asset_bytes: int = 268_435_456
     keychain_service: str = "com.epistoria.worker.account-key"
@@ -92,6 +94,14 @@ class WorkerSettings:
             ),
             input_usd_per_million=_optional_float("EPISTORIA_MODEL_INPUT_USD_PER_MILLION"),
             output_usd_per_million=_optional_float("EPISTORIA_MODEL_OUTPUT_USD_PER_MILLION"),
+            transcription_model=os.environ.get(
+                "EPISTORIA_TRANSCRIPTION_MODEL", "whisper-1"
+            ).strip(),
+            transcription_usd_per_minute=(
+                _optional_float("EPISTORIA_TRANSCRIPTION_USD_PER_MINUTE")
+                if os.environ.get("EPISTORIA_TRANSCRIPTION_USD_PER_MINUTE", "").strip()
+                else 0.006
+            ),
             poll_seconds=poll_seconds,
             maximum_asset_bytes=maximum_asset_bytes,
             keychain_service=os.environ.get(

@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 public enum DigestSourceKind: String, Codable, Sendable {
@@ -20,8 +21,65 @@ public enum LearningAIJobType: String, Codable, CaseIterable, Sendable {
     case weeklyReview = "WEEKLY_REVIEW"
 }
 
+public extension AutomationJobKind {
+    var learningJobType: LearningAIJobType? {
+        switch self {
+        case .topicSynthesis: .topicSynthesis
+        case .flashcardDrafts: .flashcardDrafts
+        case .conceptSuggestions: .conceptSuggestions
+        case .sourceDiscovery: .sourceDiscovery
+        case .weeklyReview: .weeklyReview
+        default: nil
+        }
+    }
+}
+
+public struct TestGenerationPlan: Codable, Equatable, Sendable {
+    public var schemaVersion = "test-generation-plan/v1"
+    public var mode: TestMode
+    public var questionCount: Int
+    public var timeLimitMinutes: Int?
+    public var coverageDimensions: [TestCoverageDimension]
+    public var objectiveTitles: [String]
+
+    public init(
+        mode: TestMode,
+        questionCount: Int,
+        timeLimitMinutes: Int? = nil,
+        coverageDimensions: [TestCoverageDimension],
+        objectiveTitles: [String]
+    ) {
+        self.mode = mode
+        self.questionCount = min(max(questionCount, 1), 100)
+        self.timeLimitMinutes = timeLimitMinutes.map { min(max($0, 1), 600) }
+        self.coverageDimensions = coverageDimensions.reduce(into: []) { result, dimension in
+            if !result.contains(dimension) { result.append(dimension) }
+        }
+        self.objectiveTitles = objectiveTitles.reduce(into: []) { result, rawTitle in
+            let title = rawTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !title.isEmpty,
+                  !result.contains(where: { $0.localizedCaseInsensitiveCompare(title) == .orderedSame })
+            else { return }
+            result.append(title)
+        }
+    }
+}
+
+public struct DetectedTestObjective: Equatable, Sendable, Identifiable {
+    public var title: String
+    public var supportingRecordCount: Int
+    public var origin: String
+    public var id: String { title.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current) }
+
+    public init(title: String, supportingRecordCount: Int, origin: String) {
+        self.title = title
+        self.supportingRecordCount = max(supportingRecordCount, 1)
+        self.origin = origin
+    }
+}
+
 public struct LearningGenerationRequest: Codable, Equatable, Sendable {
-    public var schemaVersion = "learning-generation-request/v1"
+    public var schemaVersion = "learning-generation-request/v4"
     public var accountId: UUID
     public var jobId: UUID
     public var jobType: LearningAIJobType
@@ -29,8 +87,68 @@ public struct LearningGenerationRequest: Codable, Equatable, Sendable {
     public var includeConnectedKnowledge: Bool
     public var userInstructions: String?
     public var sources: [DigestSourceExcerpt]
+    public var knownConcepts: [KnownConceptReference]?
     public var objectiveTitles: [String]
+    public var testPlan: TestGenerationPlan? = nil
+    public var automationAuthorization: AutomationAuthorization? = nil
     public var disclosureAcknowledged: Bool
+}
+
+public struct KnownConceptReference: Codable, Equatable, Sendable, Identifiable {
+    public var id: UUID
+    public var name: String
+    public var aliases: [String]
+
+    public init(id: UUID, name: String, aliases: [String] = []) {
+        self.id = id
+        self.name = name
+        self.aliases = aliases
+    }
+}
+
+public struct AutomationAuthorization: Codable, Equatable, Sendable {
+    public var schemaVersion = "automation-authorization/v1"
+    public var grantId: UUID
+    public var topicIds: [UUID]
+    public var jobTypes: [LearningAIJobType]
+    public var minimumIntervalHours: Int
+    public var expiresAt: Date
+    public var spendingLimitMinorUnits: Int
+    public var currencyCode: String
+    public var authorizedAt: Date
+    public var scopeKey: String
+    public var inputFingerprint: String
+
+    public init(
+        grantId: UUID,
+        topicIds: [UUID],
+        jobTypes: [LearningAIJobType],
+        minimumIntervalHours: Int,
+        expiresAt: Date,
+        spendingLimitMinorUnits: Int,
+        currencyCode: String,
+        authorizedAt: Date,
+        scopeKey: String,
+        inputFingerprint: String
+    ) {
+        self.grantId = grantId
+        self.topicIds = topicIds
+        self.jobTypes = jobTypes
+        self.minimumIntervalHours = max(minimumIntervalHours, 1)
+        self.expiresAt = expiresAt
+        self.spendingLimitMinorUnits = max(spendingLimitMinorUnits, 0)
+        self.currencyCode = currencyCode
+        self.authorizedAt = authorizedAt
+        self.scopeKey = scopeKey
+        self.inputFingerprint = inputFingerprint
+    }
+}
+
+public enum AutomationQueueOutcome: Equatable, Sendable {
+    case queued(jobId: UUID, grantId: UUID, topicId: UUID, jobType: LearningAIJobType)
+    case unchanged(grantId: UUID, topicId: UUID, jobType: LearningAIJobType)
+    case notDue(grantId: UUID, topicId: UUID, jobType: LearningAIJobType)
+    case unavailable(grantId: UUID, topicId: UUID, jobType: LearningAIJobType, reason: String)
 }
 
 public struct LearningDraftItem: Codable, Equatable, Sendable, Identifiable {
@@ -68,13 +186,54 @@ public struct LearningGenerationResponse: Codable, Equatable, Sendable {
     public var schemaVersion: String
     public var summary: String
     public var items: [LearningDraftItem]
+    public var conceptLinks: [ConceptLinkDraft]?
     public var coverageGaps: [String]
 
-    public init(schemaVersion: String = "learning-generation-response/v1", summary: String, items: [LearningDraftItem], coverageGaps: [String] = []) {
+    public init(
+        schemaVersion: String = "learning-generation-response/v2",
+        summary: String,
+        items: [LearningDraftItem],
+        conceptLinks: [ConceptLinkDraft] = [],
+        coverageGaps: [String] = []
+    ) {
         self.schemaVersion = schemaVersion
         self.summary = summary
         self.items = items
+        self.conceptLinks = conceptLinks
         self.coverageGaps = coverageGaps
+    }
+
+    public var resolvedConceptLinks: [ConceptLinkDraft] { conceptLinks ?? [] }
+}
+
+public struct ConceptLinkDraft: Codable, Equatable, Sendable, Identifiable {
+    public var id: UUID
+    public var sourceConceptId: UUID?
+    public var sourceConceptName: String
+    public var targetConceptId: UUID?
+    public var targetConceptName: String
+    public var relation: ConceptLinkKind
+    public var rationale: String
+    public var citedSourceIds: [UUID]
+
+    public init(
+        id: UUID = UUID(),
+        sourceConceptId: UUID? = nil,
+        sourceConceptName: String,
+        targetConceptId: UUID? = nil,
+        targetConceptName: String,
+        relation: ConceptLinkKind,
+        rationale: String,
+        citedSourceIds: [UUID]
+    ) {
+        self.id = id
+        self.sourceConceptId = sourceConceptId
+        self.sourceConceptName = sourceConceptName
+        self.targetConceptId = targetConceptId
+        self.targetConceptName = targetConceptName
+        self.relation = relation
+        self.rationale = rationale
+        self.citedSourceIds = citedSourceIds
     }
 }
 
@@ -92,12 +251,14 @@ public struct LearningGenerationArtifact: EntityPayload, Equatable {
     public var reviewState: AIArtifactReviewState?
     public var reviewedAt: Date?
     public var editedResponse: LearningGenerationResponse?
+    public var testPlan: TestGenerationPlan?
+    public var knownConceptIds: [UUID]?
 
     public var createdAt: Date { generatedAt }
     public var updatedAt: Date { reviewedAt ?? generatedAt }
 
     public init(
-        schemaVersion: String = "ai-artifact/learning-generation/v1",
+        schemaVersion: String = "ai-artifact/learning-generation/v2",
         jobId: UUID,
         jobType: LearningAIJobType,
         topicId: UUID,
@@ -105,7 +266,9 @@ public struct LearningGenerationArtifact: EntityPayload, Equatable {
         generatedAt: Date,
         sourceIds: [UUID],
         trace: ProviderTrace,
-        response: LearningGenerationResponse
+        response: LearningGenerationResponse,
+        testPlan: TestGenerationPlan? = nil,
+        knownConceptIds: [UUID] = []
     ) {
         self.schemaVersion = schemaVersion
         self.jobId = jobId
@@ -119,12 +282,137 @@ public struct LearningGenerationArtifact: EntityPayload, Equatable {
         reviewState = nil
         reviewedAt = nil
         editedResponse = nil
+        self.testPlan = testPlan
+        self.knownConceptIds = knownConceptIds
     }
 }
 
 public struct PreparedLearningGenerationRequest: Equatable, Sendable {
     public var request: LearningGenerationRequest
     public var sourceCount: Int
+    public var approximateTokens: Int
+}
+
+public enum FeedbackEvidenceKind: String, Codable, Sendable {
+    case questionSnapshot = "QUESTION_SNAPSHOT"
+    case noteBlock = "NOTE_BLOCK"
+    case evidence = "EVIDENCE"
+}
+
+public struct FeedbackEvidenceExcerpt: Codable, Equatable, Sendable {
+    public var sourceId: UUID
+    public var sourceKind: FeedbackEvidenceKind
+    public var title: String
+    public var locator: String
+    public var excerpt: String
+
+    public init(
+        sourceId: UUID,
+        sourceKind: FeedbackEvidenceKind,
+        title: String,
+        locator: String,
+        excerpt: String
+    ) {
+        self.sourceId = sourceId
+        self.sourceKind = sourceKind
+        self.title = title
+        self.locator = locator
+        self.excerpt = excerpt
+    }
+}
+
+public struct FreeResponseFeedbackRequest: Codable, Equatable, Sendable {
+    public var schemaVersion = "free-response-feedback-request/v1"
+    public var accountId: UUID
+    public var jobId: UUID
+    public var attemptId: UUID
+    public var responseId: UUID
+    public var questionId: UUID
+    public var topicId: UUID
+    public var questionKind: TestQuestionKind
+    public var prompt: String
+    public var rubric: String
+    public var referenceAnswer: String
+    public var userResponse: String
+    public var confidence: Int?
+    public var evidence: [FeedbackEvidenceExcerpt]
+    public var disclosureAcknowledged: Bool
+}
+
+public struct FreeResponseFeedbackResponse: Codable, Equatable, Sendable {
+    public var schemaVersion = "free-response-feedback-response/v1"
+    public var feedback: String
+    public var strengths: [String]
+    public var improvements: [String]
+    public var proposedScore: Double
+    public var uncertainty: String
+    public var citedSourceIds: [UUID]
+
+    public init(
+        feedback: String,
+        strengths: [String] = [],
+        improvements: [String] = [],
+        proposedScore: Double,
+        uncertainty: String,
+        citedSourceIds: [UUID]
+    ) {
+        self.feedback = feedback
+        self.strengths = strengths
+        self.improvements = improvements
+        self.proposedScore = min(max(proposedScore, 0), 1)
+        self.uncertainty = uncertainty
+        self.citedSourceIds = citedSourceIds
+    }
+}
+
+public struct FreeResponseFeedbackArtifact: EntityPayload, Equatable {
+    public static let entityType = EntityType.aiArtifact
+    public var schemaVersion = "ai-artifact/free-response-feedback/v1"
+    public var jobId: UUID
+    public var attemptId: UUID
+    public var responseId: UUID
+    public var questionId: UUID
+    public var topicId: UUID
+    public var generatedAt: Date
+    public var sourceIds: [UUID]
+    public var trace: ProviderTrace
+    public var response: FreeResponseFeedbackResponse
+    public var reviewState: AIArtifactReviewState?
+    public var reviewedAt: Date?
+    public var editedResponse: FreeResponseFeedbackResponse?
+
+    public var createdAt: Date { generatedAt }
+    public var updatedAt: Date { reviewedAt ?? generatedAt }
+
+    public init(
+        jobId: UUID,
+        attemptId: UUID,
+        responseId: UUID,
+        questionId: UUID,
+        topicId: UUID,
+        generatedAt: Date,
+        sourceIds: [UUID],
+        trace: ProviderTrace,
+        response: FreeResponseFeedbackResponse
+    ) {
+        self.jobId = jobId
+        self.attemptId = attemptId
+        self.responseId = responseId
+        self.questionId = questionId
+        self.topicId = topicId
+        self.generatedAt = generatedAt
+        self.sourceIds = sourceIds
+        self.trace = trace
+        self.response = response
+        reviewState = nil
+        reviewedAt = nil
+        editedResponse = nil
+    }
+}
+
+public struct PreparedFreeResponseFeedbackRequest: Equatable, Sendable {
+    public var request: FreeResponseFeedbackRequest
+    public var evidenceCount: Int
     public var approximateTokens: Int
 }
 
@@ -368,12 +656,186 @@ public struct PDFExtractionManifest: EntityPayload, Equatable {
     public var updatedAt: Date { generatedAt }
 }
 
+public struct MediaTranscriptionRequest: Codable, Equatable, Sendable {
+    public var schemaVersion = "media-transcription-request/v1"
+    public var accountId: UUID
+    public var jobId: UUID
+    public var sourceId: UUID
+    public var sourceVersionId: UUID
+    public var sourceType: ResourceKind
+    public var assetId: UUID
+    public var assetKey: String
+    public var expectedDedupeTag: String
+    public var expectedPlaintextBytes: Int64
+    public var filename: String
+    public var mimeType: String
+    public var language: String?
+    public var disclosureAcknowledged: Bool
+}
+
+public struct TranscriptSegment: Codable, Equatable, Sendable, Identifiable {
+    public var index: Int
+    public var startSeconds: Double
+    public var endSeconds: Double
+    public var text: String
+    public var id: Int { index }
+
+    public init(index: Int, startSeconds: Double, endSeconds: Double, text: String) {
+        self.index = index
+        self.startSeconds = startSeconds
+        self.endSeconds = endSeconds
+        self.text = text
+    }
+}
+
+public enum TranscriptCorrectionState: String, Codable, Sendable {
+    case active = "ACTIVE"
+    case superseded = "SUPERSEDED"
+    case retracted = "RETRACTED"
+}
+
+/// An owner-authored correction. The generated transcript chunk remains immutable.
+public struct TranscriptCorrectionPayload: EntityPayload, Equatable {
+    public static let entityType = EntityType.transcriptCorrection
+    public var schemaVersion = "transcript-correction/v1"
+    public var sourceId: UUID
+    public var sourceVersionId: UUID
+    public var transcriptionArtifactId: UUID
+    public var segmentIndex: Int
+    public var startSeconds: Double
+    public var endSeconds: Double
+    public var originalText: String
+    public var correctedText: String
+    public var reason: String?
+    public var state: TranscriptCorrectionState
+    public var supersedesCorrectionId: UUID?
+    public var createdAt: Date
+    public var updatedAt: Date
+
+    public init(
+        sourceId: UUID,
+        sourceVersionId: UUID,
+        transcriptionArtifactId: UUID,
+        segment: TranscriptSegment,
+        correctedText: String,
+        reason: String? = nil,
+        supersedesCorrectionId: UUID? = nil,
+        now: Date = .now
+    ) {
+        self.sourceId = sourceId
+        self.sourceVersionId = sourceVersionId
+        self.transcriptionArtifactId = transcriptionArtifactId
+        segmentIndex = segment.index
+        startSeconds = segment.startSeconds
+        endSeconds = segment.endSeconds
+        originalText = segment.text
+        self.correctedText = correctedText
+        self.reason = reason
+        state = .active
+        self.supersedesCorrectionId = supersedesCorrectionId
+        createdAt = now
+        updatedAt = now
+    }
+}
+
+/// Local projection combining one immutable provider segment with an optional active correction.
+public struct ReviewedTranscriptSegment: Identifiable, Equatable, Sendable {
+    public var original: TranscriptSegment
+    public var text: String
+    public var correctionId: UUID?
+    public var id: Int { original.index }
+
+    public init(original: TranscriptSegment, text: String, correctionId: UUID?) {
+        self.original = original
+        self.text = text
+        self.correctionId = correctionId
+    }
+}
+
+public struct MediaTranscriptionChunk: Codable, Equatable, Sendable {
+    public var schemaVersion = "media-transcription-chunk/v1"
+    public var jobId: UUID
+    public var sourceId: UUID
+    public var sourceVersionId: UUID
+    public var chunkIndex: Int
+    public var segments: [TranscriptSegment]
+
+    public init(
+        jobId: UUID,
+        sourceId: UUID,
+        sourceVersionId: UUID,
+        chunkIndex: Int,
+        segments: [TranscriptSegment]
+    ) {
+        self.jobId = jobId
+        self.sourceId = sourceId
+        self.sourceVersionId = sourceVersionId
+        self.chunkIndex = chunkIndex
+        self.segments = segments
+    }
+}
+
+public struct MediaTranscriptionManifest: EntityPayload, Equatable {
+    public static let entityType = EntityType.aiArtifact
+    public var schemaVersion = "ai-artifact/media-transcription/v1"
+    public var jobId: UUID
+    public var sourceId: UUID
+    public var sourceVersionId: UUID
+    public var generatedAt: Date
+    public var language: String?
+    public var durationSeconds: Double
+    public var characterCount: Int
+    public var segmentCount: Int
+    public var trace: ProviderTrace
+    public var chunkEntityIds: [UUID]
+    public var reviewState: AIArtifactReviewState?
+    public var reviewedAt: Date?
+    public var createdAt: Date { generatedAt }
+    public var updatedAt: Date { reviewedAt ?? generatedAt }
+
+    public init(
+        jobId: UUID,
+        sourceId: UUID,
+        sourceVersionId: UUID,
+        generatedAt: Date,
+        language: String?,
+        durationSeconds: Double,
+        characterCount: Int,
+        segmentCount: Int,
+        trace: ProviderTrace,
+        chunkEntityIds: [UUID],
+        reviewState: AIArtifactReviewState? = nil,
+        reviewedAt: Date? = nil
+    ) {
+        self.jobId = jobId
+        self.sourceId = sourceId
+        self.sourceVersionId = sourceVersionId
+        self.generatedAt = generatedAt
+        self.language = language
+        self.durationSeconds = durationSeconds
+        self.characterCount = characterCount
+        self.segmentCount = segmentCount
+        self.trace = trace
+        self.chunkEntityIds = chunkEntityIds
+        self.reviewState = reviewState
+        self.reviewedAt = reviewedAt
+    }
+}
+
 public enum AIJobCoordinatorError: Error, Equatable {
     case sessionNotEnded
     case noReadableSources
     case disclosureNotAcknowledged
     case resourceHasNoPDF
+    case sourceHasNoTranscribableMedia
+    case transcriptionFormatUnsupported
+    case transcriptionMediaTooLarge
     case topicRequired
+    case invalidTestPlan
+    case feedbackRequiresSubmittedResponse
+    case attemptNotSubmitted
+    case responseEmpty
+    case questionNotFound
 }
 
 extension AIJobCoordinatorError: LocalizedError {
@@ -383,7 +845,19 @@ extension AIJobCoordinatorError: LocalizedError {
         case .noReadableSources: "This scope does not contain readable note text or Evidence yet."
         case .disclosureNotAcknowledged: "Review and approve the disclosure before queueing this request."
         case .resourceHasNoPDF: "This Source does not contain a PDF that the trusted Mac can extract."
+        case .sourceHasNoTranscribableMedia:
+            "This Source does not contain a current local audio or video version."
+        case .transcriptionFormatUnsupported:
+            "This transcription stage supports MP3, M4A, WAV, and MP4 files."
+        case .transcriptionMediaTooLarge:
+            "This recording exceeds the current 25 MB transcription limit. Import a smaller copy before trying again."
         case .topicRequired: "Choose a Topic before creating a learning request."
+        case .invalidTestPlan: "A test plan needs at least one objective and one coverage dimension."
+        case .feedbackRequiresSubmittedResponse:
+            "Free-response feedback must be requested from a submitted test response."
+        case .attemptNotSubmitted: "Submit the test before requesting feedback."
+        case .responseEmpty: "Write an answer before requesting feedback."
+        case .questionNotFound: "The frozen question is no longer available in this attempt."
         }
     }
 }
@@ -568,6 +1042,99 @@ public actor AIJobCoordinator {
         return nil
     }
 
+    public func submitMediaTranscription(
+        sourceId: UUID,
+        language: String? = nil,
+        disclosureAcknowledged: Bool
+    ) async throws -> AIJobSummary {
+        guard disclosureAcknowledged else {
+            throw AIJobCoordinatorError.disclosureNotAcknowledged
+        }
+        let source = try await store.payload(SourcePayload.self, id: sourceId).payload
+        guard [.audio, .video].contains(source.sourceType),
+              let sourceVersionId = source.currentVersionId,
+              let assetId = source.originalAssetId
+        else { throw AIJobCoordinatorError.sourceHasNoTranscribableMedia }
+        let version = try await store.payload(SourceVersionPayload.self, id: sourceVersionId).payload
+        guard version.sourceId == sourceId, version.originalAssetId == assetId else {
+            throw AIJobCoordinatorError.sourceHasNoTranscribableMedia
+        }
+        let asset = try await store.payload(AssetPayload.self, id: assetId).payload
+        guard asset.plaintextByteSize <= 25 * 1_024 * 1_024 else {
+            throw AIJobCoordinatorError.transcriptionMediaTooLarge
+        }
+        let ext = URL(fileURLWithPath: asset.originalFilename).pathExtension.lowercased()
+        let supportedExtensions = source.sourceType == .audio
+            ? ["mp3", "m4a", "wav"]
+            : ["mp4"]
+        guard supportedExtensions.contains(ext) else {
+            throw AIJobCoordinatorError.transcriptionFormatUnsupported
+        }
+        let cleanLanguage = language?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let jobId = UUID()
+        let request = MediaTranscriptionRequest(
+            accountId: accountId,
+            jobId: jobId,
+            sourceId: sourceId,
+            sourceVersionId: sourceVersionId,
+            sourceType: source.sourceType,
+            assetId: assetId,
+            assetKey: asset.assetKey,
+            expectedDedupeTag: asset.dedupeTag,
+            expectedPlaintextBytes: asset.plaintextByteSize,
+            filename: asset.originalFilename,
+            mimeType: asset.mimeType,
+            language: cleanLanguage?.isEmpty == false ? cleanLanguage : nil,
+            disclosureAcknowledged: true
+        )
+        let envelope = try crypto.encryptJob(
+            CanonicalJSON.encode(request),
+            accountKey: accountKey,
+            accountId: accountId,
+            jobType: "TRANSCRIPTION",
+            jobId: jobId
+        )
+        return try await api.createAIJob(id: jobId, type: "TRANSCRIPTION", envelope: envelope)
+    }
+
+    public func latestMediaTranscription(
+        sourceId: UUID,
+        sourceVersionId: UUID? = nil
+    ) async throws -> IdentifiedPayload<MediaTranscriptionManifest>? {
+        let candidates = try await database.entities(type: .aiArtifact, parentId: sourceId)
+            .compactMap { entity -> IdentifiedPayload<MediaTranscriptionManifest>? in
+                guard let artifact = try? CanonicalJSON.decode(
+                    MediaTranscriptionManifest.self,
+                    from: entity.content
+                ), artifact.sourceId == sourceId,
+                   sourceVersionId.map({ artifact.sourceVersionId == $0 }) ?? true
+                else { return nil }
+                return IdentifiedPayload(
+                    id: entity.id,
+                    payload: artifact,
+                    revision: entity.revision,
+                    syncState: entity.syncState
+                )
+            }
+        return candidates.max { $0.payload.generatedAt < $1.payload.generatedAt }
+    }
+
+    public func mediaTranscriptionSegments(
+        manifest: MediaTranscriptionManifest
+    ) async throws -> [TranscriptSegment] {
+        var chunks: [MediaTranscriptionChunk] = []
+        for id in manifest.chunkEntityIds {
+            guard let entity = try await database.entity(id: id),
+                  let chunk = try? CanonicalJSON.decode(MediaTranscriptionChunk.self, from: entity.content),
+                  chunk.jobId == manifest.jobId,
+                  chunk.sourceId == manifest.sourceId,
+                  chunk.sourceVersionId == manifest.sourceVersionId
+            else { throw StoreError.entityNotFound }
+            chunks.append(chunk)
+        }
+        return chunks.sorted { $0.chunkIndex < $1.chunkIndex }.flatMap(\.segments)
+    }
+
     // MARK: - Note Query
 
     public func prepareNoteQuery(
@@ -707,26 +1274,230 @@ public actor AIJobCoordinator {
         .sorted { $0.payload.generatedAt > $1.payload.generatedAt }
     }
 
+    public func detectTestObjectives(
+        topicId: UUID,
+        includeConnectedKnowledge: Bool = false
+    ) async throws -> [DetectedTestObjective] {
+        _ = try await store.topic(id: topicId)
+        let scopedTopicIds = try await topicScopeIds(
+            topicId: topicId,
+            includeConnectedKnowledge: includeConnectedKnowledge
+        )
+        let concepts = try await store.list(ConceptPayload.self).filter {
+            $0.payload.state == .active && !$0.payload.topicIds.filter(scopedTopicIds.contains).isEmpty
+        }
+        let sources = try await store.list(SourcePayload.self).filter {
+            $0.payload.archivedAt == nil
+                && ($0.payload.primaryTopicId.map(scopedTopicIds.contains) == true
+                    || !$0.payload.relatedTopicIds.filter(scopedTopicIds.contains).isEmpty)
+        }
+        let notes = try await store.list(NotePayload.self).filter {
+            $0.payload.archivedAt == nil && ($0.payload.courseId.map(scopedTopicIds.contains) ?? false)
+        }
+        let questions = try await store.list(UnresolvedQuestionPayload.self).filter {
+            $0.payload.resolvedAt == nil && scopedTopicIds.contains($0.payload.topicId)
+        }
+
+        struct Candidate {
+            var title: String
+            var count: Int
+            var origin: String
+        }
+        var candidates: [String: Candidate] = [:]
+        func add(_ rawTitle: String, origin: String) {
+            let title = rawTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !title.isEmpty, title.localizedCaseInsensitiveCompare("Untitled") != .orderedSame else { return }
+            let key = title.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+            if var existing = candidates[key] {
+                existing.count += 1
+                candidates[key] = existing
+            } else {
+                candidates[key] = Candidate(title: title, count: 1, origin: origin)
+            }
+        }
+        concepts.forEach { add($0.payload.name, origin: "Concept") }
+        sources.forEach { add($0.payload.title, origin: "Source") }
+        notes.forEach { add($0.payload.title, origin: "Note") }
+        questions.forEach { add($0.payload.question, origin: "Open question") }
+
+        return candidates.values
+            .sorted {
+                if $0.count != $1.count { return $0.count > $1.count }
+                return $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending
+            }
+            .prefix(50)
+            .map { DetectedTestObjective(
+                title: $0.title,
+                supportingRecordCount: $0.count,
+                origin: $0.origin
+            ) }
+    }
+
+    public func prepareFreeResponseFeedback(
+        attemptId: UUID,
+        responseId: UUID
+    ) async throws -> PreparedFreeResponseFeedbackRequest {
+        let attempt = try await store.payload(TestAttemptPayload.self, id: attemptId)
+        guard [.submitted, .scored].contains(attempt.payload.state) else {
+            throw AIJobCoordinatorError.attemptNotSubmitted
+        }
+        let savedResponse = try await store.payload(TestResponsePayload.self, id: responseId)
+        guard savedResponse.payload.attemptId == attemptId else {
+            throw AIJobCoordinatorError.questionNotFound
+        }
+        let userResponse = savedResponse.payload.response
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !userResponse.isEmpty, !savedResponse.payload.isSkipped else {
+            throw AIJobCoordinatorError.responseEmpty
+        }
+        guard let question = attempt.payload.frozenQuestions.first(where: {
+            $0.questionId == savedResponse.payload.questionId
+        }) else { throw AIJobCoordinatorError.questionNotFound }
+
+        let snapshotText = """
+        Question: \(question.prompt)
+        Grading guide: \(question.rubric)
+        Reference answer: \(question.correctAnswer)
+        """
+        var evidence = [FeedbackEvidenceExcerpt(
+            sourceId: question.questionId,
+            sourceKind: .questionSnapshot,
+            title: "Frozen question and grading guide",
+            locator: "attempt \(attemptId.uuidString), question \(question.questionId.uuidString)",
+            excerpt: String(snapshotText.prefix(12_000))
+        )]
+        var seenIds: Set<UUID> = [question.questionId]
+        for evidenceId in question.evidenceIds where !seenIds.contains(evidenceId) {
+            guard let entity = try await database.entity(id: evidenceId) else { continue }
+            let excerpt: FeedbackEvidenceExcerpt?
+            switch entity.entityType {
+            case .noteBlock:
+                guard let block = try? CanonicalJSON.decode(NoteBlockPayload.self, from: entity.content) else {
+                    continue
+                }
+                let text = [block.plainText, block.transcription]
+                    .compactMap(\ .self)
+                    .joined(separator: "\n")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                excerpt = text.isEmpty ? nil : FeedbackEvidenceExcerpt(
+                    sourceId: evidenceId,
+                    sourceKind: .noteBlock,
+                    title: "Note evidence",
+                    locator: "note block \(evidenceId.uuidString)",
+                    excerpt: String(text.prefix(12_000))
+                )
+            case .evidence:
+                guard let item = try? CanonicalJSON.decode(EvidencePayload.self, from: entity.content) else {
+                    continue
+                }
+                let text = [item.excerpt, item.note]
+                    .compactMap(\ .self)
+                    .joined(separator: "\n")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                excerpt = text.isEmpty ? nil : FeedbackEvidenceExcerpt(
+                    sourceId: evidenceId,
+                    sourceKind: .evidence,
+                    title: "Saved Evidence",
+                    locator: item.locator.kind.rawValue,
+                    excerpt: String(text.prefix(12_000))
+                )
+            default:
+                excerpt = nil
+            }
+            if let excerpt {
+                evidence.append(excerpt)
+                seenIds.insert(evidenceId)
+            }
+            if evidence.count == 50 { break }
+        }
+
+        let jobId = UUID()
+        let request = FreeResponseFeedbackRequest(
+            accountId: accountId,
+            jobId: jobId,
+            attemptId: attemptId,
+            responseId: responseId,
+            questionId: question.questionId,
+            topicId: attempt.payload.topicId,
+            questionKind: question.kind,
+            prompt: question.prompt,
+            rubric: question.rubric,
+            referenceAnswer: question.correctAnswer,
+            userResponse: userResponse,
+            confidence: savedResponse.payload.confidence,
+            evidence: evidence,
+            disclosureAcknowledged: false
+        )
+        let characterCount = evidence.reduce(0) { $0 + $1.excerpt.count }
+            + request.prompt.count + request.rubric.count
+            + request.referenceAnswer.count + request.userResponse.count
+        return PreparedFreeResponseFeedbackRequest(
+            request: request,
+            evidenceCount: evidence.count,
+            approximateTokens: max(1, characterCount / 4)
+        )
+    }
+
+    public func submitFreeResponseFeedback(
+        _ prepared: PreparedFreeResponseFeedbackRequest
+    ) async throws -> AIJobSummary {
+        var request = prepared.request
+        guard !request.evidence.isEmpty else { throw AIJobCoordinatorError.noReadableSources }
+        request.disclosureAcknowledged = true
+        let type = LearningAIJobType.freeResponseFeedback.rawValue
+        let envelope = try crypto.encryptJob(
+            CanonicalJSON.encode(request),
+            accountKey: accountKey,
+            accountId: accountId,
+            jobType: type,
+            jobId: request.jobId
+        )
+        return try await api.createAIJob(id: request.jobId, type: type, envelope: envelope)
+    }
+
+    public func latestFreeResponseFeedback(
+        attemptId: UUID,
+        responseId: UUID
+    ) async throws -> IdentifiedPayload<FreeResponseFeedbackArtifact>? {
+        let entities = try await database.entities(type: .aiArtifact, parentId: attemptId)
+        return entities.compactMap { entity in
+            guard let artifact = try? CanonicalJSON.decode(
+                FreeResponseFeedbackArtifact.self,
+                from: entity.content
+            ), artifact.responseId == responseId else { return nil }
+            return IdentifiedPayload(
+                id: entity.id,
+                payload: artifact,
+                revision: entity.revision,
+                syncState: entity.syncState
+            )
+        }
+        .max { $0.payload.generatedAt < $1.payload.generatedAt }
+    }
+
     public func prepareTopicGeneration(
         topicId: UUID,
         jobType: LearningAIJobType,
         objectiveTitles: [String] = [],
+        testPlan: TestGenerationPlan? = nil,
         userInstructions: String? = nil,
         includeConnectedKnowledge: Bool = false
     ) async throws -> PreparedLearningGenerationRequest {
-        _ = try await store.topic(id: topicId)
-        var scopedTopicIds: Set<UUID> = [topicId]
-        if includeConnectedKnowledge {
-            let topicRelations = try await store.list(TopicAreaRelationPayload.self)
-            let areas = Set(topicRelations.lazy
-                .filter { $0.payload.topicId == topicId }
-                .map(\.payload.areaId))
-            if !areas.isEmpty {
-                scopedTopicIds.formUnion(topicRelations.lazy
-                    .filter { areas.contains($0.payload.areaId) }
-                    .map(\.payload.topicId))
-            }
+        guard jobType != .freeResponseFeedback else {
+            throw AIJobCoordinatorError.feedbackRequiresSubmittedResponse
         }
+        _ = try await store.topic(id: topicId)
+        if let testPlan {
+            guard [.testBlueprint, .testGeneration].contains(jobType),
+                  !testPlan.objectiveTitles.isEmpty,
+                  !testPlan.coverageDimensions.isEmpty,
+                  testPlan.objectiveTitles == objectiveTitles
+            else { throw AIJobCoordinatorError.invalidTestPlan }
+        }
+        let scopedTopicIds = try await topicScopeIds(
+            topicId: topicId,
+            includeConnectedKnowledge: includeConnectedKnowledge
+        )
         var excerpts: [DigestSourceExcerpt] = []
         let notes = try await store.list(NotePayload.self).filter { note in
             note.payload.courseId.map(scopedTopicIds.contains) ?? false
@@ -765,6 +1536,20 @@ public actor AIJobCoordinator {
         }
         guard !excerpts.isEmpty else { throw AIJobCoordinatorError.noReadableSources }
         excerpts = Array(excerpts.prefix(200))
+        let knownConcepts = try await store.list(ConceptPayload.self)
+            .filter { concept in
+                concept.payload.state == .active
+                    && !concept.payload.topicIds.filter(scopedTopicIds.contains).isEmpty
+            }
+            .sorted { $0.payload.name.localizedCaseInsensitiveCompare($1.payload.name) == .orderedAscending }
+            .prefix(200)
+            .map {
+                KnownConceptReference(
+                    id: $0.id,
+                    name: $0.payload.name,
+                    aliases: $0.payload.aliases
+                )
+            }
         let jobId = UUID()
         let request = LearningGenerationRequest(
             accountId: accountId,
@@ -774,7 +1559,9 @@ public actor AIJobCoordinator {
             includeConnectedKnowledge: includeConnectedKnowledge,
             userInstructions: userInstructions,
             sources: excerpts,
+            knownConcepts: jobType == .conceptSuggestions ? knownConcepts : [],
             objectiveTitles: objectiveTitles,
+            testPlan: testPlan,
             disclosureAcknowledged: false
         )
         let characters = excerpts.reduce(0) { $0 + $1.excerpt.count }
@@ -783,6 +1570,24 @@ public actor AIJobCoordinator {
             sourceCount: excerpts.count,
             approximateTokens: max(1, characters / 4)
         )
+    }
+
+    private func topicScopeIds(
+        topicId: UUID,
+        includeConnectedKnowledge: Bool
+    ) async throws -> Set<UUID> {
+        var scopedTopicIds: Set<UUID> = [topicId]
+        guard includeConnectedKnowledge else { return scopedTopicIds }
+        let topicRelations = try await store.list(TopicAreaRelationPayload.self)
+        let areas = Set(topicRelations.lazy
+            .filter { $0.payload.topicId == topicId }
+            .map(\.payload.areaId))
+        if !areas.isEmpty {
+            scopedTopicIds.formUnion(topicRelations.lazy
+                .filter { areas.contains($0.payload.areaId) }
+                .map(\.payload.topicId))
+        }
+        return scopedTopicIds
     }
 
     public func submitTopicGeneration(
@@ -800,6 +1605,171 @@ public actor AIJobCoordinator {
             jobId: request.jobId
         )
         return try await api.createAIJob(id: request.jobId, type: type, envelope: envelope)
+    }
+
+    public func runDueAutomations(at date: Date = .now) async throws -> [AutomationQueueOutcome] {
+        let grants = try await store.list(AutomationGrantPayload.self)
+            .sorted { $0.payload.createdAt < $1.payload.createdAt }
+        let artifacts = try await database.entities(type: .aiArtifact).compactMap { entity in
+            try? CanonicalJSON.decode(LearningGenerationArtifact.self, from: entity.content)
+        }
+        var outcomes: [AutomationQueueOutcome] = []
+
+        for identified in grants where identified.payload.revokedAt == nil {
+            var grant = identified.payload
+            let queuedIds = Set(grant.queuedJobIds ?? [])
+            let estimatedSpent = artifacts.reduce(0) { total, artifact in
+                guard queuedIds.contains(artifact.jobId),
+                      let dollars = artifact.trace.estimatedCostUsd
+                else { return total }
+                return total + max(Int((dollars * 100).rounded()), 0)
+            }
+            grant.estimatedSpentMinorUnits = estimatedSpent
+            grant.lastQueuedAtByScope = grant.lastQueuedAtByScope ?? [:]
+            grant.lastInputFingerprintByScope = grant.lastInputFingerprintByScope ?? [:]
+            grant.queuedJobIds = grant.queuedJobIds ?? []
+            guard grant.isActive(at: date) else { continue }
+
+            for topicId in grant.topicIds {
+                for configuredType in grant.jobTypes {
+                    guard let jobType = configuredType.learningJobType else { continue }
+                    let scopeKey = "\(topicId.uuidString.lowercased()):\(jobType.rawValue)"
+                    if let last = grant.lastQueuedAtByScope?[scopeKey],
+                       date.timeIntervalSince(last) < Double(grant.minimumIntervalHours * 3_600) {
+                        outcomes.append(.notDue(
+                            grantId: identified.id,
+                            topicId: topicId,
+                            jobType: jobType
+                        ))
+                        continue
+                    }
+                    do {
+                        var prepared = try await prepareTopicGeneration(
+                            topicId: topicId,
+                            jobType: jobType
+                        )
+                        let fingerprint = try automationFingerprint(for: prepared.request)
+                        if grant.lastInputFingerprintByScope?[scopeKey] == fingerprint {
+                            outcomes.append(.unchanged(
+                                grantId: identified.id,
+                                topicId: topicId,
+                                jobType: jobType
+                            ))
+                            continue
+                        }
+                        let jobId = Self.automaticJobId(
+                            grantId: identified.id,
+                            scopeKey: scopeKey,
+                            fingerprint: fingerprint
+                        )
+                        prepared.request.jobId = jobId
+                        prepared.request.schemaVersion = "learning-generation-request/v4"
+                        prepared.request.automationAuthorization = AutomationAuthorization(
+                            grantId: identified.id,
+                            topicIds: grant.topicIds,
+                            jobTypes: grant.jobTypes.compactMap(\.learningJobType),
+                            minimumIntervalHours: grant.minimumIntervalHours,
+                            expiresAt: grant.expiresAt,
+                            spendingLimitMinorUnits: grant.spendingLimitMinorUnits,
+                            currencyCode: grant.currencyCode,
+                            authorizedAt: date,
+                            scopeKey: scopeKey,
+                            inputFingerprint: fingerprint
+                        )
+                        _ = try await submitTopicGeneration(prepared)
+                        try await store.recordAutomationQueue(
+                            grantId: identified.id,
+                            scopeKey: scopeKey,
+                            fingerprint: fingerprint,
+                            jobId: jobId,
+                            estimatedSpentMinorUnits: estimatedSpent,
+                            at: date
+                        )
+                        grant.lastQueuedAtByScope?[scopeKey] = date
+                        grant.lastInputFingerprintByScope?[scopeKey] = fingerprint
+                        if grant.queuedJobIds?.contains(jobId) == false {
+                            grant.queuedJobIds?.append(jobId)
+                        }
+                        outcomes.append(.queued(
+                            jobId: jobId,
+                            grantId: identified.id,
+                            topicId: topicId,
+                            jobType: jobType
+                        ))
+                    } catch {
+                        outcomes.append(.unavailable(
+                            grantId: identified.id,
+                            topicId: topicId,
+                            jobType: jobType,
+                            reason: error.localizedDescription
+                        ))
+                    }
+                }
+            }
+        }
+        return outcomes
+    }
+
+    public func setAutomationGrantPaused(id: UUID, paused: Bool) async throws {
+        let jobIds = try await store.setAutomationGrantPaused(id: id, paused: paused)
+        if paused { await cancelNonterminalJobs(jobIds) }
+    }
+
+    public func revokeAutomationGrant(id: UUID) async throws {
+        let jobIds = try await store.revokeAutomationGrant(id: id)
+        await cancelNonterminalJobs(jobIds)
+    }
+
+    private func cancelNonterminalJobs(_ ids: [UUID]) async {
+        for id in ids {
+            guard let summary = try? await api.aiJob(id: id),
+                  summary.status == "PENDING" || summary.status == "LEASED"
+            else { continue }
+            _ = try? await api.cancelAIJob(id: id)
+        }
+    }
+
+    private func automationFingerprint(for request: LearningGenerationRequest) throws -> String {
+        struct Input: Codable {
+            var schemaVersion = "automation-input/v1"
+            var topicId: UUID
+            var jobType: LearningAIJobType
+            var includeConnectedKnowledge: Bool
+            var userInstructions: String?
+            var sources: [DigestSourceExcerpt]
+            var objectiveTitles: [String]
+            var testPlan: TestGenerationPlan?
+        }
+        let input = Input(
+            topicId: request.topicId,
+            jobType: request.jobType,
+            includeConnectedKnowledge: request.includeConnectedKnowledge,
+            userInstructions: request.userInstructions,
+            sources: request.sources,
+            objectiveTitles: request.objectiveTitles,
+            testPlan: request.testPlan
+        )
+        return SHA256.hash(data: try CanonicalJSON.encode(input))
+            .map { String(format: "%02x", $0) }
+            .joined()
+    }
+
+    public nonisolated static func automaticJobId(
+        grantId: UUID,
+        scopeKey: String,
+        fingerprint: String
+    ) -> UUID {
+        var bytes = Array(SHA256.hash(data: Data(
+            "\(grantId.uuidString.lowercased()):\(scopeKey):\(fingerprint)".utf8
+        )).prefix(16))
+        bytes[6] = (bytes[6] & 0x0f) | 0x50
+        bytes[8] = (bytes[8] & 0x3f) | 0x80
+        return UUID(uuid: (
+            bytes[0], bytes[1], bytes[2], bytes[3],
+            bytes[4], bytes[5], bytes[6], bytes[7],
+            bytes[8], bytes[9], bytes[10], bytes[11],
+            bytes[12], bytes[13], bytes[14], bytes[15]
+        ))
     }
 
     public func latestTopicGeneration(

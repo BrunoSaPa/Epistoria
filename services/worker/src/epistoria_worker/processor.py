@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import hmac
+import json
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID, uuid5
 
@@ -16,8 +17,14 @@ from .cost_ledger import CostLedger
 from .crypto import EncryptedEnvelope, EnvelopeError, decrypt_job, encrypt_entity
 from .models import (
     AIJobLease,
+    AutomationAuthorizationV1,
+    FreeResponseFeedbackArtifactV1,
+    FreeResponseFeedbackRequestV1,
     LearningGenerationArtifactV1,
     LearningGenerationRequestV1,
+    MediaTranscriptionChunkV1,
+    MediaTranscriptionManifestV1,
+    MediaTranscriptionRequestV1,
     NoteQueryArtifactV1,
     NoteQueryRequestV1,
     PDFExtractionChunkV1,
@@ -26,6 +33,7 @@ from .models import (
     SessionDigestArtifactV1,
     SessionDigestRequestV1,
     SessionDigestV1,
+    TranscriptSegmentV1,
 )
 from .outbox import CachedCompletion, EncryptedOutbox
 from .pdf_extract import PDFExtractionError, chunk_pages, extract_pdf_pages
@@ -33,6 +41,7 @@ from .providers.base import DigestProvider, ProviderError
 
 LOGGER = logging.getLogger("epistoria.worker")
 _MAX_PUSH_CIPHER_BYTES = 6_250_000
+_MAX_TRANSCRIPTION_BYTES = 25 * 1024 * 1024
 
 
 class ProcessingFailure(RuntimeError):
@@ -104,14 +113,23 @@ class WorkerProcessor:
             return self._pdf_extraction(lease, plaintext)
         if lease.job_type == "NOTE_QUERY":
             return self._note_query(lease, plaintext)
+        if lease.job_type == "TRANSCRIPTION":
+            try:
+                schema_version = json.loads(plaintext).get("schemaVersion")
+            except (json.JSONDecodeError, UnicodeDecodeError, AttributeError) as error:
+                raise ProcessingFailure(code="INVALID_JOB_PAYLOAD", retryable=False) from error
+            if schema_version == "media-transcription-request/v1":
+                return self._media_transcription(lease, plaintext)
+            # Generic TRANSCRIPTION drafts from the earlier learning contract remain readable.
+            return self._learning_generation(lease, plaintext)
+        if lease.job_type == "FREE_RESPONSE_FEEDBACK":
+            return self._free_response_feedback(lease, plaintext)
         if lease.job_type in {
             "SOURCE_EXTRACTION",
-            "TRANSCRIPTION",
             "TOPIC_SYNTHESIS",
             "FLASHCARD_DRAFTS",
             "TEST_BLUEPRINT",
             "TEST_GENERATION",
-            "FREE_RESPONSE_FEEDBACK",
             "CONCEPT_SUGGESTIONS",
             "SOURCE_DISCOVERY",
             "SESSION_REVIEW",
@@ -283,12 +301,26 @@ class WorkerProcessor:
             or request.job_type != lease.job_type
         ):
             raise ProcessingFailure(code="JOB_IDENTITY_MISMATCH", retryable=False)
+        authorization = self._validate_automation(request)
         response, trace = self._digest_provider.generate_learning(request)
+        if response.concept_links and request.job_type != "CONCEPT_SUGGESTIONS":
+            raise ProcessingFailure(code="PROVIDER_CONCEPT_INVALID", retryable=True)
         allowed_ids = {source.source_id for source in request.sources}
         cited: list[UUID] = []
         seen: set[UUID] = set()
         for item in response.items:
             for source_id in item.cited_source_ids:
+                if source_id not in allowed_ids:
+                    raise ProcessingFailure(code="PROVIDER_CITATION_INVALID", retryable=True)
+                if source_id not in seen:
+                    cited.append(source_id)
+                    seen.add(source_id)
+        allowed_concept_ids = {concept.id for concept in request.known_concepts}
+        for link in response.concept_links:
+            for concept_id in (link.source_concept_id, link.target_concept_id):
+                if concept_id is not None and concept_id not in allowed_concept_ids:
+                    raise ProcessingFailure(code="PROVIDER_CONCEPT_INVALID", retryable=True)
+            for source_id in link.cited_source_ids:
                 if source_id not in allowed_ids:
                     raise ProcessingFailure(code="PROVIDER_CITATION_INVALID", retryable=True)
                 if source_id not in seen:
@@ -306,6 +338,8 @@ class WorkerProcessor:
                 output_tokens=trace.output_tokens,
                 estimated_cost_usd=trace.estimated_cost_usd,
                 provider_request_id=trace.provider_request_id,
+                automation_grant_id=(authorization.grant_id if authorization else None),
+                automation_scope_key=(authorization.scope_key if authorization else None),
             )
         artifact_id = uuid5(lease.id, "ai-artifact/v1")
         artifact = LearningGenerationArtifactV1(
@@ -317,11 +351,100 @@ class WorkerProcessor:
             source_ids=cited,
             trace=trace,
             response=response,
+            test_plan=request.test_plan,
+            known_concept_ids=[concept.id for concept in request.known_concepts],
         )
         mutation = self._encrypted_mutation(
             entity_id=artifact_id,
             parent_id=request.topic_id,
             relation_ids=[request.topic_id, *cited[:63]],
+            plaintext=json_bytes(artifact),
+        )
+        return CachedCompletion(
+            job_id=lease.id,
+            artifact_entity_id=artifact_id,
+            mutations=[mutation],
+        )
+
+    def _validate_automation(
+        self, request: LearningGenerationRequestV1
+    ) -> AutomationAuthorizationV1 | None:
+        authorization = request.automation_authorization
+        if authorization is None:
+            return None
+        now = datetime.now(UTC)
+        expected_scope = f"{request.topic_id}:{request.job_type}"
+        if (
+            authorization.scope_key != expected_scope
+            or authorization.authorized_at > now + timedelta(minutes=5)
+            or authorization.expires_at <= now
+        ):
+            raise ProcessingFailure(code="AUTOMATION_GRANT_INVALID", retryable=False)
+        if self._cost_ledger is None:
+            raise ProcessingFailure(code="AUTOMATION_LEDGER_REQUIRED", retryable=False)
+        status = self._cost_ledger.automation_status(
+            grant_id=authorization.grant_id,
+            scope_key=authorization.scope_key,
+        )
+        if round(status.estimated_usd * 100) >= authorization.spending_limit_minor_units:
+            raise ProcessingFailure(code="AUTOMATION_SPENDING_LIMIT", retryable=False)
+        if status.last_recorded_at is not None and (
+            now - status.last_recorded_at
+            < timedelta(hours=authorization.minimum_interval_hours)
+        ):
+            raise ProcessingFailure(code="AUTOMATION_FREQUENCY_LIMIT", retryable=False)
+        return authorization
+
+    def _free_response_feedback(
+        self, lease: AIJobLease, plaintext: bytes
+    ) -> CachedCompletion:
+        if self._digest_provider is None:
+            raise ProcessingFailure(code="AI_NOT_CONFIGURED", retryable=False)
+        try:
+            request = FreeResponseFeedbackRequestV1.model_validate_json(plaintext)
+        except ValidationError as error:
+            raise ProcessingFailure(code="INVALID_JOB_PAYLOAD", retryable=False) from error
+        if request.account_id != self._account_id or request.job_id != lease.id:
+            raise ProcessingFailure(code="JOB_IDENTITY_MISMATCH", retryable=False)
+
+        response, trace = self._digest_provider.generate_free_response_feedback(request)
+        allowed_ids = {item.source_id for item in request.evidence}
+        if not set(response.cited_source_ids).issubset(allowed_ids):
+            raise ProcessingFailure(code="PROVIDER_CITATION_INVALID", retryable=True)
+        if self._cost_ledger is not None:
+            self._cost_ledger.record(
+                job_id=lease.id,
+                provider=trace.provider,
+                model=trace.model,
+                prompt_version=trace.prompt_version,
+                input_tokens=trace.input_tokens,
+                output_tokens=trace.output_tokens,
+                estimated_cost_usd=trace.estimated_cost_usd,
+                provider_request_id=trace.provider_request_id,
+            )
+        cited_ids = list(dict.fromkeys(response.cited_source_ids))
+        artifact_id = uuid5(lease.id, "ai-artifact/v1")
+        artifact = FreeResponseFeedbackArtifactV1(
+            job_id=lease.id,
+            attempt_id=request.attempt_id,
+            response_id=request.response_id,
+            question_id=request.question_id,
+            topic_id=request.topic_id,
+            generated_at=datetime.now(UTC),
+            source_ids=cited_ids,
+            trace=trace,
+            response=response,
+        )
+        mutation = self._encrypted_mutation(
+            entity_id=artifact_id,
+            parent_id=request.attempt_id,
+            relation_ids=[
+                request.attempt_id,
+                request.response_id,
+                request.question_id,
+                request.topic_id,
+                *cited_ids,
+            ][:64],
             plaintext=json_bytes(artifact),
         )
         return CachedCompletion(
@@ -408,6 +531,151 @@ class WorkerProcessor:
             artifact_entity_id=artifact_id,
             mutations=mutations,
         )
+
+    def _media_transcription(self, lease: AIJobLease, plaintext: bytes) -> CachedCompletion:
+        if self._digest_provider is None:
+            raise ProcessingFailure(code="AI_NOT_CONFIGURED", retryable=False)
+        try:
+            request = MediaTranscriptionRequestV1.model_validate_json(plaintext)
+            asset_key = base64url.decode(request.asset_key, field="assetKey")
+            if len(asset_key) != 32:
+                raise ValueError("asset key has the wrong length")
+        except (ValidationError, ValueError) as error:
+            raise ProcessingFailure(code="INVALID_JOB_PAYLOAD", retryable=False) from error
+        if request.account_id != self._account_id or request.job_id != lease.id:
+            raise ProcessingFailure(code="JOB_IDENTITY_MISMATCH", retryable=False)
+        if request.expected_plaintext_bytes > _MAX_TRANSCRIPTION_BYTES:
+            raise ProcessingFailure(code="TRANSCRIPTION_MEDIA_TOO_LARGE", retryable=False)
+
+        encrypted = self._api.download_encrypted_asset(
+            request.asset_id, maximum_bytes=self._maximum_asset_bytes
+        )
+        try:
+            media = decrypt_bytes(encrypted, key=asset_key)
+        except AssetCryptoError as error:
+            raise ProcessingFailure(code="ASSET_DECRYPTION_FAILED", retryable=False) from error
+        if len(media) != request.expected_plaintext_bytes or len(media) > _MAX_TRANSCRIPTION_BYTES:
+            raise ProcessingFailure(code="TRANSCRIPTION_MEDIA_SIZE_MISMATCH", retryable=False)
+        actual_tag = plaintext_dedupe_tag(
+            media, account_key=self._account_key, account_id=self._account_id
+        )
+        if not hmac.compare_digest(actual_tag, request.expected_dedupe_tag):
+            raise ProcessingFailure(code="ASSET_DEDUPE_MISMATCH", retryable=False)
+        self._validate_transcription_media_identity(request, media)
+        try:
+            response, trace = self._digest_provider.transcribe_media(
+                filename=request.filename,
+                mime_type=request.mime_type,
+                media=media,
+                language=request.language,
+            )
+        finally:
+            media = b""
+
+        chunks = self._chunk_transcript(response.segments)
+        chunk_ids = [
+            uuid5(lease.id, f"media-transcription-chunk/{index}")
+            for index in range(len(chunks))
+        ]
+        mutations: list[dict[str, Any]] = []
+        for index, (entity_id, selected_segments) in enumerate(
+            zip(chunk_ids, chunks, strict=True)
+        ):
+            chunk = MediaTranscriptionChunkV1(
+                job_id=lease.id,
+                source_id=request.source_id,
+                source_version_id=request.source_version_id,
+                chunk_index=index,
+                segments=selected_segments,
+            )
+            mutations.append(
+                self._encrypted_mutation(
+                    entity_id=entity_id,
+                    parent_id=request.source_id,
+                    relation_ids=[request.source_id, request.source_version_id],
+                    plaintext=json_bytes(chunk),
+                )
+            )
+
+        if self._cost_ledger is not None:
+            self._cost_ledger.record(
+                job_id=lease.id,
+                provider=trace.provider,
+                model=trace.model,
+                prompt_version=trace.prompt_version,
+                input_tokens=trace.input_tokens,
+                output_tokens=trace.output_tokens,
+                estimated_cost_usd=trace.estimated_cost_usd,
+                provider_request_id=trace.provider_request_id,
+            )
+        character_count = sum(len(segment.text) for segment in response.segments)
+        if character_count > 5_000_000:
+            raise ProcessingFailure(code="TRANSCRIPTION_TOO_LARGE", retryable=False)
+        artifact_id = uuid5(lease.id, "ai-artifact/v1")
+        manifest = MediaTranscriptionManifestV1(
+            job_id=lease.id,
+            source_id=request.source_id,
+            source_version_id=request.source_version_id,
+            generated_at=datetime.now(UTC),
+            language=response.language,
+            duration_seconds=response.duration_seconds,
+            character_count=character_count,
+            segment_count=len(response.segments),
+            trace=trace,
+            chunk_entity_ids=chunk_ids,
+        )
+        mutations.append(
+            self._encrypted_mutation(
+                entity_id=artifact_id,
+                parent_id=request.source_id,
+                relation_ids=[request.source_id, request.source_version_id, *chunk_ids[:62]],
+                plaintext=json_bytes(manifest),
+            )
+        )
+        return CachedCompletion(
+            job_id=lease.id,
+            artifact_entity_id=artifact_id,
+            mutations=mutations,
+        )
+
+    @staticmethod
+    def _validate_transcription_media_identity(
+        request: MediaTranscriptionRequestV1, media: bytes
+    ) -> None:
+        extension = request.filename.rpartition(".")[2].lower()
+        valid = False
+        if extension == "wav":
+            valid = len(media) >= 12 and media[:4] == b"RIFF" and media[8:12] == b"WAVE"
+        elif extension == "mp3":
+            valid = media.startswith(b"ID3") or (
+                len(media) >= 2 and media[0] == 0xFF and media[1] & 0xE0 == 0xE0
+            )
+        elif extension in {"m4a", "mp4"}:
+            valid = len(media) >= 12 and media[4:8] == b"ftyp"
+        if not valid:
+            raise ProcessingFailure(
+                code="TRANSCRIPTION_MEDIA_IDENTITY_MISMATCH", retryable=False
+            )
+
+    @staticmethod
+    def _chunk_transcript(segments: list[TranscriptSegmentV1]) -> list[list[TranscriptSegmentV1]]:
+        chunks: list[list[TranscriptSegmentV1]] = []
+        current: list[TranscriptSegmentV1] = []
+        current_characters = 0
+        for segment in segments:
+            if current and (
+                len(current) >= 500 or current_characters + len(segment.text) > 250_000
+            ):
+                chunks.append(current)
+                current = []
+                current_characters = 0
+            current.append(segment)
+            current_characters += len(segment.text)
+        if current:
+            chunks.append(current)
+        if not chunks or len(chunks) > 64:
+            raise ProcessingFailure(code="TRANSCRIPTION_TOO_LARGE", retryable=False)
+        return chunks
 
     def _encrypted_mutation(
         self,

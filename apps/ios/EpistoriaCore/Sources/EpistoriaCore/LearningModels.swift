@@ -340,7 +340,7 @@ public struct TestObjective: Codable, Equatable, Sendable, Identifiable {
     }
 }
 
-public enum TestMode: String, Codable, Sendable {
+public enum TestMode: String, Codable, CaseIterable, Sendable {
     case comprehensive = "COMPREHENSIVE"
     case quickCheck = "QUICK_CHECK"
     case custom = "CUSTOM"
@@ -348,13 +348,15 @@ public enum TestMode: String, Codable, Sendable {
 
 public struct TestBlueprintPayload: EntityPayload, Equatable {
     public static let entityType = EntityType.testBlueprint
-    public var schemaVersion = "test-blueprint/v1"
+    public var schemaVersion = "test-blueprint/v2"
     public var topicId: UUID
     public var scopeSnapshotId: UUID
     public var mode: TestMode
     public var objectives: [TestObjective]
     public var requestedQuestionCount: Int
     public var uncoveredObjectives: [UUID]
+    public var timeLimitMinutes: Int?
+    public var coverageNotes: [String]?
     public var provenance: RecordProvenance
     public var createdAt: Date
     public var updatedAt: Date
@@ -365,6 +367,7 @@ public struct TestBlueprintPayload: EntityPayload, Equatable {
         mode: TestMode = .comprehensive,
         objectives: [TestObjective],
         requestedQuestionCount: Int,
+        timeLimitMinutes: Int? = nil,
         provenance: RecordProvenance = .user,
         now: Date = .now
     ) {
@@ -374,6 +377,8 @@ public struct TestBlueprintPayload: EntityPayload, Equatable {
         self.objectives = objectives
         self.requestedQuestionCount = max(requestedQuestionCount, 1)
         uncoveredObjectives = []
+        self.timeLimitMinutes = timeLimitMinutes.map { max($0, 1) }
+        coverageNotes = nil
         self.provenance = provenance
         createdAt = now
         updatedAt = now
@@ -522,7 +527,7 @@ public struct TestAttemptPayload: EntityPayload, Equatable {
 
 public struct TestResponsePayload: EntityPayload, Equatable {
     public static let entityType = EntityType.testResponse
-    public var schemaVersion = "test-response/v1"
+    public var schemaVersion = "test-response/v2"
     public var attemptId: UUID
     public var questionId: UUID
     public var response: String
@@ -532,6 +537,14 @@ public struct TestResponsePayload: EntityPayload, Equatable {
     public var isCorrect: Bool?
     public var feedback: String?
     public var score: Double?
+    public var feedbackStrengths: [String]?
+    public var feedbackImprovements: [String]?
+    public var feedbackUncertainty: String?
+    public var feedbackCitedSourceIds: [UUID]?
+    public var feedbackArtifactId: UUID?
+    public var feedbackAcceptedAt: Date?
+    public var scoreOverride: Double?
+    public var scoreOverrideReason: String?
     public var createdAt: Date
     public var updatedAt: Date
 
@@ -545,6 +558,14 @@ public struct TestResponsePayload: EntityPayload, Equatable {
         isCorrect = nil
         feedback = nil
         score = nil
+        feedbackStrengths = nil
+        feedbackImprovements = nil
+        feedbackUncertainty = nil
+        feedbackCitedSourceIds = nil
+        feedbackArtifactId = nil
+        feedbackAcceptedAt = nil
+        scoreOverride = nil
+        scoreOverrideReason = nil
         createdAt = now
         updatedAt = now
     }
@@ -608,17 +629,34 @@ public enum RecommendationAction: String, Codable, Sendable {
 
 public struct RecommendationResponsePayload: EntityPayload, Equatable {
     public static let entityType = EntityType.recommendationResponse
-    public var schemaVersion = "recommendation-response/v1"
+    public var schemaVersion = "recommendation-response/v2"
     public var recommendationId: UUID
     public var action: RecommendationAction
     public var snoozedUntil: Date?
+    public var recommendationTitle: String?
+    public var recommendationKind: RecommendationKind?
+    public var topicId: UUID?
+    public var targetEntityIds: [UUID]?
     public var createdAt: Date
     public var updatedAt: Date
 
-    public init(recommendationId: UUID, action: RecommendationAction, snoozedUntil: Date? = nil, now: Date = .now) {
+    public init(
+        recommendationId: UUID,
+        action: RecommendationAction,
+        snoozedUntil: Date? = nil,
+        recommendationTitle: String? = nil,
+        recommendationKind: RecommendationKind? = nil,
+        topicId: UUID? = nil,
+        targetEntityIds: [UUID]? = nil,
+        now: Date = .now
+    ) {
         self.recommendationId = recommendationId
         self.action = action
         self.snoozedUntil = snoozedUntil
+        self.recommendationTitle = recommendationTitle
+        self.recommendationKind = recommendationKind
+        self.topicId = topicId
+        self.targetEntityIds = targetEntityIds
         createdAt = now
         updatedAt = now
     }
@@ -639,14 +677,19 @@ public enum AutomationJobKind: String, Codable, CaseIterable, Sendable {
 
 public struct AutomationGrantPayload: EntityPayload, Equatable {
     public static let entityType = EntityType.automationGrant
-    public var schemaVersion = "automation-grant/v1"
+    public var schemaVersion = "automation-grant/v2"
     public var topicIds: [UUID]
     public var jobTypes: [AutomationJobKind]
     public var minimumIntervalHours: Int
     public var expiresAt: Date
     public var spendingLimitMinorUnits: Int
     public var currencyCode: String
+    public var pausedAt: Date?
     public var revokedAt: Date?
+    public var lastQueuedAtByScope: [String: Date]?
+    public var lastInputFingerprintByScope: [String: String]?
+    public var queuedJobIds: [UUID]?
+    public var estimatedSpentMinorUnits: Int?
     public var createdAt: Date
     public var updatedAt: Date
 
@@ -665,9 +708,21 @@ public struct AutomationGrantPayload: EntityPayload, Equatable {
         self.expiresAt = expiresAt
         self.spendingLimitMinorUnits = max(spendingLimitMinorUnits, 0)
         self.currencyCode = currencyCode
+        pausedAt = nil
         revokedAt = nil
+        lastQueuedAtByScope = [:]
+        lastInputFingerprintByScope = [:]
+        queuedJobIds = []
+        estimatedSpentMinorUnits = 0
         createdAt = now
         updatedAt = now
+    }
+
+    public var isPaused: Bool { pausedAt != nil }
+
+    public func isActive(at date: Date) -> Bool {
+        pausedAt == nil && revokedAt == nil && expiresAt > date
+            && (estimatedSpentMinorUnits ?? 0) < spendingLimitMinorUnits
     }
 }
 

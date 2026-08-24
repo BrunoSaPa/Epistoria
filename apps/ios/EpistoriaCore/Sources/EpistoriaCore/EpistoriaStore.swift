@@ -21,17 +21,26 @@ public enum StoreError: Error, Equatable {
     case sessionTopicRequired
     case artifactAlreadyAccepted
     case invalidDraftReview
+    case invalidFeedbackReview
+    case invalidAutomationGrant
+    case invalidConceptLink
+    case invalidTranscriptCorrection
+    case transcriptReviewRequired
+    case transcriptCorrectionConflict
+    case relationshipNotFound
 }
 
 public struct AcceptedLearningRecords: Equatable, Sendable {
     public var flashcards: Int
     public var tests: Int
     public var concepts: Int
+    public var conceptLinks: Int
 
-    public init(flashcards: Int = 0, tests: Int = 0, concepts: Int = 0) {
+    public init(flashcards: Int = 0, tests: Int = 0, concepts: Int = 0, conceptLinks: Int = 0) {
         self.flashcards = flashcards
         self.tests = tests
         self.concepts = concepts
+        self.conceptLinks = conceptLinks
     }
 }
 
@@ -50,6 +59,20 @@ extension StoreError: LocalizedError {
             "This draft was already accepted and cannot be changed."
         case .invalidDraftReview:
             "The reviewed draft contains an invalid or unknown item. Reload the original draft and try again."
+        case .invalidFeedbackReview:
+            "The reviewed feedback is incomplete or cites material outside this request."
+        case .invalidAutomationGrant:
+            "The automation permission is invalid, inactive, expired, over budget, or outside its Topic and task scope."
+        case .invalidConceptLink:
+            "Choose two different Concepts and valid supporting Evidence for this connection."
+        case .invalidTranscriptCorrection:
+            "The transcript correction is empty, unchanged, or does not match this transcript."
+        case .transcriptReviewRequired:
+            "Review this transcript before creating Evidence from it."
+        case .transcriptCorrectionConflict:
+            "This segment has conflicting corrections. Resolve the conflict before using it as Evidence."
+        case .relationshipNotFound:
+            "This item is no longer linked here. Reload the view and try again."
         }
     }
 }
@@ -126,6 +149,12 @@ public enum EntitySearchIndexer {
                     title: value.annotationType.rawValue.capitalized,
                     body: [value.selectedText, value.comment].compactMap(\ .self)
                         .joined(separator: "\n")
+                )
+            case .transcriptCorrection:
+                let value = try CanonicalJSON.decode(TranscriptCorrectionPayload.self, from: content)
+                return SearchDocument(
+                    title: "Transcript correction",
+                    body: [value.correctedText, value.reason].compactMap(\ .self).joined(separator: "\n")
                 )
             case .aiArtifact:
                 guard let object = try JSONSerialization.jsonObject(with: content) as? [String: Any]
@@ -545,6 +574,32 @@ public actor EpistoriaStore {
         )
     }
 
+    /// Removes List membership without changing or deleting the note. Every matching relation is
+    /// tombstoned in one local transaction so older duplicate links cannot keep the note visible.
+    public func unlinkNote(
+        _ noteId: UUID,
+        fromCollection collectionId: UUID,
+        at date: Date = .now
+    ) async throws {
+        _ = try await payload(NotePayload.self, id: noteId)
+        _ = try await payload(CollectionPayload.self, id: collectionId)
+        let matches = try await list(
+            RelationPayload.self,
+            parentId: collectionId,
+            entityTypeOverride: .collectionItem
+        ).filter {
+            $0.payload.schemaVersion == .collectionItem
+                && $0.payload.leftId == collectionId
+                && $0.payload.rightId == noteId
+        }
+        guard !matches.isEmpty else { throw StoreError.relationshipNotFound }
+        try await database.saveLocalBatch(
+            [],
+            deleting: matches.map(\.id),
+            deletedAt: date
+        )
+    }
+
     /// Adds an existing note to a focused study session. Session membership is a relationship,
     /// so one source note can be reviewed in multiple sessions without being copied.
     @discardableResult
@@ -582,6 +637,45 @@ public actor EpistoriaStore {
         ]
         try await database.saveLocalBatch(writes)
         return relationId
+    }
+
+    /// Removes Session membership without deleting the note or its activity history. Legacy
+    /// note-owned membership is cleared in the same local transaction as relation tombstones.
+    public func unlinkNote(
+        _ noteId: UUID,
+        fromSession sessionId: UUID,
+        at date: Date = .now
+    ) async throws {
+        _ = try await payload(StudySessionPayload.self, id: sessionId)
+        var note = try await payload(NotePayload.self, id: noteId)
+        let matches = try await list(
+            RelationPayload.self,
+            parentId: sessionId,
+            entityTypeOverride: .sessionNote
+        ).filter {
+            $0.payload.schemaVersion == .sessionNote
+                && $0.payload.leftId == sessionId
+                && $0.payload.rightId == noteId
+        }
+        let hasLegacyMembership = note.payload.studySessionId == sessionId
+        guard !matches.isEmpty || hasLegacyMembership else { throw StoreError.relationshipNotFound }
+
+        var writes: [LocalEntityWrite] = []
+        if hasLegacyMembership {
+            note.payload.studySessionId = nil
+            note.payload.updatedAt = date
+            writes.append(try localWrite(
+                id: noteId,
+                payload: note.payload,
+                parentId: note.payload.courseId,
+                relationIds: [note.payload.courseId].compactMap(\ .self)
+            ))
+        }
+        try await database.saveLocalBatch(
+            writes,
+            deleting: matches.map(\.id),
+            deletedAt: date
+        )
     }
 
     /// Returns relation-backed session membership and keeps legacy note-owned membership readable.
@@ -638,6 +732,37 @@ public actor EpistoriaStore {
         block.canvasPlacement = placement
         block.canvasPageIndex = max(pageIndex, 0)
         return try await save(payload: block, parentId: noteId, relationIds: [noteId])
+    }
+
+    /// Places a reusable Evidence card on a note. The Evidence remains the source of truth and
+    /// retains its exact Source Version and locator.
+    @discardableResult
+    public func appendCanvasEvidence(
+        noteId: UUID,
+        evidenceId: UUID,
+        placement: NoteCanvasPlacement,
+        pageIndex: Int = 0
+    ) async throws -> UUID {
+        _ = try await payload(NotePayload.self, id: noteId)
+        let evidence = try await payload(EvidencePayload.self, id: evidenceId)
+        let source = try await payload(SourcePayload.self, id: evidence.payload.sourceId)
+        let version = try await payload(SourceVersionPayload.self, id: evidence.payload.sourceVersionId)
+        guard version.payload.sourceId == source.id else { throw SourceModelError.sourceVersionMismatch }
+        let count = try await database.entities(type: .noteBlock, parentId: noteId).count
+        var block = NoteBlockPayload(
+            noteId: noteId,
+            blockType: .callout,
+            orderKey: String(format: "%012d", count * 1_000),
+            plainText: ""
+        )
+        block.evidenceId = evidenceId
+        block.canvasPlacement = placement
+        block.canvasPageIndex = max(pageIndex, 0)
+        return try await save(
+            payload: block,
+            parentId: noteId,
+            relationIds: [noteId, evidenceId, source.id, version.id]
+        )
     }
 
     @discardableResult
@@ -844,7 +969,8 @@ public actor EpistoriaStore {
         let existing = try await list(StudyRecommendationPayload.self).first { value in
             value.payload.topicId == recommendation.topicId
                 && value.payload.kind == recommendation.kind
-                && value.payload.title == recommendation.title
+                && (recommendation.targetId.map(value.payload.targetEntityIds.contains)
+                    ?? value.payload.targetEntityIds.isEmpty)
         }
         let recommendationId = existing?.id ?? UUID()
         let responseId = UUID()
@@ -852,6 +978,10 @@ public actor EpistoriaStore {
             recommendationId: recommendationId,
             action: action,
             snoozedUntil: snoozedUntil,
+            recommendationTitle: recommendation.title,
+            recommendationKind: recommendation.kind,
+            topicId: recommendation.topicId,
+            targetEntityIds: [recommendation.targetId].compactMap(\ .self),
             now: date
         )
         var writes: [LocalEntityWrite] = []
@@ -940,12 +1070,28 @@ public actor EpistoriaStore {
                 $0.answer?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
             }
             if !usableItems.isEmpty {
-                let objectiveTitles = Array(Set(usableItems.flatMap(\.objectiveTitles))).sorted()
+                let objectiveTitles = (
+                    (artifact.testPlan?.objectiveTitles ?? []) + usableItems.flatMap(\.objectiveTitles)
+                ).reduce(into: [String]()) { result, rawTitle in
+                    let title = rawTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !title.isEmpty,
+                          !result.contains(where: { $0.localizedCaseInsensitiveCompare(title) == .orderedSame })
+                    else { return }
+                    result.append(title)
+                }
                 let titles = objectiveTitles.isEmpty ? ["Topic coverage"] : objectiveTitles
                 let objectives = titles.map {
-                    TestObjective(title: $0, dimensions: TestCoverageDimension.allCases)
+                    TestObjective(
+                        title: $0,
+                        dimensions: artifact.testPlan?.coverageDimensions.isEmpty == false
+                            ? artifact.testPlan?.coverageDimensions ?? TestCoverageDimension.allCases
+                            : TestCoverageDimension.allCases
+                    )
                 }
-                let objectiveByTitle = Dictionary(uniqueKeysWithValues: zip(titles, objectives.map(\.id)))
+                let objectiveByTitle = Dictionary(uniqueKeysWithValues: zip(
+                    titles.map { $0.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current) },
+                    objectives.map(\.id)
+                ))
                 let sources = try await list(SourcePayload.self).filter {
                     $0.payload.primaryTopicId == artifact.topicId || $0.payload.relatedTopicIds.contains(artifact.topicId)
                 }
@@ -967,15 +1113,25 @@ public actor EpistoriaStore {
                 var blueprint = TestBlueprintPayload(
                     topicId: artifact.topicId,
                     scopeSnapshotId: scopeId,
+                    mode: artifact.testPlan?.mode ?? .comprehensive,
                     objectives: objectives,
-                    requestedQuestionCount: usableItems.count,
+                    requestedQuestionCount: artifact.testPlan?.questionCount ?? usableItems.count,
+                    timeLimitMinutes: artifact.testPlan?.timeLimitMinutes,
                     provenance: .reviewedAI,
                     now: date
                 )
-                let coveredTitles = Set(usableItems.flatMap(\.objectiveTitles))
+                let coveredTitles = Set(usableItems.flatMap(\.objectiveTitles).map {
+                    $0.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+                })
                 blueprint.uncoveredObjectives = objectives.compactMap {
-                    coveredTitles.contains($0.title) || objectiveTitles.isEmpty ? nil : $0.id
+                    let key = $0.title.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+                    return coveredTitles.contains(key) || objectiveTitles.isEmpty ? nil : $0.id
                 }
+                var coverageNotes = response.coverageGaps
+                if let requested = artifact.testPlan?.questionCount, usableItems.count < requested {
+                    coverageNotes.append("Generated \(usableItems.count) of \(requested) requested questions.")
+                }
+                blueprint.coverageNotes = Array(Set(coverageNotes)).sorted()
                 var test = PracticeTestPayload(
                     topicId: artifact.topicId,
                     title: response.summary,
@@ -991,7 +1147,9 @@ public actor EpistoriaStore {
                 writes.append(try localWrite(id: blueprintId, payload: blueprint, parentId: artifact.topicId, relationIds: [artifact.topicId, artifactId, scopeId]))
                 writes.append(try localWrite(id: testId, payload: test, parentId: artifact.topicId, relationIds: [artifact.topicId, artifactId, scopeId, blueprintId] + questionIds))
                 for (index, item) in usableItems.enumerated() {
-                    let mappedObjectives = item.objectiveTitles.compactMap { objectiveByTitle[$0] }
+                    let mappedObjectives = item.objectiveTitles.compactMap {
+                        objectiveByTitle[$0.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)]
+                    }
                     let question = TestQuestionPayload(
                         testId: testId,
                         objectiveIds: mappedObjectives.isEmpty ? objectives.map(\.id) : mappedObjectives,
@@ -1014,20 +1172,98 @@ public actor EpistoriaStore {
             }
 
         case .conceptSuggestions:
+            let knownIds = Set(artifact.knownConceptIds ?? [])
+            let existingConcepts = try await list(ConceptPayload.self).filter {
+                $0.payload.state == .active
+                    && (knownIds.contains($0.id) || $0.payload.topicIds.contains(artifact.topicId))
+            }
+            var conceptsById = Dictionary(uniqueKeysWithValues: existingConcepts.map { ($0.id, $0.payload) })
+            var idsByName: [String: Set<UUID>] = [:]
+            func conceptKey(_ value: String) -> String {
+                value.trimmingCharacters(in: .whitespacesAndNewlines)
+                    .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+            }
+            func indexConcept(id: UUID, payload: ConceptPayload) {
+                for name in [payload.name] + payload.aliases {
+                    let key = conceptKey(name)
+                    guard !key.isEmpty else { continue }
+                    idsByName[key, default: []].insert(id)
+                }
+            }
+            existingConcepts.forEach { indexConcept(id: $0.id, payload: $0.payload) }
+
             for item in response.items {
+                let key = conceptKey(item.title)
+                if idsByName[key]?.count == 1 { continue }
+                guard idsByName[key] == nil else { throw StoreError.invalidDraftReview }
+                let conceptId = UUID()
                 let concept = ConceptPayload(
                     name: item.title,
                     conceptDescription: item.body,
                     topicIds: [artifact.topicId],
                     now: date
                 )
+                conceptsById[conceptId] = concept
+                indexConcept(id: conceptId, payload: concept)
                 writes.append(try localWrite(
-                    id: UUID(),
+                    id: conceptId,
                     payload: concept,
                     parentId: artifact.topicId,
                     relationIds: [artifact.topicId, artifactId] + item.citedSourceIds
                 ))
                 result.concepts += 1
+            }
+
+            func resolvedConceptId(id: UUID?, name: String) throws -> UUID {
+                if let id {
+                    guard conceptsById[id] != nil, knownIds.contains(id) else {
+                        throw StoreError.invalidDraftReview
+                    }
+                    return id
+                }
+                let matches = idsByName[conceptKey(name)] ?? []
+                guard matches.count == 1, let match = matches.first else {
+                    throw StoreError.invalidDraftReview
+                }
+                return match
+            }
+
+            let evidenceIdSet = Set(try await list(EvidencePayload.self).map(\.id))
+            let existingLinkKeys = Set(try await list(ConceptLinkPayload.self).map {
+                "\($0.payload.sourceConceptId.uuidString)|\($0.payload.targetConceptId.uuidString)|\($0.payload.relation.rawValue)"
+            })
+            var acceptedLinkKeys = existingLinkKeys
+            for draft in response.resolvedConceptLinks {
+                let sourceId = try resolvedConceptId(
+                    id: draft.sourceConceptId,
+                    name: draft.sourceConceptName
+                )
+                let targetId = try resolvedConceptId(
+                    id: draft.targetConceptId,
+                    name: draft.targetConceptName
+                )
+                guard sourceId != targetId else { throw StoreError.invalidDraftReview }
+                let key = "\(sourceId.uuidString)|\(targetId.uuidString)|\(draft.relation.rawValue)"
+                guard !acceptedLinkKeys.contains(key) else { continue }
+                acceptedLinkKeys.insert(key)
+                let evidenceIds = Array(Set(draft.citedSourceIds.filter(evidenceIdSet.contains)))
+                let link = ConceptLinkPayload(
+                    sourceConceptId: sourceId,
+                    targetConceptId: targetId,
+                    relation: draft.relation,
+                    provenance: .reviewedAI,
+                    rationale: draft.rationale,
+                    evidenceIds: evidenceIds,
+                    generatorArtifactId: artifactId,
+                    now: date
+                )
+                writes.append(try localWrite(
+                    id: UUID(),
+                    payload: link,
+                    parentId: sourceId,
+                    relationIds: [sourceId, targetId, artifactId] + evidenceIds
+                ))
+                result.conceptLinks += 1
             }
 
         default:
@@ -1051,6 +1287,7 @@ public actor EpistoriaStore {
         id artifactId: UUID,
         summary: String,
         selectedItems: [LearningDraftItem],
+        selectedConceptLinks: [ConceptLinkDraft]? = nil,
         at date: Date = .now
     ) async throws {
         var artifact = try await payload(LearningGenerationArtifact.self, id: artifactId)
@@ -1060,6 +1297,7 @@ public actor EpistoriaStore {
         var candidate = artifact.payload.response
         candidate.summary = summary.trimmingCharacters(in: .whitespacesAndNewlines)
         candidate.items = selectedItems
+        if let selectedConceptLinks { candidate.conceptLinks = selectedConceptLinks }
         artifact.payload.editedResponse = candidate
         artifact.payload.reviewState = .edited
         artifact.payload.reviewedAt = date
@@ -1072,17 +1310,266 @@ public actor EpistoriaStore {
         )
     }
 
+    public func saveFreeResponseFeedbackDraftReview(
+        id artifactId: UUID,
+        response: FreeResponseFeedbackResponse,
+        at date: Date = .now
+    ) async throws {
+        var artifact = try await payload(FreeResponseFeedbackArtifact.self, id: artifactId)
+        guard artifact.payload.reviewState != .accepted else {
+            throw StoreError.artifactAlreadyAccepted
+        }
+        var candidate = response
+        candidate.feedback = candidate.feedback.trimmingCharacters(in: .whitespacesAndNewlines)
+        candidate.uncertainty = candidate.uncertainty.trimmingCharacters(in: .whitespacesAndNewlines)
+        candidate.strengths = candidate.strengths.map {
+            $0.trimmingCharacters(in: .whitespacesAndNewlines)
+        }.filter { !$0.isEmpty }
+        candidate.improvements = candidate.improvements.map {
+            $0.trimmingCharacters(in: .whitespacesAndNewlines)
+        }.filter { !$0.isEmpty }
+        try validateFreeResponseFeedback(candidate, artifact: artifact.payload)
+        artifact.payload.editedResponse = candidate
+        artifact.payload.reviewState = .edited
+        artifact.payload.reviewedAt = date
+        _ = try await save(
+            id: artifactId,
+            payload: artifact.payload,
+            parentId: artifact.payload.attemptId,
+            relationIds: [
+                artifact.payload.attemptId,
+                artifact.payload.responseId,
+                artifact.payload.questionId,
+                artifact.payload.topicId,
+            ] + artifact.payload.sourceIds
+        )
+    }
+
+    public func reviewFreeResponseFeedbackArtifact(
+        id artifactId: UUID,
+        state: AIArtifactReviewState,
+        at date: Date = .now
+    ) async throws {
+        var artifact = try await payload(FreeResponseFeedbackArtifact.self, id: artifactId)
+        if artifact.payload.reviewState == .accepted {
+            if state == .accepted { return }
+            throw StoreError.artifactAlreadyAccepted
+        }
+        guard state != .edited else { throw StoreError.invalidFeedbackReview }
+        var writes: [LocalEntityWrite] = []
+        if state == .accepted {
+            let reviewed = artifact.payload.editedResponse ?? artifact.payload.response
+            try validateFreeResponseFeedback(reviewed, artifact: artifact.payload)
+            var testResponse = try await payload(TestResponsePayload.self, id: artifact.payload.responseId)
+            guard testResponse.payload.attemptId == artifact.payload.attemptId,
+                  testResponse.payload.questionId == artifact.payload.questionId
+            else { throw StoreError.invalidFeedbackReview }
+            testResponse.payload.feedback = reviewed.feedback
+            testResponse.payload.score = reviewed.proposedScore
+            testResponse.payload.feedbackStrengths = reviewed.strengths
+            testResponse.payload.feedbackImprovements = reviewed.improvements
+            testResponse.payload.feedbackUncertainty = reviewed.uncertainty
+            testResponse.payload.feedbackCitedSourceIds = reviewed.citedSourceIds
+            testResponse.payload.feedbackArtifactId = artifactId
+            testResponse.payload.feedbackAcceptedAt = date
+            testResponse.payload.schemaVersion = "test-response/v2"
+            testResponse.payload.updatedAt = date
+            writes.append(try localWrite(
+                id: testResponse.id,
+                payload: testResponse.payload,
+                parentId: artifact.payload.attemptId,
+                relationIds: [
+                    artifact.payload.attemptId,
+                    artifact.payload.questionId,
+                    artifactId,
+                ] + reviewed.citedSourceIds
+            ))
+        }
+        artifact.payload.reviewState = state
+        artifact.payload.reviewedAt = date
+        writes.append(try localWrite(
+            id: artifactId,
+            payload: artifact.payload,
+            parentId: artifact.payload.attemptId,
+            relationIds: [
+                artifact.payload.attemptId,
+                artifact.payload.responseId,
+                artifact.payload.questionId,
+                artifact.payload.topicId,
+            ] + artifact.payload.sourceIds
+        ))
+        try await database.saveLocalBatch(writes)
+    }
+
+    public func setTestResponseScoreOverride(
+        id responseId: UUID,
+        score: Double?,
+        reason: String?,
+        at date: Date = .now
+    ) async throws {
+        var response = try await payload(TestResponsePayload.self, id: responseId)
+        let cleanReason = reason?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if score != nil, cleanReason?.isEmpty != false {
+            throw LocalDatabaseError.queryFailed("a score override needs a reason")
+        }
+        response.payload.scoreOverride = score.map { min(max($0, 0), 1) }
+        response.payload.scoreOverrideReason = score == nil ? nil : cleanReason
+        response.payload.schemaVersion = "test-response/v2"
+        response.payload.updatedAt = date
+        _ = try await save(
+            id: responseId,
+            payload: response.payload,
+            parentId: response.payload.attemptId,
+            relationIds: [
+                response.payload.attemptId,
+                response.payload.questionId,
+                response.payload.feedbackArtifactId,
+            ].compactMap(\ .self) + (response.payload.feedbackCitedSourceIds ?? [])
+        )
+    }
+
+    @discardableResult
+    public func createAutomationGrant(
+        topicIds: [UUID],
+        jobTypes: [AutomationJobKind],
+        minimumIntervalHours: Int,
+        expiresAt: Date,
+        spendingLimitMinorUnits: Int,
+        currencyCode: String = "USD",
+        at date: Date = .now
+    ) async throws -> UUID {
+        let topics = Array(Set(topicIds))
+        let jobs = Array(Set(jobTypes))
+        guard !topics.isEmpty, !jobs.isEmpty, expiresAt > date,
+              spendingLimitMinorUnits > 0, currencyCode == "USD",
+              jobs.allSatisfy({ $0.learningJobType != nil })
+        else { throw StoreError.invalidAutomationGrant }
+        for topicId in topics { _ = try await topic(id: topicId) }
+        return try await save(
+            payload: AutomationGrantPayload(
+                topicIds: topics,
+                jobTypes: jobs,
+                minimumIntervalHours: minimumIntervalHours,
+                expiresAt: expiresAt,
+                spendingLimitMinorUnits: spendingLimitMinorUnits,
+                currencyCode: currencyCode,
+                now: date
+            ),
+            relationIds: topics
+        )
+    }
+
+    public func updateAutomationGrant(
+        id: UUID,
+        topicIds: [UUID],
+        jobTypes: [AutomationJobKind],
+        minimumIntervalHours: Int,
+        expiresAt: Date,
+        spendingLimitMinorUnits: Int,
+        at date: Date = .now
+    ) async throws {
+        var grant = try await payload(AutomationGrantPayload.self, id: id)
+        let topics = Array(Set(topicIds))
+        let jobs = Array(Set(jobTypes))
+        guard grant.payload.revokedAt == nil, !topics.isEmpty, !jobs.isEmpty,
+              expiresAt > date, spendingLimitMinorUnits > 0,
+              jobs.allSatisfy({ $0.learningJobType != nil })
+        else { throw StoreError.invalidAutomationGrant }
+        for topicId in topics { _ = try await topic(id: topicId) }
+        grant.payload.schemaVersion = "automation-grant/v2"
+        grant.payload.topicIds = topics
+        grant.payload.jobTypes = jobs
+        grant.payload.minimumIntervalHours = max(minimumIntervalHours, 1)
+        grant.payload.expiresAt = expiresAt
+        grant.payload.spendingLimitMinorUnits = spendingLimitMinorUnits
+        grant.payload.currencyCode = "USD"
+        grant.payload.updatedAt = date
+        _ = try await save(id: id, payload: grant.payload, relationIds: topics)
+    }
+
+    public func setAutomationGrantPaused(
+        id: UUID,
+        paused: Bool,
+        at date: Date = .now
+    ) async throws -> [UUID] {
+        var grant = try await payload(AutomationGrantPayload.self, id: id)
+        guard grant.payload.revokedAt == nil else { throw StoreError.invalidAutomationGrant }
+        grant.payload.schemaVersion = "automation-grant/v2"
+        grant.payload.pausedAt = paused ? (grant.payload.pausedAt ?? date) : nil
+        grant.payload.updatedAt = date
+        _ = try await save(id: id, payload: grant.payload, relationIds: grant.payload.topicIds)
+        return grant.payload.queuedJobIds ?? []
+    }
+
+    public func revokeAutomationGrant(id: UUID, at date: Date = .now) async throws -> [UUID] {
+        var grant = try await payload(AutomationGrantPayload.self, id: id)
+        grant.payload.schemaVersion = "automation-grant/v2"
+        grant.payload.revokedAt = grant.payload.revokedAt ?? date
+        grant.payload.pausedAt = grant.payload.pausedAt ?? date
+        grant.payload.updatedAt = date
+        _ = try await save(id: id, payload: grant.payload, relationIds: grant.payload.topicIds)
+        return grant.payload.queuedJobIds ?? []
+    }
+
+    public func recordAutomationQueue(
+        grantId: UUID,
+        scopeKey: String,
+        fingerprint: String,
+        jobId: UUID,
+        estimatedSpentMinorUnits: Int,
+        at date: Date = .now
+    ) async throws {
+        var grant = try await payload(AutomationGrantPayload.self, id: grantId)
+        guard grant.payload.isActive(at: date), fingerprint.count == 64,
+              !scopeKey.isEmpty, estimatedSpentMinorUnits < grant.payload.spendingLimitMinorUnits
+        else { throw StoreError.invalidAutomationGrant }
+        grant.payload.schemaVersion = "automation-grant/v2"
+        var queuedAt = grant.payload.lastQueuedAtByScope ?? [:]
+        var fingerprints = grant.payload.lastInputFingerprintByScope ?? [:]
+        var jobs = grant.payload.queuedJobIds ?? []
+        queuedAt[scopeKey] = date
+        fingerprints[scopeKey] = fingerprint
+        if !jobs.contains(jobId) { jobs.append(jobId) }
+        grant.payload.lastQueuedAtByScope = queuedAt
+        grant.payload.lastInputFingerprintByScope = fingerprints
+        grant.payload.queuedJobIds = Array(jobs.suffix(100))
+        grant.payload.estimatedSpentMinorUnits = max(estimatedSpentMinorUnits, 0)
+        grant.payload.updatedAt = date
+        _ = try await save(id: grantId, payload: grant.payload, relationIds: grant.payload.topicIds)
+    }
+
+    private func validateFreeResponseFeedback(
+        _ response: FreeResponseFeedbackResponse,
+        artifact: FreeResponseFeedbackArtifact
+    ) throws {
+        let allowed = Set(artifact.sourceIds)
+        guard !response.feedback.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              !response.uncertainty.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              response.proposedScore >= 0,
+              response.proposedScore <= 1,
+              !response.citedSourceIds.isEmpty,
+              Set(response.citedSourceIds).isSubset(of: allowed)
+        else { throw StoreError.invalidFeedbackReview }
+    }
+
     private func validatedLearningResponse(
         for artifact: LearningGenerationArtifact
     ) throws -> LearningGenerationResponse {
         let response = artifact.editedResponse ?? artifact.response
         let originalIds = Set(artifact.response.items.map(\.id))
         let selectedIds = response.items.map(\.id)
+        let originalLinkIds = Set(artifact.response.resolvedConceptLinks.map(\.id))
+        let selectedLinkIds = response.resolvedConceptLinks.map(\.id)
+        let allowedSourceIds = Set(artifact.sourceIds)
+        let allowedConceptIds = Set(artifact.knownConceptIds ?? [])
         guard Set(selectedIds).count == selectedIds.count,
               selectedIds.allSatisfy(originalIds.contains),
+              Set(selectedLinkIds).count == selectedLinkIds.count,
+              selectedLinkIds.allSatisfy(originalLinkIds.contains),
+              artifact.jobType == .conceptSuggestions || response.resolvedConceptLinks.isEmpty,
               response.items.allSatisfy({ item in
                   let title = item.title.trimmingCharacters(in: .whitespacesAndNewlines)
-                  guard !title.isEmpty, Set(item.citedSourceIds).isSubset(of: Set(artifact.sourceIds)) else {
+                  guard !title.isEmpty, Set(item.citedSourceIds).isSubset(of: allowedSourceIds) else {
                       return false
                   }
                   switch artifact.jobType {
@@ -1093,6 +1580,24 @@ public actor EpistoriaStore {
                   default:
                       return true
                   }
+              }),
+              response.resolvedConceptLinks.allSatisfy({ link in
+                  let sourceName = link.sourceConceptName.trimmingCharacters(in: .whitespacesAndNewlines)
+                  let targetName = link.targetConceptName.trimmingCharacters(in: .whitespacesAndNewlines)
+                  let rationale = link.rationale.trimmingCharacters(in: .whitespacesAndNewlines)
+                  let cited = Set(link.citedSourceIds)
+                  let idsAreAllowed = [link.sourceConceptId, link.targetConceptId]
+                      .compactMap(\ .self).allSatisfy(allowedConceptIds.contains)
+                  return !sourceName.isEmpty
+                      && !targetName.isEmpty
+                      && !rationale.isEmpty
+                      && !cited.isEmpty
+                      && cited.isSubset(of: allowedSourceIds)
+                      && idsAreAllowed
+                      && link.sourceConceptId != link.targetConceptId
+                      && (link.sourceConceptId != nil
+                          || link.targetConceptId != nil
+                          || sourceName.localizedCaseInsensitiveCompare(targetName) != .orderedSame)
               })
         else { throw StoreError.invalidDraftReview }
         return response
@@ -1311,6 +1816,7 @@ public actor EpistoriaStore {
         objectives: [TestObjective],
         questions: [ManualTestQuestion],
         includeConnectedKnowledge: Bool = false,
+        timeLimitMinutes: Int? = nil,
         at date: Date = .now
     ) async throws -> UUID {
         _ = try await topic(id: topicId)
@@ -1344,10 +1850,16 @@ public actor EpistoriaStore {
             mode: mode,
             objectives: objectives,
             requestedQuestionCount: questions.count,
+            timeLimitMinutes: timeLimitMinutes,
             now: date
         )
         let covered = Set(questions.flatMap(\.objectiveIds))
         blueprint.uncoveredObjectives = objectives.map(\.id).filter { !covered.contains($0) }
+        if !blueprint.uncoveredObjectives.isEmpty {
+            blueprint.coverageNotes = [
+                "\(blueprint.uncoveredObjectives.count) objective\(blueprint.uncoveredObjectives.count == 1 ? "" : "s") have no question."
+            ]
+        }
         var test = PracticeTestPayload(
             topicId: topicId,
             title: title,
@@ -1417,6 +1929,8 @@ public actor EpistoriaStore {
         title: String,
         originalAssetId: UUID? = nil,
         canonicalURL: URL? = nil,
+        capturedURL: URL? = nil,
+        identifiers: [String] = [],
         primaryTopicId: UUID? = nil,
         sessionId: UUID? = nil,
         at date: Date = .now
@@ -1433,13 +1947,15 @@ public actor EpistoriaStore {
             now: date
         )
         source.canonicalURL = canonicalURL
+        source.identifiers = Array(Set(identifiers.filter { !$0.isEmpty })).sorted()
         source.currentVersionId = versionId
-        let version = SourceVersionPayload(
+        var version = SourceVersionPayload(
             sourceId: sourceId,
             versionNumber: 1,
             originalAssetId: originalAssetId,
             now: date
         )
+        version.capturedURL = capturedURL
         var writes = try [
             localWrite(
                 id: sourceId,
@@ -1625,6 +2141,271 @@ public actor EpistoriaStore {
         return (annotationId, evidenceId)
     }
 
+    /// Returns every owner correction for one immutable transcript, including superseded and
+    /// retracted history. Generated transcript chunks are never rewritten.
+    public func transcriptCorrections(
+        transcriptionArtifactId: UUID
+    ) async throws -> [IdentifiedPayload<TranscriptCorrectionPayload>] {
+        let manifest = try await payload(MediaTranscriptionManifest.self, id: transcriptionArtifactId)
+        return try await list(TranscriptCorrectionPayload.self, parentId: manifest.payload.sourceId)
+            .filter { $0.payload.transcriptionArtifactId == transcriptionArtifactId }
+            .sorted {
+                if $0.payload.segmentIndex == $1.payload.segmentIndex {
+                    return $0.payload.createdAt < $1.payload.createdAt
+                }
+                return $0.payload.segmentIndex < $1.payload.segmentIndex
+            }
+    }
+
+    /// Creates a new correction revision and supersedes the prior active correction in the same
+    /// local transaction. Concurrent active corrections fail closed when read.
+    @discardableResult
+    public func createTranscriptCorrection(
+        transcriptionArtifactId: UUID,
+        segmentIndex: Int,
+        correctedText: String,
+        reason: String? = nil,
+        at date: Date = .now
+    ) async throws -> UUID {
+        var manifest = try await payload(MediaTranscriptionManifest.self, id: transcriptionArtifactId)
+        let segments = try await transcriptProviderSegments(manifest: manifest.payload)
+        guard let segment = segments.first(where: { $0.index == segmentIndex }) else {
+            throw StoreError.invalidTranscriptCorrection
+        }
+        let cleanText = correctedText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanReason = reason?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+        guard !cleanText.isEmpty else { throw StoreError.invalidTranscriptCorrection }
+
+        var allCorrections = try await transcriptCorrections(
+            transcriptionArtifactId: transcriptionArtifactId
+        )
+        let active = allCorrections.filter {
+            $0.payload.segmentIndex == segmentIndex && $0.payload.state == .active
+        }
+        guard active.count <= 1 else { throw StoreError.transcriptCorrectionConflict }
+        let currentText = active.first?.payload.correctedText ?? segment.text
+        guard cleanText != currentText else { throw StoreError.invalidTranscriptCorrection }
+
+        let correctionId = UUID()
+        let previousId = active.first?.id
+        let correction = TranscriptCorrectionPayload(
+            sourceId: manifest.payload.sourceId,
+            sourceVersionId: manifest.payload.sourceVersionId,
+            transcriptionArtifactId: transcriptionArtifactId,
+            segment: segment,
+            correctedText: cleanText,
+            reason: cleanReason,
+            supersedesCorrectionId: previousId,
+            now: date
+        )
+
+        var writes: [LocalEntityWrite] = []
+        for index in allCorrections.indices where allCorrections[index].payload.segmentIndex == segmentIndex
+            && allCorrections[index].payload.state == .active {
+            allCorrections[index].payload.state = .superseded
+            allCorrections[index].payload.updatedAt = date
+            writes.append(try localWrite(
+                id: allCorrections[index].id,
+                payload: allCorrections[index].payload,
+                parentId: manifest.payload.sourceId,
+                relationIds: transcriptCorrectionRelationIds(allCorrections[index].payload)
+            ))
+        }
+
+        manifest.payload.reviewState = .edited
+        manifest.payload.reviewedAt = date
+        writes.append(try localWrite(
+            id: transcriptionArtifactId,
+            payload: manifest.payload,
+            parentId: manifest.payload.sourceId,
+            relationIds: [
+                manifest.payload.sourceId,
+                manifest.payload.sourceVersionId,
+            ] + manifest.payload.chunkEntityIds
+        ))
+        writes.append(try localWrite(
+            id: correctionId,
+            payload: correction,
+            parentId: correction.sourceId,
+            relationIds: transcriptCorrectionRelationIds(correction)
+        ))
+        _ = try await database.saveLocalBatch(writes)
+        return correctionId
+    }
+
+    /// Retraction preserves the correction text and history while removing it from the effective
+    /// transcript. It never restores an older superseded correction implicitly.
+    public func retractTranscriptCorrection(
+        id: UUID,
+        at date: Date = .now
+    ) async throws {
+        var correction = try await payload(TranscriptCorrectionPayload.self, id: id)
+        guard correction.payload.state == .active else {
+            throw StoreError.invalidTranscriptCorrection
+        }
+        correction.payload.state = .retracted
+        correction.payload.updatedAt = date
+        _ = try await save(
+            id: id,
+            payload: correction.payload,
+            parentId: correction.payload.sourceId,
+            relationIds: transcriptCorrectionRelationIds(correction.payload)
+        )
+    }
+
+    /// Resolves independently-created active corrections without deleting either record. Passing
+    /// `nil` restores generated text by retracting every active candidate.
+    public func resolveTranscriptCorrectionConflict(
+        transcriptionArtifactId: UUID,
+        segmentIndex: Int,
+        keeping correctionId: UUID?,
+        at date: Date = .now
+    ) async throws {
+        let manifest = try await payload(MediaTranscriptionManifest.self, id: transcriptionArtifactId)
+        var corrections = try await transcriptCorrections(
+            transcriptionArtifactId: transcriptionArtifactId
+        )
+        let activeIndexes = corrections.indices.filter {
+            corrections[$0].payload.segmentIndex == segmentIndex
+                && corrections[$0].payload.state == .active
+        }
+        guard activeIndexes.count > 1 else { throw StoreError.invalidTranscriptCorrection }
+        if let correctionId,
+           !activeIndexes.contains(where: { corrections[$0].id == correctionId }) {
+            throw StoreError.invalidTranscriptCorrection
+        }
+
+        let writes = try activeIndexes.map { index in
+            corrections[index].payload.state = corrections[index].id == correctionId
+                ? .active
+                : (correctionId == nil ? .retracted : .superseded)
+            corrections[index].payload.updatedAt = date
+            return try localWrite(
+                id: corrections[index].id,
+                payload: corrections[index].payload,
+                parentId: manifest.payload.sourceId,
+                relationIds: transcriptCorrectionRelationIds(corrections[index].payload)
+            )
+        }
+        _ = try await database.saveLocalBatch(writes)
+    }
+
+    public func reviewedTranscriptSegments(
+        transcriptionArtifactId: UUID
+    ) async throws -> [ReviewedTranscriptSegment] {
+        let manifest = try await payload(MediaTranscriptionManifest.self, id: transcriptionArtifactId)
+        let segments = try await transcriptProviderSegments(manifest: manifest.payload)
+        let corrections = try await transcriptCorrections(
+            transcriptionArtifactId: transcriptionArtifactId
+        ).filter { $0.payload.state == .active }
+        let grouped = Dictionary(grouping: corrections, by: \ .payload.segmentIndex)
+        guard grouped.values.allSatisfy({ $0.count == 1 }) else {
+            throw StoreError.transcriptCorrectionConflict
+        }
+        return segments.map { segment in
+            let correction = grouped[segment.index]?.first
+            return ReviewedTranscriptSegment(
+                original: segment,
+                text: correction?.payload.correctedText ?? segment.text,
+                correctionId: correction?.id
+            )
+        }
+    }
+
+    /// Freezes a contiguous transcript range as Evidence. The excerpt records the reviewed text,
+    /// while the locator, provider artifact, segment indexes, and correction IDs retain provenance.
+    @discardableResult
+    public func createTranscriptEvidence(
+        transcriptionArtifactId: UUID,
+        segmentIndexes: [Int],
+        note: String? = nil,
+        at date: Date = .now
+    ) async throws -> UUID {
+        let manifest = try await payload(MediaTranscriptionManifest.self, id: transcriptionArtifactId)
+        guard manifest.payload.reviewState == .accepted || manifest.payload.reviewState == .edited else {
+            throw StoreError.transcriptReviewRequired
+        }
+        let reviewed = try await reviewedTranscriptSegments(
+            transcriptionArtifactId: transcriptionArtifactId
+        )
+        let requested = Set(segmentIndexes)
+        guard !requested.isEmpty else { throw SourceModelError.emptyEvidence }
+        let positions = reviewed.indices.filter { requested.contains(reviewed[$0].original.index) }
+        guard positions.count == requested.count,
+              let firstPosition = positions.first,
+              let lastPosition = positions.last,
+              positions.count == lastPosition - firstPosition + 1
+        else { throw SourceModelError.invalidLocator }
+
+        let selected = Array(reviewed[firstPosition...lastPosition])
+        let excerpt = selected.map(\ .text).joined(separator: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !excerpt.isEmpty else { throw SourceModelError.emptyEvidence }
+        let locator = SourceLocator(
+            kind: .media,
+            startSeconds: selected.first?.original.startSeconds,
+            endSeconds: selected.last?.original.endSeconds
+        )
+        try locator.validate()
+        _ = try await payload(SourcePayload.self, id: manifest.payload.sourceId)
+        let version = try await payload(
+            SourceVersionPayload.self,
+            id: manifest.payload.sourceVersionId
+        )
+        guard version.payload.sourceId == manifest.payload.sourceId else {
+            throw SourceModelError.sourceVersionMismatch
+        }
+
+        var evidence = EvidencePayload(
+            sourceId: manifest.payload.sourceId,
+            sourceVersionId: manifest.payload.sourceVersionId,
+            kind: .mediaClip,
+            locator: locator,
+            excerpt: excerpt,
+            now: date
+        )
+        evidence.note = note?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+        evidence.transcriptionArtifactId = transcriptionArtifactId
+        evidence.transcriptSegmentIndexes = selected.map(\ .original.index)
+        evidence.transcriptCorrectionIds = selected.compactMap(\ .correctionId)
+        return try await save(
+            payload: evidence,
+            parentId: manifest.payload.sourceId,
+            relationIds: [
+                manifest.payload.sourceId,
+                manifest.payload.sourceVersionId,
+                transcriptionArtifactId,
+            ] + evidence.resolvedTranscriptCorrectionIds
+        )
+    }
+
+    private func transcriptProviderSegments(
+        manifest: MediaTranscriptionManifest
+    ) async throws -> [TranscriptSegment] {
+        var chunks: [MediaTranscriptionChunk] = []
+        for id in manifest.chunkEntityIds {
+            guard let entity = try await database.entity(id: id),
+                  let chunk = try? CanonicalJSON.decode(MediaTranscriptionChunk.self, from: entity.content),
+                  chunk.jobId == manifest.jobId,
+                  chunk.sourceId == manifest.sourceId,
+                  chunk.sourceVersionId == manifest.sourceVersionId
+            else { throw StoreError.entityNotFound }
+            chunks.append(chunk)
+        }
+        return chunks.sorted { $0.chunkIndex < $1.chunkIndex }.flatMap(\ .segments)
+    }
+
+    private func transcriptCorrectionRelationIds(
+        _ correction: TranscriptCorrectionPayload
+    ) -> [UUID] {
+        [
+            correction.sourceId,
+            correction.sourceVersionId,
+            correction.transcriptionArtifactId,
+            correction.supersedesCorrectionId,
+        ].compactMap(\ .self)
+    }
+
     @discardableResult
     public func createConcept(
         name: String,
@@ -1691,6 +2472,161 @@ public actor EpistoriaStore {
             parentId: conceptId,
             relationIds: [conceptId, evidenceId]
         )
+    }
+
+    /// Creates one durable typed edge between two Concepts. Identical edges are idempotent so a
+    /// repeated review or retry cannot duplicate the owner's knowledge graph.
+    @discardableResult
+    public func createConceptLink(
+        sourceConceptId: UUID,
+        targetConceptId: UUID,
+        relation: ConceptLinkKind,
+        rationale: String? = nil,
+        evidenceIds: [UUID] = [],
+        provenance: RecordProvenance = .user,
+        generatorArtifactId: UUID? = nil,
+        at date: Date = .now
+    ) async throws -> UUID {
+        guard sourceConceptId != targetConceptId else { throw StoreError.invalidConceptLink }
+        _ = try await payload(ConceptPayload.self, id: sourceConceptId)
+        _ = try await payload(ConceptPayload.self, id: targetConceptId)
+        let uniqueEvidenceIds = Array(Set(evidenceIds))
+        for evidenceId in uniqueEvidenceIds {
+            _ = try await payload(EvidencePayload.self, id: evidenceId)
+        }
+        if let generatorArtifactId {
+            _ = try await payload(LearningGenerationArtifact.self, id: generatorArtifactId)
+        }
+        if let existing = try await list(ConceptLinkPayload.self).first(where: {
+            $0.payload.sourceConceptId == sourceConceptId
+                && $0.payload.targetConceptId == targetConceptId
+                && $0.payload.relation == relation
+        }) {
+            return existing.id
+        }
+        let cleanRationale = rationale?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let payload = ConceptLinkPayload(
+            sourceConceptId: sourceConceptId,
+            targetConceptId: targetConceptId,
+            relation: relation,
+            provenance: provenance,
+            rationale: cleanRationale?.isEmpty == true ? nil : cleanRationale,
+            evidenceIds: uniqueEvidenceIds,
+            generatorArtifactId: generatorArtifactId,
+            now: date
+        )
+        return try await save(
+            payload: payload,
+            parentId: sourceConceptId,
+            relationIds: [sourceConceptId, targetConceptId, generatorArtifactId].compactMap(\ .self)
+                + uniqueEvidenceIds
+        )
+    }
+
+    public func updateConceptLink(
+        id: UUID,
+        relation: ConceptLinkKind,
+        rationale: String?,
+        evidenceIds: [UUID],
+        at date: Date = .now
+    ) async throws {
+        var link = try await payload(ConceptLinkPayload.self, id: id)
+        let uniqueEvidenceIds = Array(Set(evidenceIds))
+        for evidenceId in uniqueEvidenceIds {
+            _ = try await payload(EvidencePayload.self, id: evidenceId)
+        }
+        let duplicate = try await list(ConceptLinkPayload.self).contains {
+            $0.id != id
+                && $0.payload.sourceConceptId == link.payload.sourceConceptId
+                && $0.payload.targetConceptId == link.payload.targetConceptId
+                && $0.payload.relation == relation
+        }
+        guard !duplicate else { throw StoreError.invalidConceptLink }
+        let cleanRationale = rationale?.trimmingCharacters(in: .whitespacesAndNewlines)
+        link.payload.relation = relation
+        link.payload.rationale = cleanRationale?.isEmpty == true ? nil : cleanRationale
+        link.payload.evidenceIds = uniqueEvidenceIds
+        link.payload.updatedAt = date
+        _ = try await save(
+            id: id,
+            payload: link.payload,
+            parentId: link.payload.sourceConceptId,
+            relationIds: [
+                link.payload.sourceConceptId,
+                link.payload.targetConceptId,
+                link.payload.generatorArtifactId,
+            ].compactMap(\ .self) + uniqueEvidenceIds
+        )
+    }
+
+    public func conceptLinks(conceptId: UUID) async throws -> [IdentifiedPayload<ConceptLinkPayload>] {
+        _ = try await payload(ConceptPayload.self, id: conceptId)
+        return try await list(ConceptLinkPayload.self).filter {
+            $0.payload.sourceConceptId == conceptId || $0.payload.targetConceptId == conceptId
+        }.sorted { $0.payload.updatedAt > $1.payload.updatedAt }
+    }
+
+    public func removeConceptLink(id: UUID, at date: Date = .now) async throws {
+        _ = try await payload(ConceptLinkPayload.self, id: id)
+        try await database.deleteLocal(id: id, modifiedAt: date)
+    }
+
+    /// Rebuilds every durable use of one Evidence record. The projection avoids a second mutable
+    /// backlink index and remains correct after conflict preservation or recovery.
+    public func evidenceBacklinks(evidenceId: UUID) async throws -> [EvidenceBacklink] {
+        _ = try await payload(EvidencePayload.self, id: evidenceId)
+        let noteBlocks = try await list(NoteBlockPayload.self).filter {
+            !$0.payload.tombstone && $0.payload.evidenceId == evidenceId
+        }
+        let conceptRelations = try await list(ConceptEvidenceRelationPayload.self).filter {
+            $0.payload.evidenceId == evidenceId
+        }
+        let revisions = try await list(FlashcardRevisionPayload.self).filter {
+            $0.payload.evidenceIds.contains(evidenceId)
+        }
+        let questions = try await list(TestQuestionPayload.self).filter {
+            $0.payload.evidenceIds.contains(evidenceId)
+        }
+
+        var result: [EvidenceBacklink] = []
+        for block in noteBlocks {
+            let note = try? await payload(NotePayload.self, id: block.payload.noteId)
+            result.append(EvidenceBacklink(
+                id: block.id,
+                kind: .note,
+                ownerId: block.payload.noteId,
+                title: note?.payload.title ?? "Note"
+            ))
+        }
+        for relation in conceptRelations {
+            let concept = try? await payload(ConceptPayload.self, id: relation.payload.conceptId)
+            result.append(EvidenceBacklink(
+                id: relation.id,
+                kind: .concept,
+                ownerId: relation.payload.conceptId,
+                title: concept?.payload.name ?? "Concept"
+            ))
+        }
+        for revision in revisions {
+            result.append(EvidenceBacklink(
+                id: revision.id,
+                kind: .flashcard,
+                ownerId: revision.payload.cardId,
+                title: revision.payload.prompt
+            ))
+        }
+        for question in questions {
+            result.append(EvidenceBacklink(
+                id: question.id,
+                kind: .testQuestion,
+                ownerId: question.payload.testId,
+                title: question.payload.prompt
+            ))
+        }
+        return result.sorted {
+            if $0.kind.rawValue == $1.kind.rawValue { return $0.title < $1.title }
+            return $0.kind.rawValue < $1.kind.rawValue
+        }
     }
 
     private func localWrite<Payload: EntityPayload>(

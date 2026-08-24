@@ -65,7 +65,12 @@ final class NotePDFExportService {
         try Self.removeAllTemporaryPDFs()
         async let loadedNote = store.payload(NotePayload.self, id: noteId)
         async let loadedBlocks = store.list(NoteBlockPayload.self, parentId: noteId)
-        let (note, allBlocks) = try await (loadedNote, loadedBlocks)
+        async let loadedEvidence = store.list(EvidencePayload.self)
+        async let loadedSources = store.list(SourcePayload.self)
+        async let loadedVersions = store.list(SourceVersionPayload.self)
+        let (note, allBlocks, evidence, sources, versions) = try await (
+            loadedNote, loadedBlocks, loadedEvidence, loadedSources, loadedVersions
+        )
         try Task.checkCancellation()
         let blocks = allBlocks
             .filter { !$0.payload.tombstone }
@@ -73,6 +78,12 @@ final class NotePDFExportService {
         let configuration = note.payload.canvas ?? NoteCanvasConfiguration()
         let plans = try pagePlans(configuration: configuration, blocks: blocks)
         let images = try await loadImages(for: blocks)
+        let evidenceCards = evidenceCards(
+            for: blocks,
+            evidence: evidence,
+            sources: sources,
+            versions: versions
+        )
         try Task.checkCancellation()
 
         try fileManager.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
@@ -114,6 +125,7 @@ final class NotePDFExportService {
                         configuration: configuration,
                         blocks: blocks,
                         images: images,
+                        evidenceCards: evidenceCards,
                         context: rendererContext.cgContext
                     )
                 }
@@ -247,6 +259,7 @@ final class NotePDFExportService {
         configuration: NoteCanvasConfiguration,
         blocks: [IdentifiedPayload<NoteBlockPayload>],
         images: [UUID: UIImage],
+        evidenceCards: [UUID: NSAttributedString],
         context: CGContext
     ) {
         let outputBounds = CGRect(origin: .zero, size: plan.outputSize)
@@ -270,7 +283,13 @@ final class NotePDFExportService {
         for (legacyIndex, block) in arranged {
             let placement = block.payload.canvasPlacement
                 ?? legacyPlacement(for: block.payload, index: legacyIndex, pageWidth: plan.worldRect.width)
-            draw(block: block, placement: placement, image: images[block.id], context: context)
+            draw(
+                block: block,
+                placement: placement,
+                image: images[block.id],
+                evidenceCard: evidenceCards[block.id],
+                context: context
+            )
         }
 
         for block in blocks where block.payload.canvasRole == .inkLayer
@@ -290,6 +309,7 @@ final class NotePDFExportService {
         block: IdentifiedPayload<NoteBlockPayload>,
         placement: NoteCanvasPlacement,
         image: UIImage?,
+        evidenceCard: NSAttributedString?,
         context: CGContext
     ) {
         let rect = placement.rect
@@ -333,6 +353,17 @@ final class NotePDFExportService {
                     context.strokePath()
                 }
             }
+        case .callout where block.payload.evidenceId != nil:
+            context.setFillColor(UIColor.systemBackground.cgColor)
+            context.fill(localRect)
+            context.setStrokeColor(UIColor.label.withAlphaComponent(0.2).cgColor)
+            context.setLineWidth(0.5)
+            context.stroke(localRect)
+            (evidenceCard ?? NSAttributedString(string: block.payload.plainText)).draw(
+                with: localRect.insetBy(dx: 10, dy: 10),
+                options: .usesLineFragmentOrigin,
+                context: nil
+            )
         default:
             let fallback = block.payload.plainText.isEmpty
                 ? "Preserved \(block.payload.blockType.rawValue.lowercased()) item"
@@ -346,6 +377,65 @@ final class NotePDFExportService {
             ).draw(with: localRect.insetBy(dx: 8, dy: 8), options: .usesLineFragmentOrigin, context: nil)
         }
         context.restoreGState()
+    }
+
+    private func evidenceCards(
+        for blocks: [IdentifiedPayload<NoteBlockPayload>],
+        evidence: [IdentifiedPayload<EvidencePayload>],
+        sources: [IdentifiedPayload<SourcePayload>],
+        versions: [IdentifiedPayload<SourceVersionPayload>]
+    ) -> [UUID: NSAttributedString] {
+        let evidenceById = Dictionary(uniqueKeysWithValues: evidence.map { ($0.id, $0.payload) })
+        let sourceById = Dictionary(uniqueKeysWithValues: sources.map { ($0.id, $0.payload) })
+        let versionById = Dictionary(uniqueKeysWithValues: versions.map { ($0.id, $0.payload) })
+        var result: [UUID: NSAttributedString] = [:]
+        for block in blocks {
+            guard let evidenceId = block.payload.evidenceId,
+                  let item = evidenceById[evidenceId]
+            else { continue }
+            let source = sourceById[item.sourceId]?.title ?? "Source"
+            let version = versionById[item.sourceVersionId]?.versionNumber
+            let location: String
+            switch item.locator.kind {
+            case .pdf: location = item.locator.page.map { "Page \($0)" } ?? "PDF"
+            case .slide: location = item.locator.slide.map { "Slide \($0)" } ?? "Slide"
+            case .media:
+                let start = evidenceMediaTimeLabel(item.locator.startSeconds ?? 0)
+                if let end = item.locator.endSeconds, end > (item.locator.startSeconds ?? 0) {
+                    location = "\(start)–\(evidenceMediaTimeLabel(end))"
+                } else {
+                    location = start
+                }
+            default: location = "Saved excerpt"
+            }
+            let citation = "\(source) · \(location) · \(version.map { "Version \($0)" } ?? "Saved version")"
+            let text = NSMutableAttributedString(
+                string: item.excerpt.isEmpty ? (item.note ?? "Evidence") : item.excerpt,
+                attributes: [
+                    .font: UIFont.preferredFont(forTextStyle: .body),
+                    .foregroundColor: UIColor.label,
+                ]
+            )
+            text.append(NSAttributedString(
+                string: "\n\n\(citation)",
+                attributes: [
+                    .font: UIFont.preferredFont(forTextStyle: .caption1),
+                    .foregroundColor: UIColor.secondaryLabel,
+                ]
+            ))
+            result[block.id] = text
+        }
+        return result
+    }
+
+    private func evidenceMediaTimeLabel(_ value: Double) -> String {
+        let seconds = max(Int(value.isFinite ? value.rounded(.down) : 0), 0)
+        let hours = seconds / 3_600
+        let minutes = (seconds % 3_600) / 60
+        let remainder = seconds % 60
+        return hours > 0
+            ? String(format: "%d:%02d:%02d", hours, minutes, remainder)
+            : String(format: "%d:%02d", minutes, remainder)
     }
 
     private func drawPaper(

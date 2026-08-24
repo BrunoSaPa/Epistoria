@@ -29,6 +29,12 @@ class MonthlyCostStatus:
         return self.estimated_usd / self.soft_budget_usd
 
 
+@dataclass(frozen=True, slots=True)
+class AutomationCostStatus:
+    estimated_usd: float
+    last_recorded_at: datetime | None
+
+
 class CostLedger:
     """Atomic, local-only ledger containing operational cost metadata and no content."""
 
@@ -62,10 +68,16 @@ class CostLedger:
         output_tokens: int | None,
         estimated_cost_usd: float | None,
         provider_request_id: str | None,
+        automation_grant_id: UUID | None = None,
+        automation_scope_key: str | None = None,
         recorded_at: datetime | None = None,
     ) -> MonthlyCostStatus:
         if estimated_cost_usd is None:
-            return self.status(recorded_at)
+            if automation_grant_id is None:
+                return self.status(recorded_at)
+            # Automatic work needs a durable cadence marker even when the
+            # provider has no configured price for the selected model.
+            estimated_cost_usd = 0
         if estimated_cost_usd < 0:
             raise ValueError("estimated cost cannot be negative")
         timestamp = (recorded_at or datetime.now(UTC)).astimezone(UTC)
@@ -87,6 +99,10 @@ class CostLedger:
                             "+00:00", "Z"
                         ),
                         "estimatedCostUsd": round(estimated_cost_usd, 8),
+                        "automationGrantId": (
+                            str(automation_grant_id) if automation_grant_id else None
+                        ),
+                        "automationScopeKey": automation_scope_key,
                     }
                 )
                 self._write(document)
@@ -97,6 +113,34 @@ class CostLedger:
             )
         return MonthlyCostStatus(
             timestamp.strftime("%Y-%m"), round(estimated, 8), self._soft_budget
+        )
+
+    def automation_status(
+        self,
+        *,
+        grant_id: UUID,
+        scope_key: str,
+    ) -> AutomationCostStatus:
+        with self._locked():
+            document = self._read()
+        matching = [
+            event
+            for event in document["events"]
+            if event.get("automationGrantId") == str(grant_id)
+        ]
+        scoped = [event for event in matching if event.get("automationScopeKey") == scope_key]
+        last_recorded = max(
+            (
+                datetime.fromisoformat(event["recordedAt"].replace("Z", "+00:00"))
+                for event in scoped
+            ),
+            default=None,
+        )
+        return AutomationCostStatus(
+            estimated_usd=round(
+                sum(float(event["estimatedCostUsd"]) for event in matching), 8
+            ),
+            last_recorded_at=last_recorded,
         )
 
     @contextmanager
@@ -136,6 +180,14 @@ class CostLedger:
                 or not isinstance(event.get("month"), str)
                 or not isinstance(event.get("recordedAt"), str)
                 or not isinstance(event.get("estimatedCostUsd"), (int, float))
+                or not (
+                    event.get("automationGrantId") is None
+                    or isinstance(event.get("automationGrantId"), str)
+                )
+                or not (
+                    event.get("automationScopeKey") is None
+                    or isinstance(event.get("automationScopeKey"), str)
+                )
                 or not (
                     event.get("inputTokens") is None
                     or isinstance(event.get("inputTokens"), int)

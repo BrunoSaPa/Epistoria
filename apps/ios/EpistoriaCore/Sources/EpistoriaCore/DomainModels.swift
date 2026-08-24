@@ -17,6 +17,7 @@ public enum EntityType: String, Codable, CaseIterable, Sendable {
     case sessionNote = "SESSION_NOTE"
     case sessionResource = "SESSION_RESOURCE"
     case aiArtifact = "AI_ARTIFACT"
+    case transcriptCorrection = "TRANSCRIPT_CORRECTION"
     case sourceVersion = "SOURCE_VERSION"
     case evidence = "EVIDENCE"
     case concept = "CONCEPT"
@@ -503,7 +504,7 @@ public struct NotePayload: EntityPayload, Equatable {
 
 public struct NoteBlockPayload: EntityPayload, Equatable {
     public static let entityType = EntityType.noteBlock
-    public var schemaVersion = "note-block/v4"
+    public var schemaVersion = "note-block/v5"
     public var noteId: UUID
     public var blockType: NoteBlockKind
     public var orderKey: String
@@ -511,6 +512,8 @@ public struct NoteBlockPayload: EntityPayload, Equatable {
     public var richTextRtf: Data?
     public var drawingData: Data?
     public var assetId: UUID?
+    /// Reuses one immutable Evidence record without copying or weakening its Source Version link.
+    public var evidenceId: UUID?
     public var transcription: String?
     /// Spatial geometry is optional so v1 vertical notes decode without a destructive migration.
     public var canvasPlacement: NoteCanvasPlacement?
@@ -537,6 +540,7 @@ public struct NoteBlockPayload: EntityPayload, Equatable {
         richTextRtf = nil
         drawingData = nil
         assetId = nil
+        evidenceId = nil
         transcription = nil
         canvasPlacement = nil
         canvasRole = nil

@@ -119,7 +119,8 @@ public enum StudyNextEngine {
         }
 
         values.append(contentsOf: storedRecommendations.compactMap { value in
-            guard activeTopics[value.payload.topicId] != nil,
+            guard !value.payload.generatedLocally,
+                  activeTopics[value.payload.topicId] != nil,
                   value.payload.expiresAt.map({ $0 > now }) ?? true
             else { return nil }
             return LocalStudyRecommendation(
@@ -128,7 +129,7 @@ public enum StudyNextEngine {
                 title: value.payload.title,
                 explanation: value.payload.explanation,
                 score: value.payload.score,
-                targetId: value.id
+                targetId: value.payload.targetEntityIds.first
             )
         })
 

@@ -377,8 +377,15 @@ final class CoreTrustTests: XCTestCase {
             api: api
         )
 
+        do {
+            _ = try await manager.decryptedLocalData(assetId: assetId)
+            XCTFail("Expected the local-only read to avoid restoration")
+        } catch let error as AssetManagerError {
+            XCTAssertEqual(error, .encryptedAssetUnavailable)
+        }
+        XCTAssertEqual(objectDownloads.value, 0)
         let first = try await manager.decryptedData(assetId: assetId)
-        let second = try await manager.decryptedData(assetId: assetId)
+        let second = try await manager.decryptedLocalData(assetId: assetId)
         let local = try await database.localAsset(id: assetId)
 
         XCTAssertEqual(first, plaintext)

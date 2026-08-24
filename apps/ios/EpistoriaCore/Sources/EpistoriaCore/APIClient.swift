@@ -399,6 +399,10 @@ public actor EpistoriaAPIClient {
         try await send(method: "GET", path: "ai-jobs/\(id.uuidString.lowercased())")
     }
 
+    public func cancelAIJob(id: UUID) async throws -> AIJobSummary {
+        try await send(method: "POST", path: "ai-jobs/\(id.uuidString.lowercased())/cancel")
+    }
+
     private func endpoint(_ path: String) throws -> URL {
         guard let url = URL(string: path, relativeTo: normalizedBaseURL())?.absoluteURL else {
             throw APIClientError.invalidEndpoint

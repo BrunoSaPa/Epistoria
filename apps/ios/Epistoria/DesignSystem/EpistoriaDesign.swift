@@ -1,6 +1,35 @@
+import EpistoriaCore
 import Observation
 import SwiftUI
 import UIKit
+import UniformTypeIdentifiers
+
+enum EpistoriaSourceImportTypes {
+    static let supported: [UTType] = {
+        let packaged = [
+            "md", "epub", "docx", "odt", "pptx", "odp", "xlsx",
+            "aac", "caf", "m4a", "mp3", "wav",
+            "m4v", "mov", "mp4",
+        ]
+            .compactMap { UTType(filenameExtension: $0) }
+        return [.pdf, .image, .plainText, .html, .commaSeparatedText] + packaged
+    }()
+}
+
+extension ResourceKind {
+    var epistoriaSymbol: String {
+        switch self {
+        case .audio, .lecture: "waveform"
+        case .video, .youtube: "play.rectangle"
+        case .image: "photo"
+        case .csv, .xlsx, .googleSheet: "tablecells"
+        case .epub, .book: "book.closed"
+        case .pptx, .odp, .googleSlides: "rectangle.on.rectangle"
+        case .pdf: "doc.richtext"
+        default: "doc.text"
+        }
+    }
+}
 
 enum EpistoriaDesign {
     /// The fixed identity colors used by the app icon and brand mark.

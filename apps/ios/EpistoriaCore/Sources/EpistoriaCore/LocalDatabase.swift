@@ -367,14 +367,21 @@ public actor SQLCipherDatabase {
         )
     }
 
-    /// Saves a related set of encrypted records and their outbox mutations as one transaction.
-    /// Any malformed or oversized write rejects the complete batch.
+    /// Saves and tombstones a related set of encrypted records and their outbox mutations as one
+    /// transaction. Any malformed or oversized write rejects the complete batch.
     public func saveLocalBatch(
         _ writes: [LocalEntityWrite],
+        deleting deletionIds: [UUID] = [],
+        deletedAt: Date = .now,
         migration: LocalMigrationBatch? = nil
     ) throws {
-        guard !writes.isEmpty else { return }
+        guard !writes.isEmpty || !deletionIds.isEmpty else { return }
         guard Set(writes.map(\.id)).count == writes.count else {
+            throw LocalDatabaseError.queryFailed("duplicate entity in atomic write")
+        }
+        guard Set(deletionIds).count == deletionIds.count,
+              Set(writes.map(\.id)).isDisjoint(with: deletionIds)
+        else {
             throw LocalDatabaseError.queryFailed("duplicate entity in atomic write")
         }
         guard writes.allSatisfy({ $0.content.count <= 2_097_152 }) else {
@@ -387,6 +394,10 @@ public actor SQLCipherDatabase {
                 relationJSON: try encodeUUIDs(write.relationIds),
                 mutationId: UUID()
             )
+        }
+        let preparedDeletions = try deletionIds.compactMap { id -> StoredEntity? in
+            guard let current = try entity(id: id), !current.tombstone else { return nil }
+            return current
         }
         do {
             try transaction {
@@ -410,53 +421,80 @@ public actor SQLCipherDatabase {
                     )
                 }
                 for item in prepared {
-                let write = item.write
-                try run(
-                    """
-                    INSERT INTO entities
-                        (id, entity_type, parent_id, relation_ids, content, revision, tombstone,
-                         client_modified_at, sync_state)
-                    VALUES (?, ?, ?, ?, ?, ?, 0, ?, 'PENDING')
-                    ON CONFLICT(id) DO UPDATE SET
-                        entity_type=excluded.entity_type,
-                        parent_id=excluded.parent_id,
-                        relation_ids=excluded.relation_ids,
-                        content=excluded.content,
-                        tombstone=0,
-                        client_modified_at=excluded.client_modified_at,
-                        sync_state='PENDING'
-                    """,
-                    [
-                        .text(canonical(write.id)),
-                        .text(write.entityType.rawValue),
-                        write.parentId.map { .text(canonical($0)) } ?? .null,
-                        .text(item.relationJSON),
-                        .blob(write.content),
-                        .integer(Int64(item.revision)),
-                        .real(write.modifiedAt.timeIntervalSince1970),
-                    ]
-                )
-                try run("DELETE FROM outbox WHERE entity_id = ?", [.text(canonical(write.id))])
-                try run(
-                    """
-                    INSERT INTO outbox
-                        (mutation_id, entity_id, entity_type, operation, base_revision, parent_id,
-                         relation_ids, content, client_modified_at, attempt_count, created_at)
-                    VALUES (?, ?, ?, 'UPSERT', ?, ?, ?, ?, ?, 0, ?)
-                    """,
-                    [
-                        .text(canonical(item.mutationId)),
-                        .text(canonical(write.id)),
-                        .text(write.entityType.rawValue),
-                        .integer(Int64(item.revision)),
-                        write.parentId.map { .text(canonical($0)) } ?? .null,
-                        .text(item.relationJSON),
-                        .blob(write.content),
-                        .real(write.modifiedAt.timeIntervalSince1970),
-                        .real(Date.now.timeIntervalSince1970),
-                    ]
-                )
+                    let write = item.write
+                    try run(
+                        """
+                        INSERT INTO entities
+                            (id, entity_type, parent_id, relation_ids, content, revision, tombstone,
+                             client_modified_at, sync_state)
+                        VALUES (?, ?, ?, ?, ?, ?, 0, ?, 'PENDING')
+                        ON CONFLICT(id) DO UPDATE SET
+                            entity_type=excluded.entity_type,
+                            parent_id=excluded.parent_id,
+                            relation_ids=excluded.relation_ids,
+                            content=excluded.content,
+                            tombstone=0,
+                            client_modified_at=excluded.client_modified_at,
+                            sync_state='PENDING'
+                        """,
+                        [
+                            .text(canonical(write.id)),
+                            .text(write.entityType.rawValue),
+                            write.parentId.map { .text(canonical($0)) } ?? .null,
+                            .text(item.relationJSON),
+                            .blob(write.content),
+                            .integer(Int64(item.revision)),
+                            .real(write.modifiedAt.timeIntervalSince1970),
+                        ]
+                    )
+                    try run("DELETE FROM outbox WHERE entity_id = ?", [.text(canonical(write.id))])
+                    try run(
+                        """
+                        INSERT INTO outbox
+                            (mutation_id, entity_id, entity_type, operation, base_revision, parent_id,
+                             relation_ids, content, client_modified_at, attempt_count, created_at)
+                        VALUES (?, ?, ?, 'UPSERT', ?, ?, ?, ?, ?, 0, ?)
+                        """,
+                        [
+                            .text(canonical(item.mutationId)),
+                            .text(canonical(write.id)),
+                            .text(write.entityType.rawValue),
+                            .integer(Int64(item.revision)),
+                            write.parentId.map { .text(canonical($0)) } ?? .null,
+                            .text(item.relationJSON),
+                            .blob(write.content),
+                            .real(write.modifiedAt.timeIntervalSince1970),
+                            .real(Date.now.timeIntervalSince1970),
+                        ]
+                    )
                     try updateSearch(id: write.id, document: write.search)
+                }
+                for current in preparedDeletions {
+                    try run(
+                        "UPDATE entities SET tombstone=1, sync_state='PENDING', client_modified_at=? WHERE id=?",
+                        [.real(deletedAt.timeIntervalSince1970), .text(canonical(current.id))]
+                    )
+                    try run("DELETE FROM outbox WHERE entity_id=?", [.text(canonical(current.id))])
+                    try run(
+                        """
+                        INSERT INTO outbox
+                            (mutation_id, entity_id, entity_type, operation, base_revision, parent_id,
+                             relation_ids, content, client_modified_at, attempt_count, created_at)
+                        VALUES (?, ?, ?, 'DELETE', ?, ?, ?, ?, ?, 0, ?)
+                        """,
+                        [
+                            .text(canonical(UUID())),
+                            .text(canonical(current.id)),
+                            .text(current.entityType.rawValue),
+                            .integer(Int64(current.revision)),
+                            current.parentId.map { .text(canonical($0)) } ?? .null,
+                            .text(try encodeUUIDs(current.relationIds)),
+                            .blob(current.content),
+                            .real(deletedAt.timeIntervalSince1970),
+                            .real(Date.now.timeIntervalSince1970),
+                        ]
+                    )
+                    try updateSearch(id: current.id, document: nil)
                 }
                 if let migration {
                     try run(

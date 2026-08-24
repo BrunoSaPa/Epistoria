@@ -34,4 +34,88 @@ final class CanonicalJSONTests: XCTestCase {
             response
         )
     }
+
+    func testMediaTranscriptionContractsRoundTripWithTimestampedSegments() throws {
+        let jobId = UUID()
+        let sourceId = UUID()
+        let sourceVersionId = UUID()
+        let segment = TranscriptSegment(
+            index: 0,
+            startSeconds: 1.25,
+            endSeconds: 4.5,
+            text: "A timestamped explanation."
+        )
+        let chunk = MediaTranscriptionChunk(
+            jobId: jobId,
+            sourceId: sourceId,
+            sourceVersionId: sourceVersionId,
+            chunkIndex: 0,
+            segments: [segment]
+        )
+        let chunkData = try CanonicalJSON.encode(chunk)
+        XCTAssertEqual(
+            try CanonicalJSON.decode(MediaTranscriptionChunk.self, from: chunkData),
+            chunk
+        )
+
+        let manifest = MediaTranscriptionManifest(
+            jobId: jobId,
+            sourceId: sourceId,
+            sourceVersionId: sourceVersionId,
+            generatedAt: Date(timeIntervalSince1970: 1_800_000_000),
+            language: "en",
+            durationSeconds: 4.5,
+            characterCount: segment.text.count,
+            segmentCount: 1,
+            trace: ProviderTrace(
+                provider: "openai",
+                model: "whisper-1",
+                promptVersion: "media-transcription/v1",
+                estimatedCostUsd: 0.00045
+            ),
+            chunkEntityIds: [UUID()]
+        )
+        let manifestData = try CanonicalJSON.encode(manifest)
+        XCTAssertEqual(
+            try CanonicalJSON.decode(MediaTranscriptionManifest.self, from: manifestData),
+            manifest
+        )
+
+        let correction = TranscriptCorrectionPayload(
+            sourceId: sourceId,
+            sourceVersionId: sourceVersionId,
+            transcriptionArtifactId: UUID(),
+            segment: segment,
+            correctedText: "A corrected timestamped explanation.",
+            reason: "Verified against the recording.",
+            now: Date(timeIntervalSince1970: 1_800_000_100)
+        )
+        let correctionData = try CanonicalJSON.encode(correction)
+        XCTAssertEqual(
+            try CanonicalJSON.decode(TranscriptCorrectionPayload.self, from: correctionData),
+            correction
+        )
+    }
+
+    func testLegacyEvidenceDecodesWithoutTranscriptProvenance() throws {
+        let evidence = EvidencePayload(
+            sourceId: UUID(),
+            sourceVersionId: UUID(),
+            kind: .excerpt,
+            locator: SourceLocator(kind: .pdf, page: 2),
+            excerpt: "Legacy excerpt"
+        )
+        var object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: CanonicalJSON.encode(evidence)) as? [String: Any]
+        )
+        object.removeValue(forKey: "transcriptionArtifactId")
+        object.removeValue(forKey: "transcriptSegmentIndexes")
+        object.removeValue(forKey: "transcriptCorrectionIds")
+        let legacyData = try JSONSerialization.data(withJSONObject: object)
+
+        let decoded = try CanonicalJSON.decode(EvidencePayload.self, from: legacyData)
+        XCTAssertNil(decoded.transcriptionArtifactId)
+        XCTAssertTrue(decoded.resolvedTranscriptSegmentIndexes.isEmpty)
+        XCTAssertTrue(decoded.resolvedTranscriptCorrectionIds.isEmpty)
+    }
 }

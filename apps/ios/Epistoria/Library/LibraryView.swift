@@ -1,7 +1,11 @@
+import AVFAudio
+import AVFoundation
+import AVKit
 import EpistoriaCore
 import PDFKit
 import SwiftUI
 import UniformTypeIdentifiers
+import WebKit
 
 struct LibraryView: View {
     private enum LibrarySection: String, CaseIterable, Identifiable {
@@ -19,6 +23,16 @@ struct LibraryView: View {
     @State private var selectedType: ResourceKind?
     @State private var selectedTopicId: UUID?
     @State private var isImporting = false
+    @State private var isCapturingWebPage = false
+    @State private var webAddress = ""
+    @State private var webTopicId: UUID?
+    @State private var isCapturingGoogleFile = false
+    @State private var googleAddress = ""
+    @State private var googleTopicId: UUID?
+    @State private var isAddingYouTubeVideo = false
+    @State private var youtubeAddress = ""
+    @State private var youtubeTitle = ""
+    @State private var youtubeTopicId: UUID?
     @State private var importProgress: String?
     @State private var errorMessage: String?
 
@@ -31,9 +45,21 @@ struct LibraryView: View {
                     } description: {
                         Text(emptyDescription)
                     } actions: {
-                        Button("Import your first Source") { isImporting = true }
-                            .buttonStyle(.borderedProminent)
-                            .tint(EpistoriaDesign.ink)
+                        VStack(spacing: 10) {
+                            HStack {
+                                Button("Import a file") { isImporting = true }
+                                    .buttonStyle(.borderedProminent)
+                                    .tint(EpistoriaDesign.ink)
+                                Button("Capture a webpage") { isCapturingWebPage = true }
+                                    .buttonStyle(.bordered)
+                            }
+                            HStack {
+                                Button("Add Google file") { isCapturingGoogleFile = true }
+                                    .buttonStyle(.bordered)
+                                Button("Add YouTube video") { isAddingYouTubeVideo = true }
+                                    .buttonStyle(.bordered)
+                            }
+                        }
                     }
                 } else {
                     List(visibleResources, id: \.id) { resource in
@@ -41,7 +67,7 @@ struct LibraryView: View {
                             ResourceDetailView(model: model, resourceId: resource.id)
                         } label: {
                             HStack(spacing: 14) {
-                                Image(systemName: resource.payload.sourceType == .pdf ? "doc.richtext" : "doc.text")
+                                Image(systemName: resource.payload.sourceType.epistoriaSymbol)
                                     .font(.title2)
                                     .foregroundStyle(.tint)
                                 VStack(alignment: .leading, spacing: 4) {
@@ -82,8 +108,21 @@ struct LibraryView: View {
                         Button("Any Topic") { selectedTopicId = nil }
                         ForEach(topics, id: \.id) { topic in Button(topic.payload.name) { selectedTopicId = topic.id } }
                     } label: { Label("Filter", systemImage: "line.3.horizontal.decrease.circle") }
-                    Button { isImporting = true } label: {
-                        Label("Import Source", systemImage: "square.and.arrow.down")
+                    Menu {
+                        Button("Import files", systemImage: "square.and.arrow.down") {
+                            isImporting = true
+                        }
+                        Button("Capture webpage", systemImage: "globe") {
+                            isCapturingWebPage = true
+                        }
+                        Button("Google Docs, Slides, or Sheets", systemImage: "doc.badge.arrow.up") {
+                            isCapturingGoogleFile = true
+                        }
+                        Button("YouTube video", systemImage: "play.rectangle") {
+                            isAddingYouTubeVideo = true
+                        }
+                    } label: {
+                        Label("Add Source", systemImage: "plus")
                     }
                 }
             }
@@ -100,10 +139,38 @@ struct LibraryView: View {
             }
             .fileImporter(
                 isPresented: $isImporting,
-                allowedContentTypes: [.pdf, .image, .plainText, .html, UTType(filenameExtension: "md") ?? .plainText],
+                allowedContentTypes: EpistoriaSourceImportTypes.supported,
                 allowsMultipleSelection: true
             ) { result in
                 Task { await importFiles(result) }
+            }
+            .sheet(isPresented: $isCapturingWebPage) {
+                WebSnapshotCaptureSheet(
+                    address: $webAddress,
+                    topicId: $webTopicId,
+                    topics: topics
+                ) {
+                    Task { await captureWebPage() }
+                }
+            }
+            .sheet(isPresented: $isCapturingGoogleFile) {
+                GoogleWorkspaceCaptureSheet(
+                    address: $googleAddress,
+                    topicId: $googleTopicId,
+                    topics: topics
+                ) {
+                    Task { await captureGoogleFile() }
+                }
+            }
+            .sheet(isPresented: $isAddingYouTubeVideo) {
+                YouTubeCaptureSheet(
+                    address: $youtubeAddress,
+                    title: $youtubeTitle,
+                    topicId: $youtubeTopicId,
+                    topics: topics
+                ) {
+                    Task { await addYouTubeVideo() }
+                }
             }
             .task { await load() }
             .refreshable { await load() }
@@ -147,7 +214,7 @@ struct LibraryView: View {
         if !resources.isEmpty && section == .inbox {
             return "Source Inbox is clear. Unassigned imports appear here until you choose a Topic."
         }
-        return "Import PDFs, images, text, Markdown, or HTML. Epistoria encrypts the original locally before it can sync."
+        return "Import local files, webpages, shared Google files, or YouTube references. Local originals are encrypted before they can sync."
     }
 
     private func importFiles(_ result: Result<[URL], Error>) async {
@@ -156,8 +223,82 @@ struct LibraryView: View {
             let urls = try result.get()
             for (index, url) in urls.enumerated() {
                 importProgress = "Encrypting \(index + 1) of \(urls.count): \(url.lastPathComponent)"
-                _ = try await assetManager.importPhaseOneSource(from: url)
+                _ = try await assetManager.importSource(from: url)
             }
+            model.noteLocalMutation()
+            importProgress = nil
+            await load()
+        } catch {
+            importProgress = nil
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func captureWebPage() async {
+        guard let assetManager = model.assetManager else { return }
+        let cleanAddress = webAddress.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let url = URL(string: cleanAddress) else {
+            errorMessage = WebSnapshotCaptureError.invalidURL.localizedDescription
+            return
+        }
+        isCapturingWebPage = false
+        importProgress = "Capturing webpage…"
+        do {
+            _ = try await assetManager.importWebSnapshot(from: url, topicId: webTopicId)
+            webAddress = ""
+            webTopicId = nil
+            model.noteLocalMutation()
+            importProgress = nil
+            await load()
+        } catch {
+            importProgress = nil
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func captureGoogleFile() async {
+        guard let assetManager = model.assetManager else { return }
+        let cleanAddress = googleAddress.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let url = URL(string: cleanAddress) else {
+            errorMessage = GoogleWorkspaceCaptureError.invalidURL.localizedDescription
+            return
+        }
+        isCapturingGoogleFile = false
+        importProgress = "Capturing Google file…"
+        do {
+            _ = try await assetManager.importGoogleWorkspaceSnapshot(
+                from: url,
+                topicId: googleTopicId
+            )
+            googleAddress = ""
+            googleTopicId = nil
+            model.noteLocalMutation()
+            importProgress = nil
+            await load()
+        } catch {
+            importProgress = nil
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func addYouTubeVideo() async {
+        guard let assetManager = model.assetManager else { return }
+        let cleanAddress = youtubeAddress.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let url = URL(string: cleanAddress) else {
+            errorMessage = YouTubeReferenceError.invalidURL.localizedDescription
+            return
+        }
+        isAddingYouTubeVideo = false
+        importProgress = "Adding YouTube reference…"
+        do {
+            _ = try await assetManager.importYouTubeReference(
+                from: url,
+                title: youtubeTitle,
+                topicId: youtubeTopicId
+            )
+            youtubeAddress = ""
+            youtubeTitle = ""
+            youtubeTopicId = nil
             model.noteLocalMutation()
             importProgress = nil
             await load()
@@ -184,6 +325,168 @@ struct LibraryView: View {
     }
 }
 
+private struct WebSnapshotCaptureSheet: View {
+    @Binding var address: String
+    @Binding var topicId: UUID?
+    let topics: [IdentifiedPayload<TopicPayload>]
+    let capture: () -> Void
+
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Webpage") {
+                    TextField("https://example.com/article", text: $address)
+                        .keyboardType(.URL)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .accessibilityIdentifier("web-snapshot.address")
+                    Text("Epistoria downloads one HTML snapshot. It does not keep browsing history, cookies, or a live connection to the page.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Section("Organization") {
+                    Picker("Topic", selection: $topicId) {
+                        Text("Unassigned Inbox").tag(UUID?.none)
+                        ForEach(topics, id: \.id) { topic in
+                            Text(topic.payload.name).tag(Optional(topic.id))
+                        }
+                    }
+                }
+                Section {
+                    Text("Refreshing later is always manual and creates another immutable version.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .navigationTitle("Capture webpage")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Capture") { capture() }
+                        .fontWeight(.semibold)
+                        .disabled(address.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        .accessibilityIdentifier("web-snapshot.capture")
+                }
+            }
+        }
+        .presentationDetents([.medium])
+    }
+}
+
+private struct GoogleWorkspaceCaptureSheet: View {
+    @Binding var address: String
+    @Binding var topicId: UUID?
+    let topics: [IdentifiedPayload<TopicPayload>]
+    let capture: () -> Void
+
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Google file") {
+                    TextField("Paste a Google Docs, Slides, or Sheets link", text: $address)
+                        .keyboardType(.URL)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .accessibilityIdentifier("google-workspace.address")
+                    Text("The file must allow anyone with the link to view it. Epistoria downloads an Office-format copy without signing in to Google.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Section("Organization") {
+                    Picker("Topic", selection: $topicId) {
+                        Text("Unassigned Inbox").tag(UUID?.none)
+                        ForEach(topics, id: \.id) { topic in
+                            Text(topic.payload.name).tag(Optional(topic.id))
+                        }
+                    }
+                }
+                Section {
+                    Text("The downloaded copy is encrypted locally. Refresh is manual and creates another immutable version.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .navigationTitle("Add Google file")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Add") { capture() }
+                        .fontWeight(.semibold)
+                        .disabled(address.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        .accessibilityIdentifier("google-workspace.capture")
+                }
+            }
+        }
+        .presentationDetents([.medium])
+    }
+}
+
+private struct YouTubeCaptureSheet: View {
+    @Binding var address: String
+    @Binding var title: String
+    @Binding var topicId: UUID?
+    let topics: [IdentifiedPayload<TopicPayload>]
+    let add: () -> Void
+
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("YouTube video") {
+                    TextField("Paste a YouTube video link", text: $address)
+                        .keyboardType(.URL)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .accessibilityIdentifier("youtube.address")
+                    TextField("Title (optional)", text: $title)
+                        .accessibilityIdentifier("youtube.title")
+                    Text("Epistoria saves the reference. It does not download or cache the video or its captions.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Section("Organization") {
+                    Picker("Topic", selection: $topicId) {
+                        Text("Unassigned Inbox").tag(UUID?.none)
+                        ForEach(topics, id: \.id) { topic in
+                            Text(topic.payload.name).tag(Optional(topic.id))
+                        }
+                    }
+                }
+                Section {
+                    Text("Playback requires a network connection. The privacy-enhanced YouTube player loads only after you choose to load it.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .navigationTitle("Add YouTube video")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Add") { add() }
+                        .fontWeight(.semibold)
+                        .disabled(address.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        .accessibilityIdentifier("youtube.add")
+                }
+            }
+        }
+        .presentationDetents([.medium])
+    }
+}
+
 struct ResourceDetailView: View {
     @Bindable var model: AppModel
     let resourceId: UUID
@@ -191,20 +494,38 @@ struct ResourceDetailView: View {
     var initialPageNumber: Int?
     var focusedAnnotationId: UUID?
     var highlightText: String?
+    var initialMediaTimeSeconds: Double?
 
     @State private var resource: IdentifiedPayload<ResourcePayload>?
     @State private var source: IdentifiedPayload<SourcePayload>?
     @State private var topics: [IdentifiedPayload<TopicPayload>] = []
     @State private var lists: [IdentifiedPayload<CollectionPayload>] = []
     @State private var versions: [IdentifiedPayload<SourceVersionPayload>] = []
+    @State private var selectedSourceVersionId: UUID?
     @State private var isOrganizing = false
+    @State private var isComparing = false
     @State private var isRefreshingSource = false
-    @State private var pdfData: Data?
+    @State private var isRefreshingWebPage = false
+    @State private var isRefreshingGoogleFile = false
+    @State private var webSnapshotDifference: WebSnapshotDifference?
+    @State private var snapshotChangeTitle = "Source refreshed"
+    @State private var sourceData: Data?
+    @State private var mediaPlaybackStartTime: Double?
+    @State private var sourceFilenameExtension = "mp4"
+    @State private var csvDocument: CSVSourceDocument?
+    @State private var readableText: String?
     @State private var pageNumber = 1
     @State private var pageCount = 0
     @State private var annotations: [IdentifiedPayload<AnnotationPayload>] = []
     @State private var extraction: IdentifiedPayload<PDFExtractionManifest>?
     @State private var extractionJob: AIJobSummary?
+    @State private var transcription: IdentifiedPayload<MediaTranscriptionManifest>?
+    @State private var transcriptSegments: [TranscriptSegment] = []
+    @State private var transcriptionJob: AIJobSummary?
+    @State private var sourceAsset: AssetPayload?
+    @State private var isApprovingTranscription = false
+    @State private var isShowingTranscript = false
+    @State private var transcriptionLanguage = ""
     @State private var annotationKind = AnnotationKind.comment
     @State private var comment = ""
     @State private var isLoading = true
@@ -220,9 +541,11 @@ struct ResourceDetailView: View {
         model: AppModel,
         resourceId: UUID,
         sessionId: UUID? = nil,
+        initialSourceVersionId: UUID? = nil,
         initialPageNumber: Int? = nil,
         focusedAnnotationId: UUID? = nil,
-        highlightText: String? = nil
+        highlightText: String? = nil,
+        initialMediaTimeSeconds: Double? = nil
     ) {
         self.model = model
         self.resourceId = resourceId
@@ -230,7 +553,10 @@ struct ResourceDetailView: View {
         self.initialPageNumber = initialPageNumber
         self.focusedAnnotationId = focusedAnnotationId
         self.highlightText = highlightText
+        self.initialMediaTimeSeconds = initialMediaTimeSeconds
+        _selectedSourceVersionId = State(initialValue: initialSourceVersionId)
         _pageNumber = State(initialValue: max(initialPageNumber ?? 1, 1))
+        _mediaPlaybackStartTime = State(initialValue: initialMediaTimeSeconds)
     }
 
     var body: some View {
@@ -238,23 +564,34 @@ struct ResourceDetailView: View {
             if isLoading {
                 ProgressView("Decrypting locally…")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if let pdfData, resource?.payload.resourceType == .pdf {
-                PDFDocumentView(data: pdfData, pageNumber: $pageNumber, pageCount: $pageCount, highlightText: highlightText)
-            } else if let pdfData, resource?.payload.resourceType == .image,
-                      let image = UIImage(data: pdfData) {
+            } else if resource?.payload.resourceType == .youtube,
+                      let url = selectedYouTubeURL,
+                      let reference = try? YouTubeReference(url: url) {
+                YouTubeSourceView(reference: reference)
+            } else if let sourceData, resource?.payload.resourceType == .pdf {
+                PDFDocumentView(data: sourceData, pageNumber: $pageNumber, pageCount: $pageCount, highlightText: highlightText)
+            } else if let sourceData, resource?.payload.resourceType == .image,
+                      let image = UIImage(data: sourceData) {
                 ScrollView([.horizontal, .vertical]) {
                     Image(uiImage: image).resizable().scaledToFit().padding(24)
                 }
-            } else if let pdfData,
-                      let text = String(data: pdfData, encoding: .utf8) {
-                ScrollView {
-                    Text(text)
-                        .font(resource?.payload.resourceType == .markdown ? .body.monospaced() : .body)
-                        .textSelection(.enabled)
-                        .frame(maxWidth: EpistoriaDesign.Layout.readingWidth, alignment: .leading)
-                        .padding(EpistoriaDesign.Spacing.page)
-                        .frame(maxWidth: .infinity, alignment: .top)
-                }
+            } else if let sourceData, resource?.payload.resourceType == .audio {
+                AudioSourceView(data: sourceData, initialTime: mediaPlaybackStartTime)
+                    .id(mediaPlaybackStartTime)
+            } else if let sourceData, resource?.payload.resourceType == .video {
+                VideoSourceView(
+                    data: sourceData,
+                    filenameExtension: sourceFilenameExtension,
+                    initialTime: mediaPlaybackStartTime
+                )
+                .id(mediaPlaybackStartTime)
+            } else if let document = csvDocument {
+                CSVSourceView(document: document)
+            } else if let readableText {
+                StructuredSourceTextView(
+                    text: readableText,
+                    usesMonospacedText: resource?.payload.resourceType == .markdown
+                )
             } else {
                 ContentUnavailableView {
                     Label("File unavailable", systemImage: "doc.questionmark")
@@ -271,11 +608,47 @@ struct ResourceDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
+                Button { isComparing = true } label: {
+                    Label("Compare Sources", systemImage: "rectangle.split.2x1")
+                }
                 Button { isOrganizing = true } label: {
                     Label("Edit Source", systemImage: "slider.horizontal.3")
                 }
-                Button { isRefreshingSource = true } label: {
-                    Label("Refresh Source", systemImage: "arrow.clockwise")
+                if resource?.payload.resourceType == .website {
+                    Button { Task { await refreshWebPage() } } label: {
+                        Label("Refresh webpage", systemImage: "arrow.clockwise")
+                    }
+                    .disabled(isRefreshingWebPage)
+                    Button { isInspectorPresented.toggle() } label: {
+                        Label(
+                            isInspectorPresented ? "Hide Source details" : "Show Source details",
+                            systemImage: "sidebar.trailing"
+                        )
+                    }
+                } else if resource?.payload.resourceType.isGoogleWorkspaceSource == true {
+                    Button { Task { await refreshGoogleFile() } } label: {
+                        Label("Refresh Google file", systemImage: "arrow.clockwise")
+                    }
+                    .disabled(isRefreshingGoogleFile)
+                    Button { isInspectorPresented.toggle() } label: {
+                        Label(
+                            isInspectorPresented ? "Hide Source details" : "Show Source details",
+                            systemImage: "sidebar.trailing"
+                        )
+                    }
+                } else if resource?.payload.resourceType == .youtube
+                            || resource?.payload.resourceType == .audio
+                            || resource?.payload.resourceType == .video {
+                    Button { isInspectorPresented.toggle() } label: {
+                        Label(
+                            isInspectorPresented ? "Hide Source details" : "Show Source details",
+                            systemImage: "sidebar.trailing"
+                        )
+                    }
+                } else {
+                    Button { isRefreshingSource = true } label: {
+                        Label("Refresh Source", systemImage: "arrow.clockwise")
+                    }
                 }
                 if pageCount > 0 {
                     Button {
@@ -325,7 +698,7 @@ struct ResourceDetailView: View {
         .task { await load() }
         .fileImporter(
             isPresented: $isRefreshingSource,
-            allowedContentTypes: [.pdf, .image, .plainText, .html]
+            allowedContentTypes: EpistoriaSourceImportTypes.supported
         ) { result in
             Task { await refreshSource(result) }
         }
@@ -338,6 +711,48 @@ struct ResourceDetailView: View {
             ) {
                 isOrganizing = false
                 Task { await load() }
+            }
+        }
+        .fullScreenCover(isPresented: $isComparing) {
+            SourceComparisonView(model: model, initialSourceId: resourceId)
+        }
+        .sheet(isPresented: $isApprovingTranscription) {
+            MediaTranscriptionApprovalSheet(
+                filename: sourceAsset?.originalFilename ?? resource?.payload.title ?? "Media Source",
+                byteCount: sourceAsset?.plaintextByteSize ?? Int64(sourceData?.count ?? 0),
+                language: $transcriptionLanguage
+            ) {
+                isApprovingTranscription = false
+                Task { await queueTranscription() }
+            }
+        }
+        .sheet(isPresented: $isShowingTranscript) {
+            MediaTranscriptView(
+                model: model,
+                title: resource?.payload.title ?? "Transcript",
+                transcriptionArtifactId: transcription?.id,
+                manifest: transcription?.payload,
+                segments: transcriptSegments,
+                accept: { Task { await reviewTranscription(.accepted) } },
+                reject: { Task { await reviewTranscription(.rejected) } },
+                openAtTime: { time in
+                    mediaPlaybackStartTime = time
+                    isShowingTranscript = false
+                },
+                changed: { Task { await load() } }
+            )
+        }
+        .sheet(
+            isPresented: Binding(
+                get: { webSnapshotDifference != nil },
+                set: { if !$0 { webSnapshotDifference = nil } }
+            )
+        ) {
+            if let webSnapshotDifference {
+                WebSnapshotChangesView(
+                    difference: webSnapshotDifference,
+                    title: snapshotChangeTitle
+                )
             }
         }
         .sheet(
@@ -396,15 +811,15 @@ struct ResourceDetailView: View {
         NavigationStack {
             ScrollViewReader { proxy in
                 List {
-                Section {
+                if resource?.payload.resourceType == .pdf { Section {
                     Label("Original PDF preserved", systemImage: "lock.doc")
                         .foregroundStyle(.secondary)
                     Text("Annotations are separate encrypted records, so importing never modifies the source file.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                }
+                } }
 
-                Section("Searchable text") {
+                if resource?.payload.resourceType == .pdf { Section("Searchable text") {
                     if let extraction {
                         Label("\(extraction.payload.pageCount) pages indexed", systemImage: "checkmark.circle.fill")
                             .foregroundStyle(EpistoriaDesign.positive)
@@ -431,24 +846,144 @@ struct ResourceDetailView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
+                } }
+
+                if resource?.payload.resourceType == .website {
+                    Section("Captured webpage") {
+                        if let canonicalURL = source?.payload.canonicalURL {
+                            LabeledContent("Address") {
+                                Text(canonicalURL.absoluteString)
+                                    .multilineTextAlignment(.trailing)
+                                    .textSelection(.enabled)
+                            }
+                        }
+                        Text("This is a local snapshot. The page is never refreshed automatically.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                if resource?.payload.resourceType.isGoogleWorkspaceSource == true {
+                    Section("Captured Google file") {
+                        if let canonicalURL = source?.payload.canonicalURL {
+                            LabeledContent("Share link") {
+                                Text(canonicalURL.absoluteString)
+                                    .multilineTextAlignment(.trailing)
+                                    .textSelection(.enabled)
+                            }
+                        }
+                        Text("This is an encrypted offline copy. Epistoria does not sign in to Google and never refreshes it automatically.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                if resource?.payload.resourceType == .youtube {
+                    Section("YouTube reference") {
+                        if let url = selectedYouTubeURL {
+                            LabeledContent("Video link") {
+                                Text(url.absoluteString)
+                                    .multilineTextAlignment(.trailing)
+                                    .textSelection(.enabled)
+                            }
+                        }
+                        Text("Epistoria stores this link. Video playback uses YouTube's privacy-enhanced online player only after you choose Load video.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                if resource?.payload.resourceType == .audio
+                    || resource?.payload.resourceType == .video {
+                    Section("Transcript") {
+                        if let transcription {
+                            Button("Read timestamped transcript", systemImage: "text.quote") {
+                                isShowingTranscript = true
+                            }
+                            if let state = transcription.payload.reviewState {
+                                LabeledContent("Review", value: state.rawValue.capitalized)
+                            } else {
+                                Label("Needs review", systemImage: "exclamationmark.circle")
+                                    .foregroundStyle(EpistoriaDesign.attention)
+                            }
+                            LabeledContent(
+                                "Length",
+                                value: mediaTimeLabel(transcription.payload.durationSeconds)
+                            )
+                            LabeledContent(
+                                "Segments",
+                                value: transcription.payload.segmentCount.formatted()
+                            )
+                            Text("This encrypted transcript is bound to Source Version \(transcription.payload.sourceVersionId.uuidString).")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        } else if let transcriptionJob {
+                            Label(
+                                "Trusted Mac job \(transcriptionJob.status.lowercased())",
+                                systemImage: "desktopcomputer"
+                            )
+                            Text("Run the trusted worker, then sync this iPad to receive the encrypted transcript.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        } else if !canTranscribeCurrentMedia {
+                            Label(
+                                "Transcription supports MP3, M4A, WAV, and MP4 in this stage.",
+                                systemImage: "info.circle"
+                            )
+                            .foregroundStyle(.secondary)
+                        } else {
+                            Button("Transcribe on trusted Mac…", systemImage: "waveform.badge.mic") {
+                                isApprovingTranscription = true
+                            }
+                            .disabled(model.aiJobs == nil || sourceData == nil)
+                            Text("Transcription is optional. Approval is required because the configured AI provider receives the media bytes from the trusted Mac.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
                 }
 
                 Section("Versions") {
                     ForEach(versions, id: \.id) { version in
-                        HStack {
-                            Text("Version \(version.payload.versionNumber)")
-                            Spacer()
-                            if version.id == source?.payload.currentVersionId {
-                                Text("Current").font(.caption.bold())
+                        Button {
+                            guard resource?.payload.resourceType == .website
+                                    || resource?.payload.resourceType.isGoogleWorkspaceSource == true
+                            else { return }
+                            selectedSourceVersionId = version.id
+                            Task { await load() }
+                        } label: {
+                            VStack(alignment: .leading, spacing: 3) {
+                                HStack {
+                                    Text("Version \(version.payload.versionNumber)")
+                                    Spacer()
+                                    if version.id == selectedSourceVersionId
+                                        || (selectedSourceVersionId == nil
+                                            && version.id == source?.payload.currentVersionId) {
+                                        Text("Viewing").font(.caption.bold())
+                                    } else if version.id == source?.payload.currentVersionId {
+                                        Text("Current").font(.caption.bold())
+                                    }
+                                }
+                                if let capturedURL = version.payload.capturedURL {
+                                    Text(capturedURL.absoluteString)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(2)
+                                }
                             }
                         }
+                        .buttonStyle(.plain)
+                        .disabled(
+                            resource?.payload.resourceType != .website
+                                && resource?.payload.resourceType.isGoogleWorkspaceSource != true
+                        )
                     }
                     Text("Refresh creates a new immutable version. Existing citations and study records keep their original version.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
 
-                Section("Add to page \(pageNumber)") {
+                if resource?.payload.resourceType == .pdf { Section("Add to page \(pageNumber)") {
                     Picker("Kind", selection: $annotationKind) {
                         ForEach(AnnotationKind.allCases, id: \.self) { kind in
                             Text(kind.rawValue.capitalized).tag(kind)
@@ -467,9 +1002,9 @@ struct ResourceDetailView: View {
                     Text("Saved annotations also become reusable Evidence bound to this exact Source Version.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                }
+                } }
 
-                Section("Annotations") {
+                if resource?.payload.resourceType == .pdf { Section("Annotations") {
                     if annotations.isEmpty {
                         Text("No annotations yet").foregroundStyle(.secondary)
                     }
@@ -521,9 +1056,17 @@ struct ResourceDetailView: View {
                             }
                         }
                     }
+                } }
                 }
-                }
-                .navigationTitle("Notes")
+                .navigationTitle(
+                    resource?.payload.resourceType == .website
+                        || resource?.payload.resourceType.isGoogleWorkspaceSource == true
+                        || resource?.payload.resourceType == .youtube
+                        || resource?.payload.resourceType == .audio
+                        || resource?.payload.resourceType == .video
+                        ? "Source details"
+                        : "Notes"
+                )
                 .toolbar {
                     ToolbarItem(placement: .confirmationAction) {
                         Button("Done") { isInspectorPresented = false }
@@ -540,15 +1083,41 @@ struct ResourceDetailView: View {
         }
     }
 
+    private var selectedYouTubeURL: URL? {
+        let selectedVersion = versions.first { version in
+            version.id == (selectedSourceVersionId ?? source?.payload.currentVersionId)
+        }
+        return selectedVersion?.payload.capturedURL ?? source?.payload.canonicalURL
+    }
+
+    private var canTranscribeCurrentMedia: Bool {
+        guard let filename = sourceAsset?.originalFilename else { return false }
+        let ext = URL(fileURLWithPath: filename).pathExtension.lowercased()
+        if resource?.payload.resourceType == .audio {
+            return ["mp3", "m4a", "wav"].contains(ext)
+        }
+        return resource?.payload.resourceType == .video && ext == "mp4"
+    }
+
     private func load() async {
         guard let store = model.store else { return }
+        isLoading = true
+        errorMessage = nil
+        sourceData = nil
+        sourceFilenameExtension = "mp4"
+        csvDocument = nil
+        readableText = nil
+        sourceAsset = nil
+        transcription = nil
+        transcriptSegments = []
         do {
             let loaded = try await store.payload(ResourcePayload.self, id: resourceId)
             async let loadedSource = store.payload(SourcePayload.self, id: resourceId)
             async let loadedTopics = store.topics()
             async let loadedLists = store.lists()
             resource = loaded
-            source = try await loadedSource
+            let resolvedSource = try await loadedSource
+            source = resolvedSource
             topics = try await loadedTopics.filter { !$0.payload.archived }
             lists = try await loadedLists.filter { $0.payload.archivedAt == nil }
             versions = try await store.list(SourceVersionPayload.self, parentId: resourceId)
@@ -568,9 +1137,55 @@ struct ResourceDetailView: View {
             } else if let initialPageNumber {
                 pageNumber = max(initialPageNumber, 1)
             }
-            extraction = try await model.aiJobs?.latestPDFExtraction(resourceId: resourceId)
-            if let assetId = loaded.payload.originalAssetId, let assetManager = model.assetManager {
-                pdfData = try await assetManager.decryptedData(assetId: assetId)
+            if loaded.payload.resourceType == .pdf {
+                extraction = try await model.aiJobs?.latestPDFExtraction(resourceId: resourceId)
+            } else {
+                extraction = nil
+            }
+            let selectedVersion = versions.first { version in
+                version.id == (selectedSourceVersionId ?? resolvedSource.payload.currentVersionId)
+            }
+            let displayedAssetId = selectedVersion?.payload.originalAssetId
+                ?? loaded.payload.originalAssetId
+            if let assetId = displayedAssetId, let assetManager = model.assetManager {
+                if let metadata = try? await store.payload(AssetPayload.self, id: assetId).payload {
+                    sourceAsset = metadata
+                    let ext = URL(fileURLWithPath: metadata.originalFilename).pathExtension.lowercased()
+                    if loaded.payload.resourceType == .video,
+                       ["m4v", "mov", "mp4"].contains(ext) {
+                        sourceFilenameExtension = ext
+                    }
+                }
+                let data = try await assetManager.decryptedData(assetId: assetId)
+                sourceData = data
+                let prepared = try await Self.prepareReaderContent(
+                    data: data,
+                    sourceType: loaded.payload.resourceType
+                )
+                csvDocument = prepared.csv
+                readableText = prepared.text
+            }
+            if (loaded.payload.resourceType == .audio || loaded.payload.resourceType == .video),
+               let currentVersionId = resolvedSource.payload.currentVersionId,
+               let coordinator = model.aiJobs {
+                transcription = try await coordinator.latestMediaTranscription(
+                    sourceId: resourceId,
+                    sourceVersionId: currentVersionId
+                )
+                if let transcription {
+                    transcriptSegments = try await coordinator.mediaTranscriptionSegments(
+                        manifest: transcription.payload
+                    )
+                }
+            }
+            let supportsInspector = loaded.payload.resourceType == .pdf
+                || loaded.payload.resourceType == .website
+                || loaded.payload.resourceType.isGoogleWorkspaceSource
+                || loaded.payload.resourceType == .youtube
+                || loaded.payload.resourceType == .audio
+                || loaded.payload.resourceType == .video
+            if !supportsInspector {
+                isInspectorPresented = false
             }
             if let sessionId, !hasRecordedSessionOpen,
                let session = try? await store.payload(StudySessionPayload.self, id: sessionId),
@@ -591,13 +1206,69 @@ struct ResourceDetailView: View {
         }
     }
 
+    fileprivate static func prepareReaderContent(
+        data: Data,
+        sourceType: ResourceKind
+    ) async throws -> PreparedSourceContent {
+        try await Task.detached(priority: .userInitiated) {
+            if sourceType == .csv {
+                return PreparedSourceContent(csv: try CSVSourceAdapter().parse(data: data))
+            }
+            switch sourceType {
+            case .epub, .docx, .odt, .pptx, .odp, .xlsx, .html, .website,
+                    .googleDocument, .googleSlides, .googleSheet:
+                let adapter = try SourceAdapterRegistry().adapter(for: sourceType)
+                return PreparedSourceContent(text: try adapter.extractText(data: data))
+            case .pastedText, .markdown:
+                guard let text = String(data: data, encoding: .utf8) else {
+                    throw SourceAdapterError.malformed
+                }
+                return PreparedSourceContent(text: text)
+            default:
+                return PreparedSourceContent()
+            }
+        }.value
+    }
+
     private func refreshSource(_ result: Result<URL, Error>) async {
         guard let manager = model.assetManager else { return }
         do {
-            _ = try await manager.refreshPhaseOneSource(id: resourceId, from: result.get())
+            _ = try await manager.refreshSource(id: resourceId, from: result.get())
             model.noteLocalMutation()
             await load()
         } catch { errorMessage = error.localizedDescription }
+    }
+
+    private func refreshWebPage() async {
+        guard let manager = model.assetManager else { return }
+        isRefreshingWebPage = true
+        defer { isRefreshingWebPage = false }
+        do {
+            let refreshed = try await manager.refreshWebSnapshot(id: resourceId)
+            selectedSourceVersionId = nil
+            snapshotChangeTitle = "Webpage refreshed"
+            webSnapshotDifference = refreshed.difference
+            model.noteLocalMutation()
+            await load()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func refreshGoogleFile() async {
+        guard let manager = model.assetManager else { return }
+        isRefreshingGoogleFile = true
+        defer { isRefreshingGoogleFile = false }
+        do {
+            let refreshed = try await manager.refreshGoogleWorkspaceSnapshot(id: resourceId)
+            selectedSourceVersionId = nil
+            snapshotChangeTitle = "Google file refreshed"
+            webSnapshotDifference = refreshed.difference
+            model.noteLocalMutation()
+            await load()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
     }
 
     private func saveAnnotation() async {
@@ -642,6 +1313,46 @@ struct ResourceDetailView: View {
         }
         do { extractionJob = try await coordinator.submitPDFExtraction(resourceId: resourceId) }
         catch { errorMessage = error.localizedDescription }
+    }
+
+    private func queueTranscription() async {
+        guard let coordinator = model.aiJobs else {
+            errorMessage = "Connect the private server and pair your trusted Mac first."
+            return
+        }
+        await model.synchronize()
+        if let syncError = model.syncError {
+            errorMessage = syncError
+            return
+        }
+        do {
+            transcriptionJob = try await coordinator.submitMediaTranscription(
+                sourceId: resourceId,
+                language: transcriptionLanguage,
+                disclosureAcknowledged: true
+            )
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func reviewTranscription(_ state: AIArtifactReviewState) async {
+        guard let store = model.store, var transcription else { return }
+        transcription.payload.reviewState = state
+        transcription.payload.reviewedAt = .now
+        do {
+            _ = try await store.save(
+                id: transcription.id,
+                payload: transcription.payload,
+                parentId: resourceId,
+                relationIds: [resourceId, transcription.payload.sourceVersionId]
+                    + transcription.payload.chunkEntityIds
+            )
+            self.transcription = transcription
+            model.noteLocalMutation()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
     }
 
     private func deleteAnnotation(_ annotation: IdentifiedPayload<AnnotationPayload>) async {
@@ -689,6 +1400,1460 @@ struct ResourceDetailView: View {
         case .bookmark: "bookmark"
         case .drawing: "pencil.tip"
         }
+    }
+}
+
+private struct YouTubeSourceView: View {
+    let reference: YouTubeReference
+
+    @State private var isLoaded = false
+
+    var body: some View {
+        Group {
+            if isLoaded {
+                YouTubeEmbedWebView(url: reference.embedURL)
+                    .overlay(alignment: .topTrailing) {
+                        Button("Unload video", systemImage: "xmark") {
+                            isLoaded = false
+                        }
+                        .labelStyle(.iconOnly)
+                        .buttonStyle(.bordered)
+                        .background(.regularMaterial, in: Circle())
+                        .padding()
+                        .accessibilityHint("Stops the player and clears its temporary web data")
+                    }
+            } else {
+                ContentUnavailableView {
+                    Label("YouTube video", systemImage: "play.rectangle")
+                } description: {
+                    Text("Loading connects to YouTube. Playback requires a network connection and follows YouTube's privacy terms.")
+                } actions: {
+                    Button("Load video") { isLoaded = true }
+                        .buttonStyle(.borderedProminent)
+                        .tint(EpistoriaDesign.ink)
+                    Link("Open in YouTube", destination: reference.playbackURL)
+                        .buttonStyle(.bordered)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .accessibilityIdentifier("youtube.source")
+    }
+}
+
+private struct YouTubeEmbedWebView: UIViewRepresentable {
+    let url: URL
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    func makeUIView(context: Context) -> WKWebView {
+        let configuration = WKWebViewConfiguration()
+        configuration.websiteDataStore = .nonPersistent()
+        configuration.allowsInlineMediaPlayback = true
+        configuration.mediaTypesRequiringUserActionForPlayback = .all
+        let webView = WKWebView(frame: .zero, configuration: configuration)
+        webView.navigationDelegate = context.coordinator
+        webView.isOpaque = false
+        webView.backgroundColor = .black
+        webView.scrollView.backgroundColor = .black
+        return webView
+    }
+
+    func updateUIView(_ webView: WKWebView, context: Context) {
+        guard webView.url != url else { return }
+        webView.load(URLRequest(url: url))
+    }
+
+    static func dismantleUIView(_ webView: WKWebView, coordinator: Coordinator) {
+        webView.stopLoading()
+        webView.loadHTMLString("", baseURL: nil)
+        webView.navigationDelegate = nil
+    }
+
+    final class Coordinator: NSObject, WKNavigationDelegate {
+        func webView(
+            _ webView: WKWebView,
+            decidePolicyFor navigationAction: WKNavigationAction
+        ) async -> WKNavigationActionPolicy {
+            guard let host = navigationAction.request.url?.host?.lowercased() else {
+                return .cancel
+            }
+            let allowed = host == "www.youtube-nocookie.com"
+                || host == "youtube-nocookie.com"
+                || host.hasSuffix(".youtube.com")
+                || host == "youtube.com"
+            return allowed ? .allow : .cancel
+        }
+    }
+}
+
+private struct MediaTranscriptionApprovalSheet: View {
+    let filename: String
+    let byteCount: Int64
+    @Binding var language: String
+    let approve: () -> Void
+
+    @Environment(\.dismiss) private var dismiss
+
+    private var formattedSize: String {
+        ByteCountFormatter.string(fromByteCount: byteCount, countStyle: .file)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Media") {
+                    LabeledContent("File", value: filename)
+                    LabeledContent("Size", value: formattedSize)
+                }
+                Section("Optional language") {
+                    TextField("Language code, such as en or es", text: $language)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    Text("Leave this empty to let the provider detect the language.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Section("Before you approve") {
+                    Label("The trusted Mac decrypts this Source for this job.", systemImage: "desktopcomputer")
+                    Label("The configured AI provider receives the media bytes.", systemImage: "network")
+                    Label("The returned transcript is encrypted and bound to this Source Version.", systemImage: "lock.doc")
+                    Text("The sync service does not receive plaintext media or transcript content. The original Source is not changed.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                if byteCount > 25 * 1_024 * 1_024 {
+                    Section {
+                        Label("This file exceeds the current 25 MB transcription limit.", systemImage: "exclamationmark.triangle")
+                            .foregroundStyle(EpistoriaDesign.attention)
+                    }
+                }
+            }
+            .navigationTitle("Approve transcription")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Approve and transcribe") { approve() }
+                        .fontWeight(.semibold)
+                        .disabled(byteCount <= 0 || byteCount > 25 * 1_024 * 1_024)
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+    }
+}
+
+private struct MediaTranscriptView: View {
+    @Bindable var model: AppModel
+    let title: String
+    let transcriptionArtifactId: UUID?
+    let manifest: MediaTranscriptionManifest?
+    let segments: [TranscriptSegment]
+    let accept: () -> Void
+    let reject: () -> Void
+    let openAtTime: (Double) -> Void
+    let changed: () -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var searchText = ""
+    @State private var reviewedManifest: MediaTranscriptionManifest?
+    @State private var reviewedSegments: [ReviewedTranscriptSegment] = []
+    @State private var corrections: [IdentifiedPayload<TranscriptCorrectionPayload>] = []
+    @State private var selectedSegmentIndexes: Set<Int> = []
+    @State private var selectionAnchor: Int?
+    @State private var editingSegment: ReviewedTranscriptSegment?
+    @State private var isCreatingEvidence = false
+    @State private var statusMessage: String?
+    @State private var errorMessage: String?
+
+    private var displayManifest: MediaTranscriptionManifest? { reviewedManifest ?? manifest }
+
+    private var effectiveSegments: [ReviewedTranscriptSegment] {
+        reviewedSegments.isEmpty
+            ? segments.map { ReviewedTranscriptSegment(original: $0, text: $0.text, correctionId: nil) }
+            : reviewedSegments
+    }
+
+    private var visibleSegments: [ReviewedTranscriptSegment] {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return effectiveSegments }
+        return effectiveSegments.filter {
+            $0.text.localizedCaseInsensitiveContains(query)
+                || $0.original.text.localizedCaseInsensitiveContains(query)
+        }
+    }
+
+    private var selectedSegments: [ReviewedTranscriptSegment] {
+        effectiveSegments.filter { selectedSegmentIndexes.contains($0.id) }
+    }
+
+    private var canCreateEvidence: Bool {
+        guard let state = displayManifest?.reviewState else { return false }
+        return correctionConflicts.isEmpty
+            && !selectedSegmentIndexes.isEmpty
+            && (state == .accepted || state == .edited)
+    }
+
+    private var correctionConflicts: [TranscriptCorrectionConflictGroup] {
+        Dictionary(
+            grouping: corrections.filter { $0.payload.state == .active },
+            by: \ .payload.segmentIndex
+        )
+        .filter { $0.value.count > 1 }
+        .map {
+            TranscriptCorrectionConflictGroup(
+                segmentIndex: $0.key,
+                candidates: $0.value.sorted {
+                    if $0.payload.createdAt == $1.payload.createdAt {
+                        return $0.id.uuidString < $1.id.uuidString
+                    }
+                    return $0.payload.createdAt < $1.payload.createdAt
+                }
+            )
+        }
+        .sorted { $0.segmentIndex < $1.segmentIndex }
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if let manifest = displayManifest {
+                    Section {
+                        LabeledContent("Duration", value: mediaTimeLabel(manifest.durationSeconds))
+                        LabeledContent("Segments", value: manifest.segmentCount.formatted())
+                        if let language = manifest.language, !language.isEmpty {
+                            LabeledContent("Language", value: language)
+                        }
+                    } footer: {
+                        Text("Generated by \(manifest.trace.provider) using \(manifest.trace.model). Provider text remains unchanged when you save a correction.")
+                    }
+                    reviewSection(manifest)
+                }
+
+                if !selectedSegmentIndexes.isEmpty {
+                    Section("Evidence selection") {
+                        LabeledContent("Range", value: selectedRangeLabel)
+                        LabeledContent("Segments", value: selectedSegmentIndexes.count.formatted())
+                        Button("Create timestamped Evidence…", systemImage: "quote.bubble") {
+                            isCreatingEvidence = true
+                        }
+                        .disabled(!canCreateEvidence)
+                        Button("Clear selection", systemImage: "xmark") { clearSelection() }
+                        if !canCreateEvidence {
+                            Text(correctionConflicts.isEmpty
+                                ? "Accept or correct the transcript before creating Evidence."
+                                : "Resolve correction conflicts before creating Evidence.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+
+                if let statusMessage {
+                    Section {
+                        Label(statusMessage, systemImage: "checkmark.circle")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                if !correctionConflicts.isEmpty {
+                    Section("Correction conflicts") {
+                        ForEach(correctionConflicts) { conflict in
+                            VStack(alignment: .leading, spacing: 10) {
+                                Text(conflictTimeLabel(conflict.segmentIndex))
+                                    .font(.caption.monospacedDigit().weight(.semibold))
+                                    .foregroundStyle(.secondary)
+                                Text("Corrections from different devices are active. Choose one or restore generated text.")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                ForEach(conflict.candidates, id: \ .id) { candidate in
+                                    Button {
+                                        Task {
+                                            await resolveCorrectionConflict(
+                                                segmentIndex: conflict.segmentIndex,
+                                                keeping: candidate.id
+                                            )
+                                        }
+                                    } label: {
+                                        VStack(alignment: .leading, spacing: 3) {
+                                            Text(candidate.payload.correctedText)
+                                            if let reason = candidate.payload.reason {
+                                                Text(reason).font(.caption).foregroundStyle(.secondary)
+                                            }
+                                            Text("Keep this correction")
+                                                .font(.caption.weight(.semibold))
+                                        }
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                    }
+                                    .buttonStyle(.bordered)
+                                }
+                                Button("Use generated text", systemImage: "arrow.uturn.backward") {
+                                    Task {
+                                        await resolveCorrectionConflict(
+                                            segmentIndex: conflict.segmentIndex,
+                                            keeping: nil
+                                        )
+                                    }
+                                }
+                            }
+                            .padding(.vertical, 4)
+                        }
+                    }
+                }
+
+                Section("Transcript") {
+                    if visibleSegments.isEmpty {
+                        Text(searchText.isEmpty ? "No transcript segments are available." : "No matching transcript text.")
+                            .foregroundStyle(.secondary)
+                    }
+                    ForEach(visibleSegments) { segment in
+                        transcriptRow(segment)
+                            .listRowBackground(
+                                selectedSegmentIndexes.contains(segment.id)
+                                    ? EpistoriaDesign.ink.opacity(0.08)
+                                    : Color.clear
+                            )
+                    }
+                }
+            }
+            .searchable(text: $searchText, prompt: "Search transcript")
+            .navigationTitle(title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+        .task { await loadReviewedTranscript() }
+        .sheet(item: $editingSegment) { segment in
+            TranscriptCorrectionEditor(
+                segment: segment,
+                history: corrections.filter { $0.payload.segmentIndex == segment.id },
+                save: { correctedText, reason in
+                    try await saveCorrection(
+                        segmentIndex: segment.id,
+                        correctedText: correctedText,
+                        reason: reason
+                    )
+                },
+                retract: segment.correctionId == nil ? nil : {
+                    try await retractCorrection(segment.correctionId)
+                }
+            )
+        }
+        .sheet(isPresented: $isCreatingEvidence) {
+            TranscriptEvidenceEditor(
+                title: title,
+                segments: selectedSegments,
+                create: { note in try await createEvidence(note: note) }
+            )
+        }
+        .alert("Transcript problem", isPresented: Binding(
+            get: { errorMessage != nil },
+            set: { if !$0 { errorMessage = nil } }
+        )) {
+            Button("OK", role: .cancel) { errorMessage = nil }
+        } message: {
+            Text(errorMessage ?? "")
+        }
+    }
+
+    @ViewBuilder
+    private func reviewSection(_ manifest: MediaTranscriptionManifest) -> some View {
+        Section("Review") {
+            if let state = manifest.reviewState {
+                LabeledContent("Status", value: state.rawValue.capitalized)
+            } else {
+                Button("Accept transcript", systemImage: "checkmark") {
+                    accept()
+                    dismiss()
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(EpistoriaDesign.ink)
+                Button("Reject transcript", systemImage: "xmark", role: .destructive) {
+                    reject()
+                    dismiss()
+                }
+                Text("Accepting includes the transcript in derived-data exports. Rejecting keeps it out. Neither action changes the media Source.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func transcriptRow(_ segment: ReviewedTranscriptSegment) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: selectedSegmentIndexes.contains(segment.id) ? "checkmark.circle.fill" : "circle")
+                .foregroundStyle(selectedSegmentIndexes.contains(segment.id) ? .primary : .tertiary)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 8) {
+                    Text("\(mediaTimeLabel(segment.original.startSeconds))–\(mediaTimeLabel(segment.original.endSeconds))")
+                        .font(.caption.monospacedDigit().weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    if segment.correctionId != nil {
+                        Text("Corrected")
+                            .font(.caption2.weight(.semibold))
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(EpistoriaDesign.ink.opacity(0.08), in: Capsule())
+                    }
+                }
+                Text(segment.text)
+                    .textSelection(.enabled)
+                if segment.correctionId != nil, segment.original.text != segment.text {
+                    Text("Generated: \(segment.original.text)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                }
+            }
+            Spacer(minLength: 4)
+            Button {
+                openAtTime(segment.original.startSeconds)
+            } label: {
+                Label("Open media at timestamp", systemImage: "play")
+                    .labelStyle(.iconOnly)
+            }
+            .buttonStyle(.borderless)
+            Button {
+                editingSegment = segment
+            } label: {
+                Label("Correct segment", systemImage: "pencil")
+                    .labelStyle(.iconOnly)
+            }
+            .buttonStyle(.borderless)
+            .disabled(correctionConflicts.contains { $0.segmentIndex == segment.id })
+        }
+        .padding(.vertical, 5)
+        .contentShape(Rectangle())
+        .onTapGesture { updateSelection(with: segment.id) }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(mediaTimeLabel(segment.original.startSeconds)) to \(mediaTimeLabel(segment.original.endSeconds)), \(segment.text)")
+        .accessibilityValue(selectedSegmentIndexes.contains(segment.id) ? "Selected" : "Not selected")
+        .accessibilityAction(named: "Select for Evidence") { updateSelection(with: segment.id) }
+        .accessibilityAction(named: "Open media at timestamp") {
+            openAtTime(segment.original.startSeconds)
+        }
+        .accessibilityAction(named: "Correct transcript") {
+            if !correctionConflicts.contains(where: { $0.segmentIndex == segment.id }) {
+                editingSegment = segment
+            }
+        }
+    }
+
+    private var selectedRangeLabel: String {
+        guard let first = selectedSegments.first, let last = selectedSegments.last else { return "None" }
+        return "\(mediaTimeLabel(first.original.startSeconds))–\(mediaTimeLabel(last.original.endSeconds))"
+    }
+
+    private func updateSelection(with segmentIndex: Int) {
+        guard let position = effectiveSegments.firstIndex(where: { $0.id == segmentIndex }) else { return }
+        if selectedSegmentIndexes.count == 1 && selectedSegmentIndexes.contains(segmentIndex) {
+            clearSelection()
+            return
+        }
+        guard let anchor = selectionAnchor,
+              let anchorPosition = effectiveSegments.firstIndex(where: { $0.id == anchor })
+        else {
+            selectionAnchor = segmentIndex
+            selectedSegmentIndexes = [segmentIndex]
+            return
+        }
+        let range = min(anchorPosition, position)...max(anchorPosition, position)
+        selectedSegmentIndexes = Set(range.map { effectiveSegments[$0].id })
+    }
+
+    private func clearSelection() {
+        selectedSegmentIndexes = []
+        selectionAnchor = nil
+    }
+
+    private func loadReviewedTranscript() async {
+        reviewedManifest = manifest
+        reviewedSegments = segments.map {
+            ReviewedTranscriptSegment(original: $0, text: $0.text, correctionId: nil)
+        }
+        guard let store = model.store, let transcriptionArtifactId else { return }
+        do {
+            let loadedManifest = try await store.payload(
+                MediaTranscriptionManifest.self,
+                id: transcriptionArtifactId
+            )
+            let loadedCorrections = try await store.transcriptCorrections(
+                transcriptionArtifactId: transcriptionArtifactId
+            )
+            reviewedManifest = loadedManifest.payload
+            corrections = loadedCorrections
+            reviewedSegments = try await store.reviewedTranscriptSegments(
+                transcriptionArtifactId: transcriptionArtifactId
+            )
+            errorMessage = nil
+        } catch StoreError.transcriptCorrectionConflict {
+            errorMessage = nil
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func saveCorrection(
+        segmentIndex: Int,
+        correctedText: String,
+        reason: String?
+    ) async throws {
+        guard let store = model.store, let transcriptionArtifactId else {
+            throw StoreError.entityNotFound
+        }
+        _ = try await store.createTranscriptCorrection(
+            transcriptionArtifactId: transcriptionArtifactId,
+            segmentIndex: segmentIndex,
+            correctedText: correctedText,
+            reason: reason
+        )
+        model.noteLocalMutation()
+        statusMessage = "Correction saved. Generated text is preserved."
+        await loadReviewedTranscript()
+        changed()
+    }
+
+    private func retractCorrection(_ correctionId: UUID?) async throws {
+        guard let store = model.store, let correctionId else { throw StoreError.entityNotFound }
+        try await store.retractTranscriptCorrection(id: correctionId)
+        model.noteLocalMutation()
+        statusMessage = "Correction retracted. Its history is preserved."
+        await loadReviewedTranscript()
+        changed()
+    }
+
+    private func createEvidence(note: String?) async throws {
+        guard let store = model.store, let transcriptionArtifactId else {
+            throw StoreError.entityNotFound
+        }
+        _ = try await store.createTranscriptEvidence(
+            transcriptionArtifactId: transcriptionArtifactId,
+            segmentIndexes: selectedSegments.map(\ .id),
+            note: note
+        )
+        model.noteLocalMutation()
+        statusMessage = "Timestamped Evidence created."
+        clearSelection()
+        changed()
+    }
+
+    private func resolveCorrectionConflict(segmentIndex: Int, keeping correctionId: UUID?) async {
+        guard let store = model.store, let transcriptionArtifactId else { return }
+        do {
+            try await store.resolveTranscriptCorrectionConflict(
+                transcriptionArtifactId: transcriptionArtifactId,
+                segmentIndex: segmentIndex,
+                keeping: correctionId
+            )
+            model.noteLocalMutation()
+            statusMessage = correctionId == nil
+                ? "Conflict resolved with generated text. Correction history is preserved."
+                : "Correction conflict resolved. Other candidates remain in history."
+            await loadReviewedTranscript()
+            changed()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func conflictTimeLabel(_ segmentIndex: Int) -> String {
+        guard let segment = segments.first(where: { $0.index == segmentIndex }) else {
+            return "Segment \(segmentIndex + 1)"
+        }
+        return "\(mediaTimeLabel(segment.startSeconds))–\(mediaTimeLabel(segment.endSeconds))"
+    }
+}
+
+private struct TranscriptCorrectionConflictGroup: Identifiable {
+    var segmentIndex: Int
+    var candidates: [IdentifiedPayload<TranscriptCorrectionPayload>]
+    var id: Int { segmentIndex }
+}
+
+private struct TranscriptCorrectionEditor: View {
+    let segment: ReviewedTranscriptSegment
+    let history: [IdentifiedPayload<TranscriptCorrectionPayload>]
+    let save: (String, String?) async throws -> Void
+    let retract: (() async throws -> Void)?
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var correctedText: String
+    @State private var reason: String
+    @State private var isSaving = false
+    @State private var isConfirmingRetraction = false
+    @State private var errorMessage: String?
+
+    init(
+        segment: ReviewedTranscriptSegment,
+        history: [IdentifiedPayload<TranscriptCorrectionPayload>],
+        save: @escaping (String, String?) async throws -> Void,
+        retract: (() async throws -> Void)?
+    ) {
+        self.segment = segment
+        self.history = history
+        self.save = save
+        self.retract = retract
+        _correctedText = State(initialValue: segment.text)
+        _reason = State(initialValue: "")
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Generated text") {
+                    Text(segment.original.text).textSelection(.enabled)
+                }
+                Section {
+                    TextEditor(text: $correctedText)
+                        .frame(minHeight: 120)
+                    TextField("Reason (optional)", text: $reason, axis: .vertical)
+                } header: {
+                    Text("Your correction")
+                } footer: {
+                    Text("Saving creates a new encrypted correction record. It does not replace the generated transcript.")
+                }
+                if !history.isEmpty {
+                    Section("Correction history") {
+                        ForEach(history, id: \ .id) { item in
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack {
+                                    Text(item.payload.state.rawValue.capitalized)
+                                        .font(.caption.weight(.semibold))
+                                    Spacer()
+                                    Text(item.payload.createdAt, style: .date)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Text(item.payload.correctedText)
+                                if let reason = item.payload.reason {
+                                    Text(reason).font(.caption).foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                    }
+                }
+                if retract != nil {
+                    Section {
+                        Button("Use generated text", systemImage: "arrow.uturn.backward") {
+                            isConfirmingRetraction = true
+                        }
+                    } footer: {
+                        Text("The correction stays in history but no longer changes the effective transcript.")
+                    }
+                }
+            }
+            .navigationTitle("Correct transcript")
+            .navigationBarTitleDisplayMode(.inline)
+            .disabled(isSaving)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(isSaving ? "Saving…" : "Save") { Task { await performSave() } }
+                        .fontWeight(.semibold)
+                        .disabled(
+                            correctedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                || correctedText.trimmingCharacters(in: .whitespacesAndNewlines) == segment.text
+                        )
+                }
+            }
+        }
+        .confirmationDialog(
+            "Use the generated text for this segment?",
+            isPresented: $isConfirmingRetraction,
+            titleVisibility: .visible
+        ) {
+            Button("Retract correction") { Task { await performRetraction() } }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Correction history is retained.")
+        }
+        .alert("Correction problem", isPresented: Binding(
+            get: { errorMessage != nil },
+            set: { if !$0 { errorMessage = nil } }
+        )) {
+            Button("OK", role: .cancel) { errorMessage = nil }
+        } message: { Text(errorMessage ?? "") }
+    }
+
+    private func performSave() async {
+        isSaving = true
+        do {
+            let cleanReason = reason.trimmingCharacters(in: .whitespacesAndNewlines)
+            try await save(correctedText, cleanReason.isEmpty ? nil : cleanReason)
+            dismiss()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+        isSaving = false
+    }
+
+    private func performRetraction() async {
+        guard let retract else { return }
+        isSaving = true
+        do {
+            try await retract()
+            dismiss()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+        isSaving = false
+    }
+}
+
+private struct TranscriptEvidenceEditor: View {
+    let title: String
+    let segments: [ReviewedTranscriptSegment]
+    let create: (String?) async throws -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var note = ""
+    @State private var isSaving = false
+    @State private var errorMessage: String?
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Timestamp") {
+                    LabeledContent("Source", value: title)
+                    if let first = segments.first, let last = segments.last {
+                        LabeledContent(
+                            "Range",
+                            value: "\(mediaTimeLabel(first.original.startSeconds))–\(mediaTimeLabel(last.original.endSeconds))"
+                        )
+                    }
+                }
+                Section {
+                    Text(segments.map(\ .text).joined(separator: " "))
+                        .textSelection(.enabled)
+                } header: {
+                    Text("Frozen excerpt")
+                } footer: {
+                    Text("Evidence keeps this reviewed text, the exact Source Version, segment indexes, timestamps, and applied correction records.")
+                }
+                Section("Note") {
+                    TextField("Optional context", text: $note, axis: .vertical)
+                }
+            }
+            .navigationTitle("Create Evidence")
+            .navigationBarTitleDisplayMode(.inline)
+            .disabled(isSaving)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(isSaving ? "Creating…" : "Create") { Task { await performCreate() } }
+                        .fontWeight(.semibold)
+                        .disabled(segments.isEmpty)
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+        .alert("Evidence problem", isPresented: Binding(
+            get: { errorMessage != nil },
+            set: { if !$0 { errorMessage = nil } }
+        )) {
+            Button("OK", role: .cancel) { errorMessage = nil }
+        } message: { Text(errorMessage ?? "") }
+    }
+
+    private func performCreate() async {
+        isSaving = true
+        do {
+            let cleanNote = note.trimmingCharacters(in: .whitespacesAndNewlines)
+            try await create(cleanNote.isEmpty ? nil : cleanNote)
+            dismiss()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+        isSaving = false
+    }
+}
+
+private func mediaTimeLabel(_ time: TimeInterval) -> String {
+    guard time.isFinite, time >= 0 else { return "0:00" }
+    let total = Int(time.rounded(.down))
+    let hours = total / 3_600
+    let minutes = (total % 3_600) / 60
+    let seconds = total % 60
+    if hours > 0 { return String(format: "%d:%02d:%02d", hours, minutes, seconds) }
+    return String(format: "%d:%02d", minutes, seconds)
+}
+
+private struct SourceComparisonView: View {
+    @Bindable var model: AppModel
+    @Environment(\.dismiss) private var dismiss
+    let initialSourceId: UUID
+
+    @State private var sources: [IdentifiedPayload<SourcePayload>] = []
+    @State private var versionsBySource: [UUID: [IdentifiedPayload<SourceVersionPayload>]] = [:]
+    @State private var leftSourceId: UUID
+    @State private var rightSourceId: UUID
+    @State private var leftVersionId: UUID?
+    @State private var rightVersionId: UUID?
+    @State private var isLoading = true
+    @State private var errorMessage: String?
+
+    init(model: AppModel, initialSourceId: UUID) {
+        self.model = model
+        self.initialSourceId = initialSourceId
+        _leftSourceId = State(initialValue: initialSourceId)
+        _rightSourceId = State(initialValue: initialSourceId)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if isLoading {
+                    ProgressView("Preparing comparison…")
+                } else if sources.isEmpty {
+                    ContentUnavailableView("No Sources", systemImage: "rectangle.split.2x1")
+                } else {
+                    GeometryReader { proxy in
+                        if proxy.size.width >= 820 {
+                            HStack(spacing: 0) {
+                                comparisonPane(sourceId: leftSourceId, versionId: $leftVersionId)
+                                Divider()
+                                comparisonPane(sourceId: rightSourceId, versionId: $rightVersionId)
+                            }
+                        } else {
+                            ScrollView {
+                                VStack(spacing: 12) {
+                                    comparisonPane(sourceId: leftSourceId, versionId: $leftVersionId)
+                                        .frame(minHeight: 520)
+                                    Divider()
+                                    comparisonPane(sourceId: rightSourceId, versionId: $rightVersionId)
+                                        .frame(minHeight: 520)
+                                }
+                                .padding(.horizontal, 12)
+                            }
+                        }
+                    }
+                }
+            }
+            .epistoriaPageBackground()
+            .navigationTitle("Compare Sources")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") { dismiss() }
+                }
+                ToolbarItemGroup(placement: .principal) {
+                    sourcePicker(title: "Left", selection: sourceBinding(isLeft: true))
+                    Image(systemName: "arrow.left.arrow.right")
+                        .foregroundStyle(.secondary)
+                        .accessibilityHidden(true)
+                    sourcePicker(title: "Right", selection: sourceBinding(isLeft: false))
+                }
+            }
+            .task { await load() }
+            .alert("Comparison error", isPresented: .constant(errorMessage != nil)) {
+                Button("Dismiss", role: .cancel) { errorMessage = nil }
+            } message: {
+                Text(errorMessage ?? "")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func comparisonPane(sourceId: UUID, versionId: Binding<UUID?>) -> some View {
+        if let source = sources.first(where: { $0.id == sourceId }) {
+            SourceComparisonPane(
+                model: model,
+                source: source,
+                versions: versionsBySource[sourceId] ?? [],
+                selectedVersionId: versionId
+            )
+        } else {
+            ContentUnavailableView("Source unavailable", systemImage: "doc.questionmark")
+        }
+    }
+
+    private func sourcePicker(title: String, selection: Binding<UUID>) -> some View {
+        Picker(title, selection: selection) {
+            ForEach(sources, id: \.id) { source in
+                Text(source.payload.title).tag(source.id)
+            }
+        }
+        .pickerStyle(.menu)
+        .accessibilityLabel("\(title) Source")
+    }
+
+    private func sourceBinding(isLeft: Bool) -> Binding<UUID> {
+        Binding(
+            get: { isLeft ? leftSourceId : rightSourceId },
+            set: { id in
+                if isLeft {
+                    leftSourceId = id
+                    leftVersionId = currentVersionId(for: id)
+                } else {
+                    rightSourceId = id
+                    rightVersionId = currentVersionId(for: id)
+                }
+            }
+        )
+    }
+
+    private func currentVersionId(for sourceId: UUID) -> UUID? {
+        sources.first { $0.id == sourceId }?.payload.currentVersionId
+            ?? versionsBySource[sourceId]?.first?.id
+    }
+
+    private func load() async {
+        guard let store = model.store else { return }
+        isLoading = true
+        do {
+            let loadedSources = try await store.list(SourcePayload.self)
+                .filter { $0.payload.archivedAt == nil }
+                .sorted { $0.payload.title.localizedCaseInsensitiveCompare($1.payload.title) == .orderedAscending }
+            var loadedVersions: [UUID: [IdentifiedPayload<SourceVersionPayload>]] = [:]
+            for source in loadedSources {
+                loadedVersions[source.id] = try await store.list(SourceVersionPayload.self, parentId: source.id)
+                    .sorted { $0.payload.versionNumber > $1.payload.versionNumber }
+            }
+            sources = loadedSources
+            versionsBySource = loadedVersions
+            guard let initial = loadedSources.first(where: { $0.id == initialSourceId }) ?? loadedSources.first else {
+                isLoading = false
+                return
+            }
+            leftSourceId = initial.id
+            leftVersionId = initial.payload.currentVersionId ?? loadedVersions[initial.id]?.first?.id
+            if let prior = loadedVersions[initial.id]?.first(where: { $0.id != leftVersionId }) {
+                rightSourceId = initial.id
+                rightVersionId = prior.id
+            } else if let other = loadedSources.first(where: { $0.id != initial.id }) {
+                rightSourceId = other.id
+                rightVersionId = other.payload.currentVersionId ?? loadedVersions[other.id]?.first?.id
+            } else {
+                rightSourceId = initial.id
+                rightVersionId = leftVersionId
+            }
+            errorMessage = nil
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+        isLoading = false
+    }
+}
+
+private struct SourceComparisonPane: View {
+    @Bindable var model: AppModel
+    let source: IdentifiedPayload<SourcePayload>
+    let versions: [IdentifiedPayload<SourceVersionPayload>]
+    @Binding var selectedVersionId: UUID?
+
+    @State private var data: Data?
+    @State private var csv: CSVSourceDocument?
+    @State private var text: String?
+    @State private var filenameExtension = "mp4"
+    @State private var pageNumber = 1
+    @State private var pageCount = 0
+    @State private var isLoading = true
+    @State private var errorMessage: String?
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(source.payload.title)
+                        .font(.headline)
+                        .lineLimit(1)
+                    Text(source.payload.sourceType.rawValue.replacingOccurrences(of: "_", with: " ").capitalized)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                if !versions.isEmpty {
+                    Picker("Version", selection: $selectedVersionId) {
+                        ForEach(versions, id: \.id) { version in
+                            Text(versionLabel(version)).tag(Optional(version.id))
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .accessibilityLabel("Version of \(source.payload.title)")
+                }
+            }
+            .padding(12)
+            .background(.thinMaterial)
+
+            Divider()
+
+            Group {
+                if isLoading {
+                    ProgressView("Decrypting locally…")
+                } else if let errorMessage {
+                    ContentUnavailableView {
+                        Label("Source unavailable", systemImage: "doc.questionmark")
+                    } description: {
+                        Text(errorMessage)
+                    }
+                } else if source.payload.sourceType == .youtube, let url = selectedURL {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Label("YouTube reference", systemImage: "play.rectangle")
+                                .font(.headline)
+                            Text(url.absoluteString).textSelection(.enabled)
+                            Text("Comparison does not load the online player. The saved reference remains unchanged.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(24)
+                    }
+                } else if let data, source.payload.sourceType == .pdf {
+                    PDFDocumentView(
+                        data: data,
+                        pageNumber: $pageNumber,
+                        pageCount: $pageCount,
+                        highlightText: nil
+                    )
+                } else if let data, source.payload.sourceType == .image,
+                          let image = UIImage(data: data) {
+                    ScrollView([.horizontal, .vertical]) {
+                        Image(uiImage: image).resizable().scaledToFit().padding(20)
+                    }
+                } else if let data, source.payload.sourceType == .audio {
+                    AudioSourceView(data: data)
+                } else if let data, source.payload.sourceType == .video {
+                    VideoSourceView(data: data, filenameExtension: filenameExtension)
+                } else if let csv {
+                    CSVSourceView(document: csv)
+                } else if let text {
+                    StructuredSourceTextView(
+                        text: text,
+                        usesMonospacedText: source.payload.sourceType == .markdown
+                    )
+                } else {
+                    ContentUnavailableView {
+                        Label("No readable local copy", systemImage: "doc.questionmark")
+                    } description: {
+                        Text("This exact Source Version is not available on this device.")
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .background(EpistoriaDesign.canvas)
+        .task(id: taskIdentity) { await load() }
+        .onChange(of: selectedVersionId) {
+            pageNumber = 1
+        }
+    }
+
+    private var selectedVersion: IdentifiedPayload<SourceVersionPayload>? {
+        versions.first { $0.id == selectedVersionId }
+            ?? versions.first { $0.id == source.payload.currentVersionId }
+            ?? versions.first
+    }
+
+    private var selectedURL: URL? {
+        selectedVersion?.payload.capturedURL ?? source.payload.canonicalURL
+    }
+
+    private var taskIdentity: String {
+        "\(source.id.uuidString):\(selectedVersionId?.uuidString ?? "original")"
+    }
+
+    private func versionLabel(_ version: IdentifiedPayload<SourceVersionPayload>) -> String {
+        let suffix = version.id == source.payload.currentVersionId ? " · Current" : ""
+        return "Version \(version.payload.versionNumber)\(suffix)"
+    }
+
+    private func load() async {
+        isLoading = true
+        errorMessage = nil
+        data = nil
+        csv = nil
+        text = nil
+        guard source.payload.sourceType != .youtube else {
+            isLoading = false
+            return
+        }
+        guard let assetManager = model.assetManager else {
+            errorMessage = "The local asset store is unavailable."
+            isLoading = false
+            return
+        }
+        let assetId = selectedVersion?.payload.originalAssetId ?? source.payload.originalAssetId
+        guard let assetId else {
+            isLoading = false
+            return
+        }
+        do {
+            if let store = model.store,
+               let asset = try? await store.payload(AssetPayload.self, id: assetId).payload {
+                let ext = URL(fileURLWithPath: asset.originalFilename).pathExtension.lowercased()
+                if ["m4v", "mov", "mp4"].contains(ext) { filenameExtension = ext }
+            }
+            let decrypted = try await assetManager.decryptedLocalData(assetId: assetId)
+            data = decrypted
+            let prepared = try await ResourceDetailView.prepareReaderContent(
+                data: decrypted,
+                sourceType: source.payload.sourceType
+            )
+            csv = prepared.csv
+            text = prepared.text
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+        isLoading = false
+    }
+}
+
+private struct PreparedSourceContent: Sendable {
+    var csv: CSVSourceDocument?
+    var text: String?
+
+    init(csv: CSVSourceDocument? = nil, text: String? = nil) {
+        self.csv = csv
+        self.text = text
+    }
+}
+
+private struct WebSnapshotChangesView: View {
+    let difference: WebSnapshotDifference
+    let title: String
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    if !difference.previousVersionAvailable {
+                        Label("Previous version unavailable for comparison", systemImage: "questionmark.circle")
+                    } else if difference.isUnchanged {
+                        Label("No readable text changed", systemImage: "equal.circle")
+                    } else {
+                        LabeledContent("Added paragraphs", value: difference.addedParagraphCount.formatted())
+                        LabeledContent("Removed paragraphs", value: difference.removedParagraphCount.formatted())
+                    }
+                } footer: {
+                    Text("The previous snapshot remains available to citations and learning records that already reference it.")
+                }
+
+                if !difference.addedExamples.isEmpty {
+                    Section("Added examples") {
+                        ForEach(difference.addedExamples, id: \.self) { Text($0).textSelection(.enabled) }
+                    }
+                }
+                if !difference.removedExamples.isEmpty {
+                    Section("Removed examples") {
+                        ForEach(difference.removedExamples, id: \.self) { Text($0).textSelection(.enabled) }
+                    }
+                }
+            }
+            .navigationTitle(title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+    }
+}
+
+private struct AudioSourceView: View {
+    let data: Data
+    var initialTime: TimeInterval? = nil
+
+    @State private var player: AVAudioPlayer?
+    @State private var currentTime = 0.0
+    @State private var duration = 0.0
+    @State private var isPlaying = false
+    @State private var errorMessage: String?
+
+    var body: some View {
+        VStack(spacing: 28) {
+            Spacer()
+            Image(systemName: "waveform")
+                .font(.system(size: 42, weight: .regular))
+                .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
+
+            VStack(spacing: 10) {
+                Slider(
+                    value: Binding(
+                        get: { min(currentTime, max(duration, 0)) },
+                        set: { seek(to: $0) }
+                    ),
+                    in: 0...max(duration, 1)
+                )
+                .disabled(player == nil)
+                .accessibilityLabel("Recording position")
+                .accessibilityValue("\(timeLabel(currentTime)) of \(timeLabel(duration))")
+
+                HStack {
+                    Text(timeLabel(currentTime))
+                    Spacer()
+                    Text("−\(timeLabel(max(duration - currentTime, 0)))")
+                }
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+            }
+
+            HStack(spacing: 34) {
+                Button { skip(by: -15) } label: {
+                    Label("Back 15 seconds", systemImage: "gobackward.15")
+                        .labelStyle(.iconOnly)
+                        .font(.title2)
+                }
+                .disabled(player == nil)
+
+                Button { togglePlayback() } label: {
+                    Image(systemName: isPlaying ? "pause.fill" : "play.fill")
+                        .font(.title2)
+                        .frame(width: 62, height: 62)
+                        .background(EpistoriaDesign.ink, in: Circle())
+                        .foregroundStyle(EpistoriaDesign.inverseInk)
+                        .contentShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .disabled(player == nil)
+                .accessibilityLabel(isPlaying ? "Pause recording" : "Play recording")
+
+                Button { skip(by: 15) } label: {
+                    Label("Forward 15 seconds", systemImage: "goforward.15")
+                        .labelStyle(.iconOnly)
+                        .font(.title2)
+                }
+                .disabled(player == nil)
+            }
+            .foregroundStyle(.primary)
+
+            if let errorMessage {
+                Label(errorMessage, systemImage: "exclamationmark.circle")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            } else {
+                Text("Playback stays on this iPad.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+        }
+        .padding(EpistoriaDesign.Spacing.page)
+        .frame(maxWidth: 620)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .task { prepare() }
+        .task(id: isPlaying) {
+            guard isPlaying else { return }
+            while !Task.isCancelled, let player, player.isPlaying {
+                currentTime = player.currentTime
+                try? await Task.sleep(for: .milliseconds(200))
+            }
+            if !Task.isCancelled {
+                currentTime = player?.currentTime ?? currentTime
+                isPlaying = false
+            }
+        }
+        .onDisappear { stop() }
+    }
+
+    private func prepare() {
+        guard player == nil else { return }
+        do {
+            let session = AVAudioSession.sharedInstance()
+            try session.setCategory(.playback, mode: .spokenAudio)
+            try session.setActive(true)
+            let created = try AVAudioPlayer(data: data)
+            guard created.prepareToPlay(), created.duration.isFinite, created.duration > 0 else {
+                throw SourceAdapterError.malformed
+            }
+            player = created
+            duration = created.duration
+            let requested = initialTime.flatMap { $0.isFinite ? $0 : nil } ?? 0
+            created.currentTime = min(max(requested, 0), created.duration)
+            currentTime = created.currentTime
+        } catch {
+            errorMessage = "This recording could not be decoded on this iPad."
+        }
+    }
+
+    private func togglePlayback() {
+        guard let player else { return }
+        if player.isPlaying {
+            player.pause()
+            currentTime = player.currentTime
+            isPlaying = false
+        } else {
+            if player.currentTime >= player.duration { player.currentTime = 0 }
+            player.play()
+            currentTime = player.currentTime
+            isPlaying = player.isPlaying
+        }
+    }
+
+    private func seek(to value: Double) {
+        guard let player else { return }
+        player.currentTime = min(max(value, 0), player.duration)
+        currentTime = player.currentTime
+    }
+
+    private func skip(by interval: TimeInterval) {
+        seek(to: currentTime + interval)
+    }
+
+    private func stop() {
+        player?.stop()
+        isPlaying = false
+        try? AVAudioSession.sharedInstance().setActive(
+            false,
+            options: .notifyOthersOnDeactivation
+        )
+    }
+
+    private func timeLabel(_ time: TimeInterval) -> String {
+        guard time.isFinite, time >= 0 else { return "0:00" }
+        let total = Int(time.rounded(.down))
+        let hours = total / 3_600
+        let minutes = (total % 3_600) / 60
+        let seconds = total % 60
+        if hours > 0 { return String(format: "%d:%02d:%02d", hours, minutes, seconds) }
+        return String(format: "%d:%02d", minutes, seconds)
+    }
+}
+
+private struct VideoSourceView: View {
+    let data: Data
+    let filenameExtension: String
+    var initialTime: TimeInterval? = nil
+
+    @State private var player: AVPlayer?
+    @State private var temporaryURL: URL?
+    @State private var errorMessage: String?
+
+    var body: some View {
+        Group {
+            if let player {
+                VideoPlayer(player: player)
+                    .background(Color.black)
+                    .accessibilityLabel("Video Source player")
+            } else if let errorMessage {
+                ContentUnavailableView {
+                    Label("Video unavailable", systemImage: "play.slash")
+                } description: {
+                    Text(errorMessage)
+                }
+            } else {
+                ProgressView("Preparing protected playback…")
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .task(id: data) { await prepare() }
+        .onDisappear { cleanUp() }
+    }
+
+    @MainActor
+    private func prepare() async {
+        guard player == nil, temporaryURL == nil else { return }
+        do {
+            let bytes = data
+            let ext = filenameExtension
+            let url = try await Task.detached(priority: .userInitiated) {
+                try ProtectedVideoFileStore.write(bytes, filenameExtension: ext)
+            }.value
+            guard !Task.isCancelled else {
+                try? ProtectedVideoFileStore.remove(url)
+                return
+            }
+            temporaryURL = url
+            let created = AVPlayer(url: url)
+            if let initialTime, initialTime.isFinite, initialTime > 0 {
+                await created.seek(
+                    to: CMTime(seconds: initialTime, preferredTimescale: 600),
+                    toleranceBefore: .zero,
+                    toleranceAfter: .zero
+                )
+            }
+            player = created
+        } catch {
+            errorMessage = "Epistoria could not prepare this video for local playback."
+        }
+    }
+
+    private func cleanUp() {
+        player?.pause()
+        player?.replaceCurrentItem(with: nil)
+        player = nil
+        if let temporaryURL { try? ProtectedVideoFileStore.remove(temporaryURL) }
+        temporaryURL = nil
+    }
+}
+
+private struct StructuredSourceTextView: View {
+    let text: String
+    let usesMonospacedText: Bool
+
+    var body: some View {
+        ScrollView {
+            Text(text)
+                .font(usesMonospacedText ? .body.monospaced() : .body)
+                .textSelection(.enabled)
+                .lineSpacing(4)
+                .frame(maxWidth: EpistoriaDesign.Layout.readingWidth, alignment: .leading)
+                .padding(EpistoriaDesign.Spacing.page)
+                .frame(maxWidth: .infinity, alignment: .top)
+        }
+        .accessibilityLabel("Readable Source text")
+    }
+}
+
+private struct CSVSourceView: View {
+    let document: CSVSourceDocument
+
+    var body: some View {
+        ScrollView([.horizontal, .vertical]) {
+            LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
+                if let header = document.rows.first {
+                    Section {
+                        ForEach(document.rows.indices.dropFirst(), id: \.self) { index in
+                            csvRow(document.rows[index], index: index, isHeader: false)
+                        }
+                    } header: {
+                        csvRow(header, index: 0, isHeader: true)
+                    }
+                }
+            }
+            .padding(EpistoriaDesign.Spacing.page)
+        }
+        .accessibilityLabel("CSV table with \(document.rows.count) rows and \(document.maximumColumnCount) columns")
+    }
+
+    private func csvRow(_ row: [String], index: Int, isHeader: Bool) -> some View {
+        HStack(spacing: 0) {
+            Text(isHeader ? "" : index.formatted())
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+                .frame(width: 54, alignment: .trailing)
+                .padding(.trailing, 10)
+            ForEach(0..<document.maximumColumnCount, id: \.self) { column in
+                Text(column < row.count ? row[column] : "")
+                    .font(isHeader ? .body.weight(.semibold) : .body)
+                    .textSelection(.enabled)
+                    .lineLimit(4)
+                    .frame(width: 190, alignment: .leading)
+                    .frame(minHeight: 42, alignment: .leading)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(isHeader ? Color.primary.opacity(0.08) : Color.clear)
+                    .overlay(alignment: .trailing) {
+                        Rectangle().fill(Color.primary.opacity(0.1)).frame(width: 0.5)
+                    }
+            }
+        }
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(Color.primary.opacity(0.1)).frame(height: 0.5)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(isHeader ? "Header row" : "Row \(index)")
     }
 }
 

@@ -147,6 +147,100 @@ class PDFExtractionManifestV1(ContractModel):
     chunk_entity_ids: list[UUID] = Field(min_length=1, max_length=64)
 
 
+class MediaTranscriptionRequestV1(ContractModel):
+    schema_version: Literal["media-transcription-request/v1"] = "media-transcription-request/v1"
+    account_id: UUID
+    job_id: UUID
+    source_id: UUID
+    source_version_id: UUID
+    source_type: Literal["AUDIO", "VIDEO"]
+    asset_id: UUID
+    asset_key: str = Field(min_length=43, max_length=43, pattern=r"^[A-Za-z0-9_-]+$")
+    expected_dedupe_tag: str = Field(min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$")
+    expected_plaintext_bytes: int = Field(ge=1, le=25 * 1024 * 1024)
+    filename: ShortText
+    mime_type: ShortText
+    language: Annotated[
+        str | None, StringConstraints(strip_whitespace=True, min_length=2, max_length=16)
+    ] = None
+    disclosure_acknowledged: Literal[True]
+
+    @model_validator(mode="after")
+    def validate_media_metadata(self) -> MediaTranscriptionRequestV1:
+        if "/" in self.filename or "\\" in self.filename or "\x00" in self.filename:
+            raise ValueError("transcription filename must be a basename")
+        extension = self.filename.rpartition(".")[2].lower()
+        allowed: dict[tuple[str, str], set[str]] = {
+            ("AUDIO", "mp3"): {"audio/mpeg", "audio/mp3"},
+            ("AUDIO", "m4a"): {"audio/mp4", "audio/x-m4a"},
+            ("AUDIO", "wav"): {"audio/wav", "audio/x-wav", "audio/vnd.wave"},
+            ("VIDEO", "mp4"): {"video/mp4"},
+        }
+        mime_types = allowed.get((self.source_type, extension))
+        if mime_types is None or self.mime_type.lower() not in mime_types:
+            raise ValueError("transcription media metadata is unsupported")
+        return self
+
+
+class TranscriptSegmentV1(ContractModel):
+    index: int = Field(ge=0)
+    start_seconds: float = Field(ge=0)
+    end_seconds: float = Field(ge=0)
+    text: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=12_000)]
+
+    @model_validator(mode="after")
+    def validate_time_range(self) -> TranscriptSegmentV1:
+        if self.end_seconds < self.start_seconds:
+            raise ValueError("transcript segment end cannot precede its start")
+        return self
+
+
+class MediaTranscriptionResponseV1(ContractModel):
+    language: Annotated[
+        str | None, StringConstraints(strip_whitespace=True, min_length=2, max_length=32)
+    ] = None
+    duration_seconds: float = Field(gt=0, le=604_800)
+    segments: list[TranscriptSegmentV1] = Field(min_length=1, max_length=100_000)
+
+    @model_validator(mode="after")
+    def validate_segments(self) -> MediaTranscriptionResponseV1:
+        for expected, segment in enumerate(self.segments):
+            if segment.index != expected:
+                raise ValueError("transcript segment indexes must be contiguous")
+            if segment.end_seconds > self.duration_seconds + 1:
+                raise ValueError("transcript segment exceeds media duration")
+            if expected and segment.start_seconds < self.segments[expected - 1].start_seconds:
+                raise ValueError("transcript segments must be ordered")
+        return self
+
+
+class MediaTranscriptionChunkV1(ContractModel):
+    schema_version: Literal["media-transcription-chunk/v1"] = "media-transcription-chunk/v1"
+    job_id: UUID
+    source_id: UUID
+    source_version_id: UUID
+    chunk_index: int = Field(ge=0)
+    segments: list[TranscriptSegmentV1] = Field(min_length=1, max_length=500)
+
+
+class MediaTranscriptionManifestV1(ContractModel):
+    schema_version: Literal["ai-artifact/media-transcription/v1"] = (
+        "ai-artifact/media-transcription/v1"
+    )
+    job_id: UUID
+    source_id: UUID
+    source_version_id: UUID
+    generated_at: AwareDatetime
+    language: Annotated[
+        str | None, StringConstraints(strip_whitespace=True, min_length=2, max_length=32)
+    ] = None
+    duration_seconds: float = Field(gt=0, le=604_800)
+    character_count: int = Field(ge=1, le=5_000_000)
+    segment_count: int = Field(ge=1, le=100_000)
+    trace: ProviderTraceV1
+    chunk_entity_ids: list[UUID] = Field(min_length=1, max_length=64)
+
+
 # 2 MiB base64 max length = ceil(2_097_152 / 3) * 4 = 2_796_204 chars
 _MAX_IMAGE_B64_LEN = 2_796_204
 
@@ -211,6 +305,71 @@ class NoteQueryArtifactV1(ContractModel):
     response: NoteQueryResponseV1
 
 
+FeedbackEvidenceKind = Literal["QUESTION_SNAPSHOT", "NOTE_BLOCK", "EVIDENCE"]
+
+
+class FeedbackEvidenceExcerptV1(ContractModel):
+    source_id: UUID
+    source_kind: FeedbackEvidenceKind
+    title: ShortText
+    locator: ShortText
+    excerpt: BodyText
+
+
+class FreeResponseFeedbackRequestV1(ContractModel):
+    schema_version: Literal["free-response-feedback-request/v1"] = (
+        "free-response-feedback-request/v1"
+    )
+    account_id: UUID
+    job_id: UUID
+    attempt_id: UUID
+    response_id: UUID
+    question_id: UUID
+    topic_id: UUID
+    question_kind: ShortText
+    prompt: BodyText
+    rubric: BodyText
+    reference_answer: BodyText
+    user_response: BodyText
+    confidence: int | None = Field(default=None, ge=1, le=5)
+    evidence: list[FeedbackEvidenceExcerptV1] = Field(min_length=1, max_length=50)
+    disclosure_acknowledged: Literal[True]
+
+    @model_validator(mode="after")
+    def validate_evidence_ids_unique(self) -> FreeResponseFeedbackRequestV1:
+        ids = [item.source_id for item in self.evidence]
+        if len(ids) != len(set(ids)):
+            raise ValueError("feedback evidence IDs must be unique")
+        return self
+
+
+class FreeResponseFeedbackResponseV1(ContractModel):
+    schema_version: Literal["free-response-feedback-response/v1"] = (
+        "free-response-feedback-response/v1"
+    )
+    feedback: BodyText
+    strengths: list[ShortText] = Field(default_factory=list, max_length=10)
+    improvements: list[ShortText] = Field(default_factory=list, max_length=10)
+    proposed_score: float = Field(ge=0, le=1)
+    uncertainty: ShortText
+    cited_source_ids: list[UUID] = Field(min_length=1, max_length=32)
+
+
+class FreeResponseFeedbackArtifactV1(ContractModel):
+    schema_version: Literal["ai-artifact/free-response-feedback/v1"] = (
+        "ai-artifact/free-response-feedback/v1"
+    )
+    job_id: UUID
+    attempt_id: UUID
+    response_id: UUID
+    question_id: UUID
+    topic_id: UUID
+    generated_at: AwareDatetime
+    source_ids: list[UUID] = Field(min_length=1, max_length=50)
+    trace: ProviderTraceV1
+    response: FreeResponseFeedbackResponseV1
+
+
 LearningJobType = Literal[
     "SOURCE_EXTRACTION",
     "TRANSCRIPTION",
@@ -225,9 +384,73 @@ LearningJobType = Literal[
     "WEEKLY_REVIEW",
 ]
 
+TestMode = Literal["COMPREHENSIVE", "QUICK_CHECK", "CUSTOM"]
+TestCoverageDimension = Literal[
+    "PREREQUISITE",
+    "CONCEPTUAL",
+    "METHOD_SELECTION",
+    "PROCEDURAL",
+    "VERIFICATION",
+    "ERROR_ANALYSIS",
+    "INTEGRATED",
+]
+
+
+class TestGenerationPlanV1(ContractModel):
+    schema_version: Literal["test-generation-plan/v1"] = "test-generation-plan/v1"
+    mode: TestMode
+    question_count: int = Field(ge=1, le=100)
+    time_limit_minutes: int | None = Field(default=None, ge=1, le=600)
+    coverage_dimensions: list[TestCoverageDimension] = Field(min_length=1, max_length=7)
+    objective_titles: list[ShortText] = Field(min_length=1, max_length=100)
+
+    @model_validator(mode="after")
+    def validate_unique_plan_values(self) -> TestGenerationPlanV1:
+        if len(self.coverage_dimensions) != len(set(self.coverage_dimensions)):
+            raise ValueError("coverage dimensions must be unique")
+        normalized = [title.casefold() for title in self.objective_titles]
+        if len(normalized) != len(set(normalized)):
+            raise ValueError("objective titles must be unique")
+        return self
+
+
+class AutomationAuthorizationV1(ContractModel):
+    schema_version: Literal["automation-authorization/v1"] = "automation-authorization/v1"
+    grant_id: UUID
+    topic_ids: list[UUID] = Field(min_length=1, max_length=100)
+    job_types: list[LearningJobType] = Field(min_length=1, max_length=10)
+    minimum_interval_hours: int = Field(ge=1, le=8_760)
+    expires_at: AwareDatetime
+    spending_limit_minor_units: int = Field(gt=0, le=10_000_000)
+    currency_code: Literal["USD"]
+    authorized_at: AwareDatetime
+    scope_key: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)
+    ]
+    input_fingerprint: Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
+
+    @model_validator(mode="after")
+    def validate_unique_scope(self) -> AutomationAuthorizationV1:
+        if len(self.topic_ids) != len(set(self.topic_ids)):
+            raise ValueError("automation Topic IDs must be unique")
+        if len(self.job_types) != len(set(self.job_types)):
+            raise ValueError("automation job types must be unique")
+        return self
+
+
+class KnownConceptReferenceV1(ContractModel):
+    id: UUID
+    name: ShortText
+    aliases: list[ShortText] = Field(default_factory=list, max_length=50)
+
 
 class LearningGenerationRequestV1(ContractModel):
-    schema_version: Literal["learning-generation-request/v1"] = "learning-generation-request/v1"
+    schema_version: Literal[
+        "learning-generation-request/v1",
+        "learning-generation-request/v2",
+        "learning-generation-request/v3",
+        "learning-generation-request/v4",
+    ] = "learning-generation-request/v4"
     account_id: UUID
     job_id: UUID
     job_type: LearningJobType
@@ -237,7 +460,10 @@ class LearningGenerationRequestV1(ContractModel):
         str | None, StringConstraints(strip_whitespace=True, max_length=2_000)
     ] = None
     sources: list[SourceExcerptV1] = Field(min_length=1, max_length=200)
+    known_concepts: list[KnownConceptReferenceV1] = Field(default_factory=list, max_length=200)
     objective_titles: list[ShortText] = Field(default_factory=list, max_length=100)
+    test_plan: TestGenerationPlanV1 | None = None
+    automation_authorization: AutomationAuthorizationV1 | None = None
     disclosure_acknowledged: Literal[True]
 
     @model_validator(mode="after")
@@ -245,8 +471,19 @@ class LearningGenerationRequestV1(ContractModel):
         ids = [source.source_id for source in self.sources]
         if len(ids) != len(set(ids)):
             raise ValueError("source IDs must be unique")
+        concept_ids = [concept.id for concept in self.known_concepts]
+        if len(concept_ids) != len(set(concept_ids)):
+            raise ValueError("known Concept IDs must be unique")
+        if self.job_type in {"TEST_BLUEPRINT", "TEST_GENERATION"} and self.test_plan is not None:
+            if self.objective_titles != self.test_plan.objective_titles:
+                raise ValueError("objectiveTitles must match testPlan.objectiveTitles")
+        if self.automation_authorization is not None:
+            authorization = self.automation_authorization
+            if self.topic_id not in authorization.topic_ids:
+                raise ValueError("automation does not allow this Topic")
+            if self.job_type not in authorization.job_types:
+                raise ValueError("automation does not allow this job type")
         return self
-
 
 class LearningDraftItemV1(ContractModel):
     id: UUID
@@ -259,18 +496,37 @@ class LearningDraftItemV1(ContractModel):
     cited_source_ids: list[UUID] = Field(min_length=1, max_length=32)
 
 
+ConceptLinkKind = Literal["PREREQUISITE", "PART_OF", "RELATED", "CONTRASTS", "APPLIES"]
+
+
+class ConceptLinkDraftV1(ContractModel):
+    id: UUID
+    source_concept_id: UUID | None = None
+    source_concept_name: ShortText
+    target_concept_id: UUID | None = None
+    target_concept_name: ShortText
+    relation: ConceptLinkKind
+    rationale: BodyText
+    cited_source_ids: list[UUID] = Field(min_length=1, max_length=32)
+
+
 class LearningGenerationResponseV1(ContractModel):
-    schema_version: Literal["learning-generation-response/v1"] = (
-        "learning-generation-response/v1"
+    schema_version: Literal[
+        "learning-generation-response/v1", "learning-generation-response/v2"
+    ] = (
+        "learning-generation-response/v2"
     )
     summary: BodyText
     items: list[LearningDraftItemV1] = Field(min_length=1, max_length=100)
+    concept_links: list[ConceptLinkDraftV1] = Field(default_factory=list, max_length=100)
     coverage_gaps: list[ShortText] = Field(default_factory=list, max_length=100)
 
 
 class LearningGenerationArtifactV1(ContractModel):
-    schema_version: Literal["ai-artifact/learning-generation/v1"] = (
-        "ai-artifact/learning-generation/v1"
+    schema_version: Literal[
+        "ai-artifact/learning-generation/v1", "ai-artifact/learning-generation/v2"
+    ] = (
+        "ai-artifact/learning-generation/v2"
     )
     job_id: UUID
     job_type: LearningJobType
@@ -280,6 +536,8 @@ class LearningGenerationArtifactV1(ContractModel):
     source_ids: list[UUID] = Field(min_length=1, max_length=200)
     trace: ProviderTraceV1
     response: LearningGenerationResponseV1
+    test_plan: TestGenerationPlanV1 | None = None
+    known_concept_ids: list[UUID] = Field(default_factory=list, max_length=200)
 
 
 class AIJobLease(ContractModel):

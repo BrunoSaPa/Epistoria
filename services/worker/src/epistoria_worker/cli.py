@@ -100,6 +100,8 @@ def _provider(settings: WorkerSettings) -> DigestProvider | None:
         prompt_version=settings.prompt_version,
         input_usd_per_million=settings.input_usd_per_million,
         output_usd_per_million=settings.output_usd_per_million,
+        transcription_model=settings.transcription_model,
+        transcription_usd_per_minute=settings.transcription_usd_per_minute,
     )
 
 

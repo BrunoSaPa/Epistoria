@@ -13,12 +13,13 @@ struct CollectionDetailView: View {
     @State private var showAddItem = false
     @State private var showChildCollection = false
     @State private var showEditList = false
+    @State private var pendingUnlinkNote: IdentifiedPayload<NotePayload>?
     @State private var errorMessage: String?
 
     var body: some View {
         List {
             if !childCollections.isEmpty {
-                Section("Nested collections") {
+                Section("Nested Lists") {
                     ForEach(childCollections, id: \.id) { child in
                         NavigationLink {
                             CollectionDetailView(model: model, collectionId: child.id)
@@ -42,14 +43,24 @@ struct CollectionDetailView: View {
                         NoteReviewPreview(
                             model: model,
                             note: note,
-                            context: "Collection · \(collection?.payload.name ?? "Topic")"
+                            context: "List · \(collection?.payload.name ?? "Untitled")"
                         )
+                    }
+                    .swipeActions {
+                        Button("Remove from List", systemImage: "link.badge.minus", role: .destructive) {
+                            pendingUnlinkNote = note
+                        }
+                    }
+                    .contextMenu {
+                        Button("Remove from List", systemImage: "link.badge.minus", role: .destructive) {
+                            pendingUnlinkNote = note
+                        }
                     }
                 }
             } header: {
                 Text("Notes")
             } footer: {
-                Text("A collection groups reusable material by topic. Linking a note does not move or duplicate it.")
+                Text("A List groups reusable material. Linking a note does not move or duplicate it.")
             }
 
             Section("Resources") {
@@ -61,13 +72,13 @@ struct CollectionDetailView: View {
                 }
             }
         }
-        .navigationTitle(collection?.payload.name ?? "Collection")
+        .navigationTitle(collection?.payload.name ?? "List")
         .toolbar {
             Menu {
                 Button("Edit List", systemImage: "slider.horizontal.3") { showEditList = true }
                 Button("Link existing item", systemImage: "link.badge.plus") { showAddItem = true }
                     .disabled(collection?.payload.archivedAt != nil)
-                Button("Nested collection", systemImage: "folder.badge.plus") { showChildCollection = true }
+                Button("Nested List", systemImage: "folder.badge.plus") { showChildCollection = true }
                     .disabled(collection?.payload.archivedAt != nil)
             } label: { Label("Add", systemImage: "plus") }
         }
@@ -95,7 +106,24 @@ struct CollectionDetailView: View {
         }
         .task { await load() }
         .refreshable { await load() }
-        .alert("Collection error", isPresented: .constant(errorMessage != nil)) {
+        .confirmationDialog(
+            "Remove this note from the List?",
+            isPresented: Binding(
+                get: { pendingUnlinkNote != nil },
+                set: { if !$0 { pendingUnlinkNote = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Remove from List", role: .destructive) {
+                guard let pendingUnlinkNote else { return }
+                Task { await unlinkNote(pendingUnlinkNote.id) }
+                self.pendingUnlinkNote = nil
+            }
+            Button("Cancel", role: .cancel) { pendingUnlinkNote = nil }
+        } message: {
+            Text("The note remains in the notebook and in any other Lists or Sessions.")
+        }
+        .alert("List error", isPresented: .constant(errorMessage != nil)) {
             Button("OK") { errorMessage = nil }
         } message: { Text(errorMessage ?? "") }
     }
@@ -122,6 +150,15 @@ struct CollectionDetailView: View {
             }
             notes = loadedNotes.sorted { $0.payload.updatedAt > $1.payload.updatedAt }
             resources = loadedResources
+        } catch { errorMessage = error.localizedDescription }
+    }
+
+    private func unlinkNote(_ noteId: UUID) async {
+        guard let store = model.store else { return }
+        do {
+            try await store.unlinkNote(noteId, fromCollection: collectionId)
+            model.noteLocalMutation()
+            await load()
         } catch { errorMessage = error.localizedDescription }
     }
 }

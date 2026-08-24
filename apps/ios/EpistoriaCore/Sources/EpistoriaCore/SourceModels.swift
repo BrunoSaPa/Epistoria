@@ -64,7 +64,9 @@ public struct SourceLocator: Codable, Equatable, Sendable {
         page: Int? = nil,
         rectangles: [AnnotationRectangle] = [],
         startOffset: Int? = nil,
-        endOffset: Int? = nil
+        endOffset: Int? = nil,
+        startSeconds: Double? = nil,
+        endSeconds: Double? = nil
     ) {
         self.kind = kind
         self.page = page
@@ -75,8 +77,8 @@ public struct SourceLocator: Codable, Equatable, Sendable {
         selector = nil
         self.startOffset = startOffset
         self.endOffset = endOffset
-        startSeconds = nil
-        endSeconds = nil
+        self.startSeconds = startSeconds
+        self.endSeconds = endSeconds
         slide = nil
         sheet = nil
         cellRange = nil
@@ -265,6 +267,12 @@ public struct EvidencePayload: EntityPayload, Equatable {
     public var locator: SourceLocator
     public var excerpt: String
     public var note: String?
+    /// The immutable provider artifact used to create transcript Evidence, when applicable.
+    public var transcriptionArtifactId: UUID?
+    /// Provider segment indexes included in this Evidence. Empty for non-transcript Evidence.
+    public var transcriptSegmentIndexes: [Int]?
+    /// Owner correction records applied when the excerpt was frozen.
+    public var transcriptCorrectionIds: [UUID]?
     public var createdAt: Date
     public var updatedAt: Date
 
@@ -282,8 +290,36 @@ public struct EvidencePayload: EntityPayload, Equatable {
         self.locator = locator
         self.excerpt = excerpt
         note = nil
+        transcriptionArtifactId = nil
+        transcriptSegmentIndexes = []
+        transcriptCorrectionIds = []
         createdAt = now
         updatedAt = now
+    }
+
+    public var resolvedTranscriptSegmentIndexes: [Int] { transcriptSegmentIndexes ?? [] }
+    public var resolvedTranscriptCorrectionIds: [UUID] { transcriptCorrectionIds ?? [] }
+}
+
+public enum EvidenceBacklinkKind: String, Codable, Sendable {
+    case note = "NOTE"
+    case concept = "CONCEPT"
+    case flashcard = "FLASHCARD"
+    case testQuestion = "TEST_QUESTION"
+}
+
+/// A local projection rebuilt from durable records. It is not synchronized as a separate entity.
+public struct EvidenceBacklink: Identifiable, Equatable, Sendable {
+    public var id: UUID
+    public var kind: EvidenceBacklinkKind
+    public var ownerId: UUID
+    public var title: String
+
+    public init(id: UUID, kind: EvidenceBacklinkKind, ownerId: UUID, title: String) {
+        self.id = id
+        self.kind = kind
+        self.ownerId = ownerId
+        self.title = title
     }
 }
 
@@ -340,12 +376,22 @@ public struct ConceptEvidenceRelationPayload: EntityPayload, Equatable {
     }
 }
 
-public enum ConceptLinkKind: String, Codable, Sendable {
+public enum ConceptLinkKind: String, Codable, CaseIterable, Sendable {
     case prerequisite = "PREREQUISITE"
     case partOf = "PART_OF"
     case related = "RELATED"
     case contrasts = "CONTRASTS"
     case applies = "APPLIES"
+
+    public var displayName: String {
+        switch self {
+        case .prerequisite: "Prerequisite for"
+        case .partOf: "Part of"
+        case .related: "Related to"
+        case .contrasts: "Contrasts with"
+        case .applies: "Applies to"
+        }
+    }
 }
 
 public enum RecordProvenance: String, Codable, Sendable {
@@ -362,6 +408,7 @@ public struct ConceptLinkPayload: EntityPayload, Equatable {
     public var provenance: RecordProvenance
     public var rationale: String?
     public var evidenceIds: [UUID]
+    public var generatorArtifactId: UUID?
     public var createdAt: Date
     public var updatedAt: Date
 
@@ -370,14 +417,18 @@ public struct ConceptLinkPayload: EntityPayload, Equatable {
         targetConceptId: UUID,
         relation: ConceptLinkKind,
         provenance: RecordProvenance = .user,
+        rationale: String? = nil,
+        evidenceIds: [UUID] = [],
+        generatorArtifactId: UUID? = nil,
         now: Date = .now
     ) {
         self.sourceConceptId = sourceConceptId
         self.targetConceptId = targetConceptId
         self.relation = relation
         self.provenance = provenance
-        rationale = nil
-        evidenceIds = []
+        self.rationale = rationale
+        self.evidenceIds = evidenceIds
+        self.generatorArtifactId = generatorArtifactId
         createdAt = now
         updatedAt = now
     }

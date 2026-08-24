@@ -32,12 +32,56 @@ the current personal beta.
 ## Sources
 
 - Keep an Inbox for Sources that have not been assigned to a Topic.
-- Import PDFs, images, plain text, Markdown, and HTML files.
+- Import PDFs, images, plain text, Markdown, HTML, CSV, XLSX, DOCX, PPTX, EPUB, ODT, and ODP
+  files.
+- Read CSV files in a local table with a pinned first row, row numbers, selectable text, and
+  horizontal and vertical scrolling. The original CSV bytes remain unchanged.
+- Read EPUB, word-processing, presentation, and spreadsheet text locally without uploading the
+  Source. The original package remains unchanged.
+- Import MP3, M4A, AAC, WAV, and CAF recordings after local format and system-decoder validation.
+- Play a recording locally with seek, 15-second skip, elapsed time, and remaining time controls.
+- Import MP4, M4V, and MOV video after bounded container checks and system-decoder validation.
+- Play video locally with the standard iPad controls. Playback files use complete file protection
+  and are removed when the reader closes or the notebook locks.
+- Capture an HTTPS webpage as a bounded, encrypted HTML snapshot without cookies or a
+  persistent browser session.
+- Read extracted webpage text offline. Scripts, styles, and inactive page content are not shown.
+- Refresh a webpage only when requested. Each refresh creates an immutable Source Version and
+  shows added and removed readable paragraphs. Earlier versions remain selectable.
+- Add a Google Doc, Slides presentation, or Sheet from a `docs.google.com` share link when the
+  file allows anyone with the link to view it.
+- Store the Google-provided DOCX, PPTX, or XLSX export as the encrypted original and read its
+  extracted text offline.
+- Refresh a Google file only when requested. Each refresh creates an immutable version, reports
+  readable-text changes, and leaves earlier versions selectable.
+- Add one YouTube video as a normalized link without downloading its video, captions, or metadata.
+- Load the privacy-enhanced YouTube player only after an explicit action. Unloading the player
+  clears the temporary nonpersistent web view.
+- Request an optional timestamped transcript for a local MP3, M4A, WAV, or MP4 Source up to 25 MB.
+  The approval explains that the trusted Mac decrypts the Source and sends its media bytes to the
+  configured AI provider.
+- Store transcript segments as encrypted derived records bound to the exact Source Version.
+  Search, accept, reject, or correct the transcript without changing the original media or
+  provider-generated text.
+- Select one segment or a continuous range and create reusable Evidence with the exact start and
+  end time. The Evidence keeps the frozen reviewed excerpt, Source Version, segment indexes, and
+  correction references.
+- Open a transcript segment or timestamped Evidence at its saved position in the local media
+  player.
+- Keep every transcript correction as an encrypted owner record. New corrections supersede the
+  active correction and retain prior history. Retraction restores generated text without deleting
+  the correction.
 - Filter the Library by Source type and Topic.
 - Keep the original PDF unchanged.
 - Refresh a Source by creating a new version. Older citations continue to use the earlier version.
 - Add separate page annotations.
 - Keep annotations as reusable Evidence linked to the exact Source Version.
+- Open the Evidence shelf in a note. Drag Evidence to a page or select **Insert**. The note stores
+  a reference to the existing Evidence record instead of copying it.
+- Open an Evidence card's original Source at the saved Source Version and locator.
+- Review note, Concept, flashcard, and test-question backlinks from the Evidence shelf.
+- Compare two Sources or two immutable versions of one Source in a full-screen local workspace.
+  Each side keeps its own Source, version, PDF page, scroll position, and media controls.
 - Edit a Source title, primary Topic, related Topics, and Lists. Archive and restore a Source
   without changing its immutable versions or citations.
 - Navigate directly to an annotated or searched page.
@@ -53,6 +97,8 @@ the current personal beta.
   being copied.
 - Rename, move, archive, and restore Lists while preserving linked records.
 - Create a Quick Note without assigning it, then add it to Lists or sessions later.
+- Remove a note from one List or Session without deleting the note, its other links, or Session
+  activity history.
 - Review notes with a page miniature, content excerpt, page count, and save state.
 - Link notes, Sources, Concepts, cards, tests, and study sessions to a Topic.
 - Archive and restore notes and Topics.
@@ -90,23 +136,59 @@ This feature requires a paired Mac and a configured AI provider. It is optional.
 - Edit cards by creating durable revisions. Suspend or archive cards without deleting reviews.
 - Edit goals and unresolved questions. Mark goals completed and questions resolved or reopen them.
 - Edit and archive Concepts and tests. Archived tests retain attempts and frozen questions.
+- Connect two Concepts with a typed relationship, an explanation, and optional reusable Evidence.
+  Edit or remove the connection without changing either Concept or its Evidence.
 
 - Create durable manual flashcards in eight card formats.
 - Review due cards with a deterministic offline schedule and append-only history.
 - Create coverage-first tests from an explicit objective list.
+- Choose Comprehensive, Quick Check, or Custom for manual and generated tests.
+- Detect proposed test objectives from local Topic Concepts, Sources, notes, and unresolved
+  questions before generation. Review the list before approving provider processing.
+- Set a question count and optional time limit. Custom tests can select prerequisite, conceptual,
+  method-selection, procedural, verification, error-analysis, and integrated coverage.
+- Keep the requested test plan on the encrypted artifact and durable test blueprint.
+- Compare generated questions with the requested count and objective list. Review uncovered
+  objectives and provider-reported source, dimension, count, or time constraints.
 - Store test questions, frozen attempts, autosaved responses, confidence, timing, scores, and
   score overrides.
 - Review all, incorrect, skipped, or low-confidence responses after a test.
+- Request optional source-cited feedback for a submitted written response. Review the exact data
+  included before paid processing.
+- Edit, accept, or reject generated feedback. Accepted feedback stores strengths, improvements,
+  uncertainty, citations, and a proposed question score without changing the submitted answer or
+  original calculated result.
+- Store a separate owner override and required reason for an individual question. The AI proposal
+  remains in history.
 - Use Study Next offline to rank due cards, goals, unresolved questions, paused sessions, and
   unfinished tests with a visible reason.
 - Pin, snooze, dismiss, or mark a Study Next recommendation as irrelevant.
+- Open a recommendation at its due card, paused session, unfinished attempt, test, goal, or
+  unresolved question when that record remains available.
+- Review append-only Study Next response history. Restoring a suppressed recommendation adds a new
+  response without deleting the earlier action.
+- Open **Study → Week** for an offline summary of the previous seven days and the next seven days.
+- Review focused time, completed sessions, card reviews, submitted tests, average test score,
+  difficult Topics, unresolved questions, dated goals, scheduled card reviews, and three suggested
+  next actions.
+- Open each weekly review row at the related Topic, goal, unresolved question, or recommended work
+  item. Difficult-material signals remain separate counts for card ratings, incorrect answers,
+  and low-confidence answers.
 - Use Topic Studio to review the exact Topic scope before requesting cited synthesis, flashcard
   drafts, test work, Concept suggestions, or a weekly review.
-- Review generated flashcards, test questions, and Concepts one item at a time. Edit their
+- Review generated flashcards, test questions, Concepts, and proposed Concept connections one item
+  at a time. Edit their
   content, include supported items, and exclude unsupported items before acceptance.
 - Accept selected items to create first-class encrypted learning records in one transaction while
   retaining the unchanged provider response and reviewed working copy.
 - Keep the current Topic as the default AI scope. Include connected Topics only when selected.
+- Keep Study Next in local Suggest mode without provider processing.
+- Create an optional recurring automation permission for selected Topics and supported tasks.
+- Set a minimum interval for each Topic/task pair, an expiration date, and a USD spending limit.
+- Pause, resume, edit, or permanently revoke a permission. Nonterminal jobs are cancelled when the
+  private service is reachable. Completed drafts remain available for review.
+- Avoid another automatic request when the allowed input has not changed. Automatic results use
+  the same cited draft review and acceptance flow as manual requests.
 
 ## Offline use and synchronization
 
@@ -122,7 +204,12 @@ This feature requires a paired Mac and a configured AI provider. It is optional.
 - Prevent new setup from replacing the configured notebook.
 - Verify selected recovery words during initial setup.
 - Create a readable export with standard files and checksums.
-- Preserve original PDFs, images, rich text, and Pencil data in the export.
+- Preserve original Sources, images, rich text, and Pencil data in the export.
+- Include local readable text copies for supported text and packaged-document Sources.
+- Include a readable URL file for each YouTube reference. Include accepted transcript manifests
+  and chunks when derived AI records are selected for export.
+- Include transcript corrections and timestamped Evidence in `knowledge.json`. Generated
+  transcript chunks remain separate in `ai-artifacts.json`.
 
 The current app can validate a readable export but cannot import it. See
 [Known limitations](KNOWN_LIMITATIONS.md).

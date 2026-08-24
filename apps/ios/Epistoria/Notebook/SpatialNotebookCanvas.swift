@@ -64,6 +64,7 @@ struct SpatialNotebookCommand: Equatable {
 struct SpatialNotebookItem: Identifiable {
     enum Content {
         case text(NSAttributedString)
+        case evidence(NSAttributedString, citation: String)
         case image(UIImage, filename: String)
         case legacyDrawing(PKDrawing)
         case shape(NoteCanvasShape)
@@ -1166,6 +1167,15 @@ private final class CanvasItemView: UIView, UITextViewDelegate, UIGestureRecogni
                 textView.attributedText = value
                 isApplyingText = false
             }
+            accessibilityLabel = "Canvas text"
+        case let .evidence(value, citation):
+            textView.isHidden = false
+            if !textView.attributedText.isEqual(to: value) {
+                isApplyingText = true
+                textView.attributedText = value
+                isApplyingText = false
+            }
+            accessibilityLabel = "Evidence from \(citation)"
         case let .image(image, filename):
             imageView.isHidden = false
             imageView.image = image
@@ -1210,9 +1220,12 @@ private final class CanvasItemView: UIView, UITextViewDelegate, UIGestureRecogni
 
     func setSelected(_ value: Bool) {
         selected = value
-        layer.borderWidth = value ? 1.5 : 0
-        layer.borderColor = UIColor.label.withAlphaComponent(0.55).cgColor
-        backgroundColor = value ? UIColor.secondarySystemFill.withAlphaComponent(0.35) : .clear
+        let isEvidence = if case .evidence = item?.content { true } else { false }
+        layer.borderWidth = value ? 1.5 : (isEvidence ? 0.5 : 0)
+        layer.borderColor = UIColor.label.withAlphaComponent(value ? 0.55 : 0.2).cgColor
+        backgroundColor = value
+            ? UIColor.secondarySystemFill.withAlphaComponent(0.35)
+            : (isEvidence ? UIColor.systemBackground.withAlphaComponent(0.92) : .clear)
         pinch.isEnabled = interactionEnabled && value && !textView.isFirstResponder
         rotation.isEnabled = interactionEnabled && value && !textView.isFirstResponder
     }

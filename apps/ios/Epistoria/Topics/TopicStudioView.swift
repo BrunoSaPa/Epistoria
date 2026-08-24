@@ -10,13 +10,24 @@ struct TopicStudioView: View {
     @State private var instructions = ""
     @State private var objectives = ""
     @State private var includeConnectedKnowledge = false
+    @State private var testMode = TestMode.comprehensive
+    @State private var questionCount = 12
+    @State private var usesTimeLimit = false
+    @State private var timeLimitMinutes = 30
+    @State private var customCoverage = Set(TestCoverageDimension.allCases)
+    @State private var detectedObjectives: [DetectedTestObjective] = []
+    @State private var selectedObjectiveTitles: Set<String> = []
+    @State private var isDetectingObjectives = false
     @State private var prepared: PreparedLearningGenerationRequest?
     @State private var submittedJob: AIJobSummary?
     @State private var artifact: IdentifiedPayload<LearningGenerationArtifact>?
     @State private var selectedItemIds: Set<UUID> = []
     @State private var reviewedItems: [UUID: LearningDraftItem] = [:]
+    @State private var selectedConceptLinkIds: Set<UUID> = []
+    @State private var reviewedConceptLinks: [UUID: ConceptLinkDraft] = [:]
     @State private var reviewedSummary = ""
     @State private var editingItem: LearningDraftItem?
+    @State private var editingConceptLink: ConceptLinkDraft?
     @State private var isWorking = false
     @State private var acceptanceMessage: String?
     @State private var errorMessage: String?
@@ -36,9 +47,6 @@ struct TopicStudioView: View {
                         }
                     }
                     TextField("Instructions (optional)", text: $instructions, axis: .vertical)
-                    if jobType == .testBlueprint || jobType == .testGeneration {
-                        TextField("Objectives, one per line", text: $objectives, axis: .vertical)
-                    }
                     Toggle("Include connected knowledge", isOn: $includeConnectedKnowledge)
                     Text(includeConnectedKnowledge
                          ? "Includes Topics connected through the same Areas. The disclosure below shows the final scope."
@@ -48,13 +56,24 @@ struct TopicStudioView: View {
                     Button("Review request", systemImage: "doc.text.magnifyingglass") {
                         Task { await prepare() }
                     }
-                    .disabled(isWorking)
+                    .disabled(isWorking || (isTestJob && (requestedObjectiveTitles.isEmpty || effectiveCoverage.isEmpty)))
+                }
+
+                if isTestJob {
+                    testPlanSection
                 }
 
                 if let prepared {
                     Section("Review before sending") {
                         LabeledContent("Excerpts", value: prepared.sourceCount.formatted())
                         LabeledContent("Approximate tokens", value: prepared.approximateTokens.formatted())
+                        if let plan = prepared.request.testPlan {
+                            LabeledContent("Mode", value: plan.mode.displayName)
+                            LabeledContent("Questions", value: plan.questionCount.formatted())
+                            LabeledContent("Objectives", value: plan.objectiveTitles.count.formatted())
+                            LabeledContent("Coverage", value: plan.coverageDimensions.map(\.displayName).joined(separator: ", "))
+                            LabeledContent("Time limit", value: plan.timeLimitMinutes.map { "\($0) min" } ?? "None")
+                        }
                         Label("Paid provider processing requires this approval", systemImage: "hand.raised")
                             .font(.subheadline)
                         Button("Approve and queue", systemImage: "desktopcomputer") {
@@ -140,6 +159,60 @@ struct TopicStudioView: View {
                                 .opacity(selectedItemIds.contains(original.id) ? 1 : 0.5)
                             }
 
+                            if artifact.payload.jobType == .conceptSuggestions,
+                               !artifact.payload.response.resolvedConceptLinks.isEmpty {
+                                Divider()
+                                HStack {
+                                    Text("Concept connections").font(.headline)
+                                    Spacer()
+                                    Text("\(selectedConceptLinkIds.count) of \(artifact.payload.response.resolvedConceptLinks.count) selected")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                ForEach(artifact.payload.response.resolvedConceptLinks) { original in
+                                    let link = reviewedConceptLinks[original.id] ?? original
+                                    HStack(alignment: .top, spacing: 12) {
+                                        if artifact.payload.reviewState != .accepted {
+                                            Toggle(
+                                                "Include connection from \(link.sourceConceptName) to \(link.targetConceptName)",
+                                                isOn: conceptLinkSelectionBinding(for: original.id)
+                                            )
+                                            .labelsHidden()
+                                            .disabled(isWorking)
+                                        } else {
+                                            Image(systemName: selectedConceptLinkIds.contains(original.id)
+                                                  ? "checkmark.circle.fill" : "minus.circle")
+                                                .foregroundStyle(selectedConceptLinkIds.contains(original.id) ? EpistoriaDesign.ink : .secondary)
+                                        }
+                                        VStack(alignment: .leading, spacing: 5) {
+                                            Text("\(link.sourceConceptName) → \(link.targetConceptName)")
+                                                .font(.headline)
+                                            Text(link.relation.displayName)
+                                                .font(.caption.weight(.semibold))
+                                                .foregroundStyle(.secondary)
+                                            Text(link.rationale)
+                                            Label(
+                                                "\(link.citedSourceIds.count) citation\(link.citedSourceIds.count == 1 ? "" : "s")",
+                                                systemImage: "link"
+                                            )
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                        }
+                                        Spacer()
+                                        if artifact.payload.reviewState != .accepted {
+                                            Button("Edit", systemImage: "pencil") {
+                                                editingConceptLink = link
+                                            }
+                                            .labelStyle(.iconOnly)
+                                            .accessibilityLabel("Edit connection from \(link.sourceConceptName) to \(link.targetConceptName)")
+                                            .disabled(isWorking)
+                                        }
+                                    }
+                                    .padding(.vertical, 5)
+                                    .opacity(selectedConceptLinkIds.contains(original.id) ? 1 : 0.5)
+                                }
+                            }
+
                             if !artifact.payload.response.coverageGaps.isEmpty {
                                 LabeledContent(
                                     "Coverage gaps",
@@ -152,7 +225,10 @@ struct TopicStudioView: View {
                                     Button("Accept selected", systemImage: "checkmark.circle") {
                                         Task { await acceptSelected() }
                                     }
-                                    .disabled(selectedItemIds.isEmpty || isWorking)
+                                    .disabled(
+                                        (selectedItemIds.isEmpty && selectedConceptLinkIds.isEmpty)
+                                            || isWorking
+                                    )
                                     Button("Reject all", systemImage: "xmark.circle", role: .destructive) {
                                         Task { await review(.rejected) }
                                     }
@@ -211,12 +287,104 @@ struct TopicStudioView: View {
                     Task { await persistDraftReview() }
                 }
             }
+            .sheet(item: $editingConceptLink) { link in
+                ConceptLinkDraftEditor(link: link) { edited in
+                    reviewedConceptLinks[edited.id] = edited
+                    selectedConceptLinkIds.insert(edited.id)
+                    editingConceptLink = nil
+                    Task { await persistDraftReview() }
+                }
+            }
             .onChange(of: jobType) {
                 prepared = nil
                 submittedJob = nil
                 Task { await loadArtifact() }
             }
-            .onChange(of: includeConnectedKnowledge) { prepared = nil }
+            .onChange(of: includeConnectedKnowledge) {
+                prepared = nil
+                detectedObjectives = []
+                selectedObjectiveTitles = []
+            }
+            .onChange(of: testMode) {
+                prepared = nil
+                applyTestModeDefaults()
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var testPlanSection: some View {
+        Section("Test plan") {
+            Picker("Mode", selection: $testMode) {
+                ForEach(TestMode.allCases, id: \.self) { mode in
+                    Text(mode.displayName).tag(mode)
+                }
+            }
+            .pickerStyle(.segmented)
+
+            Text(testMode.explanation)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Stepper("Questions: \(questionCount)", value: $questionCount, in: 1...100)
+                .onChange(of: questionCount) { prepared = nil }
+            Toggle("Time limit", isOn: $usesTimeLimit)
+                .onChange(of: usesTimeLimit) { prepared = nil }
+            if usesTimeLimit {
+                Stepper("Limit: \(timeLimitMinutes) minutes", value: $timeLimitMinutes, in: 5...600, step: 5)
+                    .onChange(of: timeLimitMinutes) { prepared = nil }
+            }
+
+            DisclosureGroup("Coverage dimensions (\(effectiveCoverage.count))") {
+                ForEach(TestCoverageDimension.allCases, id: \.self) { dimension in
+                    Toggle(dimension.displayName, isOn: coverageBinding(for: dimension))
+                        .disabled(testMode != .custom)
+                }
+                if testMode != .custom {
+                    Text("Choose Custom to change the coverage dimensions.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Button("Detect objectives from Topic", systemImage: "scope") {
+                Task { await detectObjectives() }
+            }
+            .disabled(isDetectingObjectives || isWorking)
+
+            if isDetectingObjectives {
+                ProgressView("Reading local Topic records…")
+            } else if detectedObjectives.isEmpty {
+                Text("Detection uses local Concept, Source, note, and unresolved-question titles. Review the results before generation.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(detectedObjectives) { objective in
+                    Toggle(isOn: objectiveBinding(for: objective.title)) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(objective.title)
+                            Text("\(objective.origin) · \(objective.supportingRecordCount) supporting record\(objective.supportingRecordCount == 1 ? "" : "s")")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .disabled(testMode == .comprehensive)
+                }
+            }
+
+            TextField("Additional objectives, one per line", text: $objectives, axis: .vertical)
+                .onChange(of: objectives) { prepared = nil }
+
+            if requestedObjectiveTitles.isEmpty {
+                Label("Add or detect at least one objective before reviewing the request.", systemImage: "exclamationmark.triangle")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            if let coverageConstraint {
+                Label(coverageConstraint, systemImage: "info.circle")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 
@@ -228,19 +396,126 @@ struct TopicStudioView: View {
         isWorking = true
         defer { isWorking = false }
         do {
-            let objectiveTitles = objectives
-                .split(whereSeparator: \.isNewline)
-                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-                .filter { !$0.isEmpty }
+            let objectiveTitles = requestedObjectiveTitles
+            let plan = isTestJob ? TestGenerationPlan(
+                mode: testMode,
+                questionCount: questionCount,
+                timeLimitMinutes: usesTimeLimit ? timeLimitMinutes : nil,
+                coverageDimensions: effectiveCoverage,
+                objectiveTitles: objectiveTitles
+            ) : nil
             prepared = try await coordinator.prepareTopicGeneration(
                 topicId: topicId,
                 jobType: jobType,
                 objectiveTitles: objectiveTitles,
+                testPlan: plan,
                 userInstructions: instructions.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty,
                 includeConnectedKnowledge: includeConnectedKnowledge
             )
             errorMessage = nil
         } catch { errorMessage = error.localizedDescription }
+    }
+
+    private func detectObjectives() async {
+        guard let coordinator = model.aiJobs else {
+            errorMessage = "Connect the private server and pair your trusted Mac in Settings first."
+            return
+        }
+        isDetectingObjectives = true
+        defer { isDetectingObjectives = false }
+        do {
+            detectedObjectives = try await coordinator.detectTestObjectives(
+                topicId: topicId,
+                includeConnectedKnowledge: includeConnectedKnowledge
+            )
+            applyTestModeSelection()
+            prepared = nil
+            errorMessage = nil
+        } catch { errorMessage = error.localizedDescription }
+    }
+
+    private var isTestJob: Bool {
+        jobType == .testBlueprint || jobType == .testGeneration
+    }
+
+    private var requestedObjectiveTitles: [String] {
+        let selected = detectedObjectives
+            .filter { selectedObjectiveTitles.contains($0.title) }
+            .map(\.title)
+        return (selected + objectives.lines).reduce(into: []) { result, title in
+            if !result.contains(where: { $0.localizedCaseInsensitiveCompare(title) == .orderedSame }) {
+                result.append(title)
+            }
+        }
+    }
+
+    private var effectiveCoverage: [TestCoverageDimension] {
+        switch testMode {
+        case .comprehensive:
+            TestCoverageDimension.allCases
+        case .quickCheck:
+            [.conceptual, .methodSelection, .verification]
+        case .custom:
+            TestCoverageDimension.allCases.filter(customCoverage.contains)
+        }
+    }
+
+    private var coverageConstraint: String? {
+        if testMode == .comprehensive, questionCount < requestedObjectiveTitles.count {
+            return "There are fewer questions than objectives. Questions may assess related objectives together; any remaining gap must be reported."
+        }
+        if usesTimeLimit, timeLimitMinutes < questionCount * 2 {
+            return "The time limit allows under two minutes per question. This may restrict procedural and integrated coverage."
+        }
+        if effectiveCoverage.isEmpty {
+            return "Select at least one coverage dimension."
+        }
+        return nil
+    }
+
+    private func applyTestModeDefaults() {
+        switch testMode {
+        case .comprehensive:
+            questionCount = max(12, detectedObjectives.count)
+        case .quickCheck:
+            questionCount = 5
+        case .custom:
+            questionCount = 10
+        }
+        applyTestModeSelection()
+    }
+
+    private func applyTestModeSelection() {
+        switch testMode {
+        case .comprehensive:
+            selectedObjectiveTitles = Set(detectedObjectives.map(\.title))
+        case .quickCheck:
+            selectedObjectiveTitles = Set(detectedObjectives.prefix(3).map(\.title))
+        case .custom:
+            selectedObjectiveTitles = Set(detectedObjectives.map(\.title))
+        }
+    }
+
+    private func objectiveBinding(for title: String) -> Binding<Bool> {
+        Binding(
+            get: { selectedObjectiveTitles.contains(title) },
+            set: { selected in
+                if selected { selectedObjectiveTitles.insert(title) }
+                else { selectedObjectiveTitles.remove(title) }
+                prepared = nil
+            }
+        )
+    }
+
+    private func coverageBinding(for dimension: TestCoverageDimension) -> Binding<Bool> {
+        Binding(
+            get: { effectiveCoverage.contains(dimension) },
+            set: { selected in
+                if selected { customCoverage.insert(dimension) }
+                else { customCoverage.remove(dimension) }
+                prepared = nil
+            }
+        )
     }
 
     private func submit() async {
@@ -274,10 +549,20 @@ struct TopicStudioView: View {
         }
     }
 
+    private var selectedConceptLinks: [ConceptLinkDraft] {
+        guard let artifact else { return [] }
+        return artifact.payload.response.resolvedConceptLinks.compactMap { original in
+            guard selectedConceptLinkIds.contains(original.id) else { return nil }
+            return reviewedConceptLinks[original.id] ?? original
+        }
+    }
+
     private func configureDraftReview() {
         guard let artifact else {
             selectedItemIds = []
             reviewedItems = [:]
+            selectedConceptLinkIds = []
+            reviewedConceptLinks = [:]
             reviewedSummary = ""
             return
         }
@@ -285,6 +570,10 @@ struct TopicStudioView: View {
         let items = reviewed?.items ?? artifact.payload.response.items
         selectedItemIds = Set(items.map(\.id))
         reviewedItems = Dictionary(uniqueKeysWithValues: items.map { ($0.id, $0) })
+        let conceptLinks = reviewed?.resolvedConceptLinks
+            ?? artifact.payload.response.resolvedConceptLinks
+        selectedConceptLinkIds = Set(conceptLinks.map(\.id))
+        reviewedConceptLinks = Dictionary(uniqueKeysWithValues: conceptLinks.map { ($0.id, $0) })
         reviewedSummary = reviewed?.summary ?? artifact.payload.response.summary
     }
 
@@ -299,17 +588,33 @@ struct TopicStudioView: View {
         )
     }
 
+    private func conceptLinkSelectionBinding(for id: UUID) -> Binding<Bool> {
+        Binding(
+            get: { selectedConceptLinkIds.contains(id) },
+            set: { included in
+                if included { selectedConceptLinkIds.insert(id) }
+                else { selectedConceptLinkIds.remove(id) }
+                Task { await persistDraftReview() }
+            }
+        )
+    }
+
     private func selectAll() async {
         guard let artifact else { return }
         selectedItemIds = Set(artifact.payload.response.items.map(\.id))
         for item in artifact.payload.response.items where reviewedItems[item.id] == nil {
             reviewedItems[item.id] = item
         }
+        selectedConceptLinkIds = Set(artifact.payload.response.resolvedConceptLinks.map(\.id))
+        for link in artifact.payload.response.resolvedConceptLinks where reviewedConceptLinks[link.id] == nil {
+            reviewedConceptLinks[link.id] = link
+        }
         await persistDraftReview()
     }
 
     private func clearSelection() async {
         selectedItemIds = []
+        selectedConceptLinkIds = []
         await persistDraftReview()
     }
 
@@ -321,7 +626,8 @@ struct TopicStudioView: View {
             try await store.saveLearningArtifactDraftReview(
                 id: artifact.id,
                 summary: reviewedSummary,
-                selectedItems: selectedItems
+                selectedItems: selectedItems,
+                selectedConceptLinks: selectedConceptLinks
             )
             model.noteLocalMutation()
             errorMessage = nil
@@ -347,6 +653,7 @@ struct TopicStudioView: View {
                     created.flashcards > 0 ? "\(created.flashcards) card\(created.flashcards == 1 ? "" : "s")" : nil,
                     created.tests > 0 ? "\(created.tests) test" : nil,
                     created.concepts > 0 ? "\(created.concepts) Concept\(created.concepts == 1 ? "" : "s")" : nil,
+                    created.conceptLinks > 0 ? "\(created.conceptLinks) Concept connection\(created.conceptLinks == 1 ? "" : "s")" : nil,
                 ]
                 .compactMap(\ .self)
                 .joined(separator: ", ")
@@ -496,6 +803,81 @@ private struct LearningDraftItemEditor: View {
     }
 }
 
+private struct ConceptLinkDraftEditor: View {
+    @Environment(\.dismiss) private var dismiss
+    let link: ConceptLinkDraft
+    let onSave: (ConceptLinkDraft) -> Void
+
+    @State private var sourceName: String
+    @State private var targetName: String
+    @State private var relation: ConceptLinkKind
+    @State private var rationale: String
+
+    init(link: ConceptLinkDraft, onSave: @escaping (ConceptLinkDraft) -> Void) {
+        self.link = link
+        self.onSave = onSave
+        _sourceName = State(initialValue: link.sourceConceptName)
+        _targetName = State(initialValue: link.targetConceptName)
+        _relation = State(initialValue: link.relation)
+        _rationale = State(initialValue: link.rationale)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Connection") {
+                    TextField("From Concept", text: $sourceName)
+                    TextField("To Concept", text: $targetName)
+                    Picker("Relationship", selection: $relation) {
+                        ForEach(ConceptLinkKind.allCases, id: \.self) { kind in
+                            Text(kind.displayName).tag(kind)
+                        }
+                    }
+                    TextField("Evidence-grounded reason", text: $rationale, axis: .vertical)
+                }
+                Section("Evidence") {
+                    Label(
+                        "\(link.citedSourceIds.count) source citation\(link.citedSourceIds.count == 1 ? "" : "s") retained",
+                        systemImage: "link"
+                    )
+                    Text("Citations are fixed during review. Exclude the connection if its evidence does not support it.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .navigationTitle("Edit Connection")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") { save() }
+                        .disabled(
+                            sourceName.trimmed.isEmpty
+                                || targetName.trimmed.isEmpty
+                                || rationale.trimmed.isEmpty
+                        )
+                }
+            }
+        }
+    }
+
+    private func save() {
+        var edited = link
+        let sourceChanged = edited.sourceConceptName != sourceName.trimmed
+        let targetChanged = edited.targetConceptName != targetName.trimmed
+        edited.sourceConceptName = sourceName.trimmed
+        edited.targetConceptName = targetName.trimmed
+        if sourceChanged { edited.sourceConceptId = nil }
+        if targetChanged { edited.targetConceptId = nil }
+        edited.relation = relation
+        edited.rationale = rationale.trimmed
+        onSave(edited)
+        dismiss()
+    }
+}
+
 private extension LearningAIJobType {
     var displayName: String {
         switch self {
@@ -516,6 +898,41 @@ private extension LearningAIJobType {
         case .conceptSuggestions: "point.3.connected.trianglepath.dotted"
         case .weeklyReview: "calendar.badge.clock"
         default: "sparkles"
+        }
+    }
+}
+
+private extension TestMode {
+    var displayName: String {
+        switch self {
+        case .comprehensive: "Comprehensive"
+        case .quickCheck: "Quick Check"
+        case .custom: "Custom"
+        }
+    }
+
+    var explanation: String {
+        switch self {
+        case .comprehensive:
+            "Uses every selected objective and coverage dimension. Any unsupported or omitted requirement is reported as a gap."
+        case .quickCheck:
+            "Creates a short check of core concepts, method selection, and verification. It does not claim complete Topic coverage."
+        case .custom:
+            "Uses only the objectives, coverage dimensions, question count, and time limit you select."
+        }
+    }
+}
+
+private extension TestCoverageDimension {
+    var displayName: String {
+        switch self {
+        case .prerequisite: "Prerequisites"
+        case .conceptual: "Concepts"
+        case .methodSelection: "Method selection"
+        case .procedural: "Procedure"
+        case .verification: "Verification"
+        case .errorAnalysis: "Error analysis"
+        case .integrated: "Integrated application"
         }
     }
 }

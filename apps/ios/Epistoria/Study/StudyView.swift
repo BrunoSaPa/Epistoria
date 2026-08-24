@@ -1,9 +1,63 @@
 import EpistoriaCore
 import SwiftUI
 
+enum StudyRecommendationDestination: Hashable, Identifiable {
+    case card(UUID)
+    case session(UUID)
+    case attempt(UUID)
+    case test(UUID)
+    case goal(UUID)
+    case question(UUID)
+    case topic(UUID)
+
+    var id: String {
+        switch self {
+        case .card(let id): "card:\(id.uuidString)"
+        case .session(let id): "session:\(id.uuidString)"
+        case .attempt(let id): "attempt:\(id.uuidString)"
+        case .test(let id): "test:\(id.uuidString)"
+        case .goal(let id): "goal:\(id.uuidString)"
+        case .question(let id): "question:\(id.uuidString)"
+        case .topic(let id): "topic:\(id.uuidString)"
+        }
+    }
+
+    static func resolve(
+        _ recommendation: LocalStudyRecommendation,
+        dueCardIdsByTopic: [UUID: [UUID]],
+        sessionIds: Set<UUID>,
+        attemptIds: Set<UUID>,
+        testIds: Set<UUID>
+    ) -> StudyRecommendationDestination {
+        switch recommendation.kind {
+        case .dueCards:
+            if let id = dueCardIdsByTopic[recommendation.topicId]?.first { return .card(id) }
+        case .pausedSession:
+            if let id = recommendation.targetId, sessionIds.contains(id) { return .session(id) }
+        case .unfinishedTest:
+            if let id = recommendation.targetId, attemptIds.contains(id) { return .attempt(id) }
+        case .goalDeadline:
+            if let id = recommendation.targetId { return .goal(id) }
+        case .unresolvedQuestion:
+            if let id = recommendation.targetId { return .question(id) }
+        case .testErrors:
+            if let id = recommendation.targetId {
+                if attemptIds.contains(id) { return .attempt(id) }
+                if testIds.contains(id) { return .test(id) }
+            }
+        case .incompleteCoverage:
+            if let id = recommendation.targetId, testIds.contains(id) { return .test(id) }
+        case .neglectedTopic:
+            break
+        }
+        return .topic(recommendation.topicId)
+    }
+}
+
 struct StudyView: View {
     private enum StudySection: String, CaseIterable, Identifiable {
         case next = "Study Next"
+        case week = "Week"
         case sessions = "Sessions"
         case flashcards = "Flashcards"
         case tests = "Tests"
@@ -20,10 +74,12 @@ struct StudyView: View {
     @State private var reviews: [IdentifiedPayload<FlashcardReviewPayload>] = []
     @State private var tests: [IdentifiedPayload<PracticeTestPayload>] = []
     @State private var attempts: [IdentifiedPayload<TestAttemptPayload>] = []
+    @State private var testResponses: [IdentifiedPayload<TestResponsePayload>] = []
     @State private var goals: [IdentifiedPayload<StudyGoalPayload>] = []
     @State private var unresolved: [IdentifiedPayload<UnresolvedQuestionPayload>] = []
     @State private var recommendations: [IdentifiedPayload<StudyRecommendationPayload>] = []
     @State private var recommendationResponses: [IdentifiedPayload<RecommendationResponsePayload>] = []
+    @State private var openedRecommendationDestination: StudyRecommendationDestination?
     @State private var errorMessage: String?
 
     var body: some View {
@@ -39,6 +95,7 @@ struct StudyView: View {
                 List {
                     switch section {
                     case .next: studyNextContent
+                    case .week: weeklyReviewContent
                     case .sessions: sessionsContent
                     case .flashcards: flashcardsContent
                     case .tests: testsContent
@@ -60,6 +117,9 @@ struct StudyView: View {
             }
             .task { await load() }
             .refreshable { await load() }
+            .navigationDestination(item: $openedRecommendationDestination) { destination in
+                recommendationDestination(destination)
+            }
             .alert("Study error", isPresented: .constant(errorMessage != nil)) {
                 Button("Try again") { Task { await load() } }
                 Button("Dismiss", role: .cancel) { errorMessage = nil }
@@ -67,23 +127,175 @@ struct StudyView: View {
         }
     }
 
+    @ViewBuilder private var weeklyReviewContent: some View {
+        let review = weeklyReview
+        Section {
+            VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Weekly review")
+                        .font(.title2.weight(.semibold))
+                    Text("\(review.periodStart.formatted(date: .abbreviated, time: .omitted))–\(review.periodEnd.formatted(date: .abbreviated, time: .omitted))")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 116), spacing: 10)], spacing: 10) {
+                    WeeklyMetric(title: "Focus", value: durationLabel(review.focusedMinutes), symbol: "timer")
+                    WeeklyMetric(title: "Cards", value: "\(review.cardReviews)", symbol: "rectangle.stack")
+                    WeeklyMetric(title: "Tests", value: "\(review.completedTests)", symbol: "checkmark.square")
+                    WeeklyMetric(
+                        title: "Average",
+                        value: review.averageTestScore?.formatted(.percent.precision(.fractionLength(0))) ?? "—",
+                        symbol: "chart.bar"
+                    )
+                }
+            }
+            .padding(.vertical, 6)
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("Weekly learning summary")
+        }
+
+        Section("Completed work") {
+            if review.topicActivity.isEmpty {
+                Text("No completed sessions, card reviews, or submitted tests in the last seven days.")
+                    .foregroundStyle(.secondary)
+            }
+            ForEach(review.topicActivity) { activity in
+                NavigationLink {
+                    TopicDashboardView(model: model, topicId: activity.topicId)
+                } label: {
+                    StudyRow(
+                        title: topicName(activity.topicId),
+                        detail: activityDetail(activity),
+                        symbol: "checkmark.circle"
+                    )
+                }
+            }
+        }
+
+        Section("Difficult material") {
+            if review.difficultTopics.isEmpty {
+                Text("No difficult card ratings, incorrect answers, or low-confidence answers were recorded this week.")
+                    .foregroundStyle(.secondary)
+            }
+            ForEach(review.difficultTopics) { difficulty in
+                NavigationLink {
+                    TopicDashboardView(model: model, topicId: difficulty.topicId)
+                } label: {
+                    StudyRow(
+                        title: topicName(difficulty.topicId),
+                        detail: difficultyDetail(difficulty),
+                        symbol: "exclamationmark.circle"
+                    )
+                }
+            }
+        }
+
+        Section("Open questions") {
+            if review.openQuestions.isEmpty {
+                Text("No unresolved questions.").foregroundStyle(.secondary)
+            }
+            ForEach(review.openQuestions.prefix(8), id: \.id) { question in
+                NavigationLink {
+                    LearningManagementView(model: model, initialTarget: .question(question.id))
+                } label: {
+                    StudyRow(
+                        title: question.payload.question,
+                        detail: topicName(question.payload.topicId),
+                        symbol: "questionmark.circle"
+                    )
+                }
+            }
+        }
+
+        Section("Next seven days") {
+            if review.upcomingGoals.isEmpty && review.reviewLoad.isEmpty {
+                Text("No dated goals or scheduled card reviews in the next seven days.")
+                    .foregroundStyle(.secondary)
+            }
+            ForEach(review.upcomingGoals.prefix(8), id: \.id) { goal in
+                NavigationLink {
+                    LearningManagementView(model: model, initialTarget: .goal(goal.id))
+                } label: {
+                    StudyRow(
+                        title: goal.payload.title,
+                        detail: goal.payload.targetDate.map {
+                            "\(topicName(goal.payload.topicId)) · \(goalDueLabel($0))"
+                        } ?? topicName(goal.payload.topicId),
+                        symbol: "target"
+                    )
+                }
+            }
+            ForEach(review.reviewLoad) { load in
+                NavigationLink {
+                    TopicDashboardView(model: model, topicId: load.topicId)
+                } label: {
+                    StudyRow(
+                        title: topicName(load.topicId),
+                        detail: reviewLoadDetail(load),
+                        symbol: "calendar"
+                    )
+                }
+            }
+        }
+
+        Section("Suggested next actions") {
+            if review.nextActions.isEmpty {
+                Text("No next action is available yet.").foregroundStyle(.secondary)
+            }
+            ForEach(review.nextActions) { recommendation in
+                Button {
+                    open(recommendation)
+                } label: {
+                    HStack(spacing: 12) {
+                        StudyRow(
+                            title: recommendation.title,
+                            detail: recommendation.explanation,
+                            symbol: recommendation.symbol
+                        )
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+                .buttonStyle(.plain)
+            }
+        }
+
+        Section {
+            Text("This review is calculated on this iPad from your durable learning history. It does not use a provider or create a paid AI job.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
     @ViewBuilder private var studyNextContent: some View {
         Section("Recommended now") {
             if let recommendation = currentRecommendation {
-                NavigationLink {
-                    TopicDashboardView(model: model, topicId: recommendation.topicId)
+                Button {
+                    open(recommendation)
                 } label: {
-                    StudyRow(
-                        title: recommendation.title,
-                        detail: recommendation.explanation,
-                        symbol: recommendation.symbol
-                    )
+                    HStack(spacing: 12) {
+                        StudyRow(
+                            title: recommendation.title,
+                            detail: recommendation.explanation,
+                            symbol: recommendation.symbol
+                        )
+                        Spacer()
+                        Text(recommendation.actionTitle)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        Image(systemName: "chevron.right")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.tertiary)
+                    }
                 }
+                .buttonStyle(.plain)
                 Menu("Recommendation actions", systemImage: "ellipsis.circle") {
-                    Button("Pin", systemImage: "pin") { Task { await respond(.pinned) } }
-                    Button("Snooze one day", systemImage: "clock") { Task { await respond(.snoozed) } }
-                    Button("Dismiss", systemImage: "xmark") { Task { await respond(.dismissed) } }
-                    Button("Not relevant", systemImage: "hand.thumbsdown") { Task { await respond(.irrelevant) } }
+                    Button("Pin", systemImage: "pin") { Task { await respond(recommendation, action: .pinned) } }
+                    Button("Snooze one day", systemImage: "clock") { Task { await respond(recommendation, action: .snoozed) } }
+                    Button("Dismiss", systemImage: "xmark") { Task { await respond(recommendation, action: .dismissed) } }
+                    Button("Not relevant", systemImage: "hand.thumbsdown") { Task { await respond(recommendation, action: .irrelevant) } }
                 }
             } else {
                 ContentUnavailableView(
@@ -107,6 +319,39 @@ struct StudyView: View {
                         StudyRow(title: testName(attempt.payload.testId), detail: "Continue saved attempt", symbol: "square.and.pencil")
                     }
                 }
+            }
+        }
+        if !recommendationResponses.isEmpty {
+            Section("Response history") {
+                ForEach(recommendationResponses.sorted { $0.payload.createdAt > $1.payload.createdAt }.prefix(30), id: \.id) { response in
+                    HStack(alignment: .top, spacing: 12) {
+                        Image(systemName: response.payload.action.historySymbol)
+                            .foregroundStyle(.secondary)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(responseTitle(response.payload))
+                                .lineLimit(2)
+                            Text("\(response.payload.action.historyLabel) · \(response.payload.createdAt.formatted(date: .abbreviated, time: .shortened))")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            if let until = response.payload.snoozedUntil {
+                                Text("Until \(until.formatted(date: .abbreviated, time: .shortened))")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        Spacer()
+                        if response.payload.action != .accepted,
+                           let recommendation = recommendation(from: response.payload) {
+                            Button("Restore") {
+                                Task { await respond(recommendation, action: .accepted) }
+                            }
+                            .font(.caption.weight(.semibold))
+                        }
+                    }
+                }
+                Text("Responses are append-only learning history. Restore adds a new response and does not erase the earlier action.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
     }
@@ -216,6 +461,21 @@ struct StudyView: View {
         rankedRecommendations.first
     }
 
+    private var weeklyReview: WeeklyReviewSummary {
+        WeeklyReviewEngine.summarize(
+            topics: topics,
+            sessions: sessions,
+            cards: cards,
+            reviews: reviews,
+            attempts: attempts,
+            responses: testResponses,
+            goals: goals,
+            unresolvedQuestions: unresolved,
+            nextActions: rankedRecommendations,
+            now: .now
+        )
+    }
+
     private var rankedRecommendations: [LocalStudyRecommendation] {
         let ranked = StudyNextEngine.rank(
             topics: topics,
@@ -237,7 +497,7 @@ struct StudyView: View {
             let key = recommendationKey(
                 topicId: stored.payload.topicId,
                 kind: stored.payload.kind,
-                title: stored.payload.title
+                targetId: stored.payload.targetEntityIds.first
             )
             switch response.action {
             case .pinned: pinned.insert(key)
@@ -288,7 +548,8 @@ struct StudyView: View {
             async let i = store.list(UnresolvedQuestionPayload.self)
             async let j = store.list(StudyRecommendationPayload.self)
             async let k = store.list(RecommendationResponsePayload.self)
-            let value = try await (a, b, c, d, e, f, g, h, i, j, k)
+            async let l = store.list(TestResponsePayload.self)
+            let value = try await (a, b, c, d, e, f, g, h, i, j, k, l)
             topics = value.0
             sessions = value.1.sorted { $0.payload.startedAt > $1.payload.startedAt }
             cards = value.2
@@ -300,12 +561,13 @@ struct StudyView: View {
             unresolved = value.8
             recommendations = value.9
             recommendationResponses = value.10
+            testResponses = value.11
             errorMessage = nil
         } catch { errorMessage = error.localizedDescription }
     }
 
-    private func respond(_ action: RecommendationAction) async {
-        guard let store = model.store, let recommendation = currentRecommendation else { return }
+    private func respond(_ recommendation: LocalStudyRecommendation, action: RecommendationAction) async {
+        guard let store = model.store else { return }
         do {
             let snoozedUntil = action == .snoozed
                 ? Calendar.current.date(byAdding: .day, value: 1, to: .now)
@@ -324,12 +586,132 @@ struct StudyView: View {
         recommendationKey(
             topicId: recommendation.topicId,
             kind: recommendation.kind,
-            title: recommendation.title
+            targetId: recommendation.targetId
         )
     }
 
-    private func recommendationKey(topicId: UUID, kind: RecommendationKind, title: String) -> String {
-        "\(topicId.uuidString):\(kind.rawValue):\(title)"
+    private func recommendationKey(topicId: UUID, kind: RecommendationKind, targetId: UUID?) -> String {
+        "\(topicId.uuidString):\(kind.rawValue):\(targetId?.uuidString ?? "aggregate")"
+    }
+
+    private func open(_ recommendation: LocalStudyRecommendation) {
+        openedRecommendationDestination = destination(for: recommendation)
+        Task { await respond(recommendation, action: .accepted) }
+    }
+
+    private func destination(for recommendation: LocalStudyRecommendation) -> StudyRecommendationDestination {
+        StudyRecommendationDestination.resolve(
+            recommendation,
+            dueCardIdsByTopic: Dictionary(grouping: dueCards, by: \.payload.topicId).mapValues { $0.map(\.id) },
+            sessionIds: Set(sessions.map(\.id)),
+            attemptIds: Set(attempts.map(\.id)),
+            testIds: Set(tests.map(\.id))
+        )
+    }
+
+    @ViewBuilder
+    private func recommendationDestination(_ destination: StudyRecommendationDestination) -> some View {
+        switch destination {
+        case .card(let id): FlashcardReviewView(model: model, cardId: id)
+        case .session(let id): SessionDetailView(model: model, sessionId: id)
+        case .attempt(let id): TestAttemptView(model: model, attemptId: id)
+        case .test(let id): PracticeTestDetailView(model: model, testId: id)
+        case .goal(let id): LearningManagementView(model: model, initialTarget: .goal(id))
+        case .question(let id): LearningManagementView(model: model, initialTarget: .question(id))
+        case .topic(let id): TopicDashboardView(model: model, topicId: id)
+        }
+    }
+
+    private func responseTitle(_ response: RecommendationResponsePayload) -> String {
+        if let title = response.recommendationTitle { return title }
+        return recommendations.first(where: { $0.id == response.recommendationId })?.payload.title
+            ?? "Study recommendation"
+    }
+
+    private func recommendation(from response: RecommendationResponsePayload) -> LocalStudyRecommendation? {
+        if let stored = recommendations.first(where: { $0.id == response.recommendationId }) {
+            return LocalStudyRecommendation(
+                topicId: stored.payload.topicId,
+                kind: stored.payload.kind,
+                title: stored.payload.title,
+                explanation: stored.payload.explanation,
+                score: stored.payload.score,
+                targetId: stored.payload.targetEntityIds.first
+            )
+        }
+        guard let topicId = response.topicId,
+              let kind = response.recommendationKind,
+              let title = response.recommendationTitle
+        else { return nil }
+        return LocalStudyRecommendation(
+            topicId: topicId,
+            kind: kind,
+            title: title,
+            explanation: "Restored from Study Next history.",
+            score: 0,
+            targetId: response.targetEntityIds?.first
+        )
+    }
+
+    private func durationLabel(_ minutes: Int) -> String {
+        if minutes < 60 { return "\(minutes)m" }
+        let hours = minutes / 60
+        let remainder = minutes % 60
+        return remainder == 0 ? "\(hours)h" : "\(hours)h \(remainder)m"
+    }
+
+    private func activityDetail(_ activity: WeeklyTopicActivity) -> String {
+        [
+            activity.completedSessions == 0 ? nil : "\(activity.completedSessions) session\(activity.completedSessions == 1 ? "" : "s")",
+            activity.focusedMinutes == 0 ? nil : durationLabel(activity.focusedMinutes),
+            activity.cardReviews == 0 ? nil : "\(activity.cardReviews) card\(activity.cardReviews == 1 ? "" : "s")",
+            activity.completedTests == 0 ? nil : "\(activity.completedTests) test\(activity.completedTests == 1 ? "" : "s")"
+        ].compactMap { $0 }.joined(separator: " · ")
+    }
+
+    private func difficultyDetail(_ difficulty: WeeklyTopicDifficulty) -> String {
+        [
+            difficulty.difficultCardReviews == 0 ? nil : "\(difficulty.difficultCardReviews) difficult card rating\(difficulty.difficultCardReviews == 1 ? "" : "s")",
+            difficulty.incorrectTestResponses == 0 ? nil : "\(difficulty.incorrectTestResponses) incorrect answer\(difficulty.incorrectTestResponses == 1 ? "" : "s")",
+            difficulty.lowConfidenceResponses == 0 ? nil : "\(difficulty.lowConfidenceResponses) low-confidence answer\(difficulty.lowConfidenceResponses == 1 ? "" : "s")"
+        ].compactMap { $0 }.joined(separator: " · ")
+    }
+
+    private func reviewLoadDetail(_ load: WeeklyTopicReviewLoad) -> String {
+        [
+            load.overdueCards == 0 ? nil : "\(load.overdueCards) due now",
+            load.upcomingCards == 0 ? nil : "\(load.upcomingCards) later this week"
+        ].compactMap { $0 }.joined(separator: " · ")
+    }
+
+    private func goalDueLabel(_ date: Date) -> String {
+        let prefix = date < .now ? "Overdue since" : "Due"
+        return "\(prefix) \(date.formatted(date: .abbreviated, time: .omitted))"
+    }
+}
+
+private struct WeeklyMetric: View {
+    let title: String
+    let value: String
+    let symbol: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Image(systemName: symbol)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.title3.weight(.semibold))
+                .monospacedDigit()
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, minHeight: 88, alignment: .leading)
+        .padding(12)
+        .background(.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(title), \(value)")
     }
 }
 
@@ -344,6 +726,43 @@ private struct StudyRow: View {
                 Text(detail).font(.caption).foregroundStyle(.secondary).lineLimit(2)
             }
         } icon: { Image(systemName: symbol).foregroundStyle(EpistoriaDesign.ink) }
+    }
+}
+
+private extension LocalStudyRecommendation {
+    var actionTitle: String {
+        switch kind {
+        case .dueCards: "Review"
+        case .testErrors: "Review errors"
+        case .unresolvedQuestion: "Resolve"
+        case .incompleteCoverage: "Review coverage"
+        case .pausedSession: "Resume"
+        case .unfinishedTest: "Continue"
+        case .neglectedTopic: "Open Topic"
+        case .goalDeadline: "Open goal"
+        }
+    }
+}
+
+private extension RecommendationAction {
+    var historyLabel: String {
+        switch self {
+        case .accepted: "Opened"
+        case .pinned: "Pinned"
+        case .snoozed: "Snoozed"
+        case .dismissed: "Dismissed"
+        case .irrelevant: "Marked not relevant"
+        }
+    }
+
+    var historySymbol: String {
+        switch self {
+        case .accepted: "arrow.right.circle"
+        case .pinned: "pin"
+        case .snoozed: "clock"
+        case .dismissed: "xmark.circle"
+        case .irrelevant: "hand.thumbsdown"
+        }
     }
 }
 
@@ -419,8 +838,12 @@ struct NewPracticeTestView: View {
     let topicId: UUID
     let onCreated: () -> Void
     @State private var title = "Practice test"
+    @State private var mode = TestMode.comprehensive
     @State private var objectives = ""
     @State private var questions = ""
+    @State private var usesTimeLimit = false
+    @State private var timeLimitMinutes = 30
+    @State private var customCoverage = Set(TestCoverageDimension.allCases)
     @State private var includeConnectedKnowledge = false
     @State private var errorMessage: String?
 
@@ -428,15 +851,46 @@ struct NewPracticeTestView: View {
         NavigationStack {
             Form {
                 TextField("Test title", text: $title)
+                Section("Plan") {
+                    Picker("Mode", selection: $mode) {
+                        ForEach(TestMode.allCases, id: \.self) { value in
+                            Text(value.studyDisplayName).tag(value)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    Text(mode.studyExplanation)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Toggle("Time limit", isOn: $usesTimeLimit)
+                    if usesTimeLimit {
+                        Stepper("Limit: \(timeLimitMinutes) minutes", value: $timeLimitMinutes, in: 5...600, step: 5)
+                    }
+                }
                 Section("Objectives") {
                     TextEditor(text: $objectives).frame(minHeight: 100)
-                    Text("Enter one objective per line. Comprehensive tests report any objective without a question.")
+                    Text("Enter one objective per line. The saved blueprint reports any objective without a question.")
                         .font(.caption).foregroundStyle(.secondary)
+                }
+                Section("Coverage dimensions") {
+                    ForEach(TestCoverageDimension.allCases, id: \.self) { dimension in
+                        Toggle(dimension.studyDisplayName, isOn: coverageBinding(for: dimension))
+                            .disabled(mode != .custom)
+                    }
+                    if mode != .custom {
+                        Text("Choose Custom to change these dimensions.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 Section("Questions") {
                     TextEditor(text: $questions).frame(minHeight: 140)
                     Text("Enter one question per line as: question | correct answer. Questions are assigned across the objectives in order.")
                         .font(.caption).foregroundStyle(.secondary)
+                    if let localCoverageWarning {
+                        Label(localCoverageWarning, systemImage: "info.circle")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 Toggle("Include connected knowledge", isOn: $includeConnectedKnowledge)
                 if let errorMessage { Text(errorMessage).foregroundStyle(.red) }
@@ -446,7 +900,7 @@ struct NewPracticeTestView: View {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Create") { Task { await create() } }
-                        .disabled(parsedObjectives.isEmpty || parsedQuestions.isEmpty)
+                        .disabled(parsedObjectives.isEmpty || parsedQuestions.isEmpty || effectiveCoverage.isEmpty)
                 }
             }
         }
@@ -454,7 +908,7 @@ struct NewPracticeTestView: View {
 
     private var parsedObjectives: [TestObjective] {
         objectives.split(whereSeparator: \.isNewline).map(String.init).map(\.trimmed).filter { !$0.isEmpty }.map {
-            TestObjective(title: $0, dimensions: TestCoverageDimension.allCases)
+            TestObjective(title: $0, dimensions: effectiveCoverage)
         }
     }
 
@@ -464,6 +918,37 @@ struct NewPracticeTestView: View {
             guard parts.count == 2, !parts[0].trimmed.isEmpty, !parts[1].trimmed.isEmpty else { return nil }
             return (parts[0].trimmed, parts[1].trimmed)
         }
+    }
+
+    private var effectiveCoverage: [TestCoverageDimension] {
+        switch mode {
+        case .comprehensive:
+            TestCoverageDimension.allCases
+        case .quickCheck:
+            [.conceptual, .methodSelection, .verification]
+        case .custom:
+            TestCoverageDimension.allCases.filter(customCoverage.contains)
+        }
+    }
+
+    private var localCoverageWarning: String? {
+        if mode == .comprehensive, parsedQuestions.count < parsedObjectives.count {
+            return "There are fewer questions than objectives. The saved test will identify objectives without a dedicated question."
+        }
+        if usesTimeLimit, timeLimitMinutes < parsedQuestions.count * 2 {
+            return "The time limit allows under two minutes per question and may restrict broader answers."
+        }
+        return nil
+    }
+
+    private func coverageBinding(for dimension: TestCoverageDimension) -> Binding<Bool> {
+        Binding(
+            get: { effectiveCoverage.contains(dimension) },
+            set: { selected in
+                if selected { customCoverage.insert(dimension) }
+                else { customCoverage.remove(dimension) }
+            }
+        )
     }
 
     private func create() async {
@@ -480,9 +965,11 @@ struct NewPracticeTestView: View {
             _ = try await store.createPracticeTest(
                 topicId: topicId,
                 title: title.trimmed,
+                mode: mode,
                 objectives: objectiveValues,
                 questions: questionValues,
-                includeConnectedKnowledge: includeConnectedKnowledge
+                includeConnectedKnowledge: includeConnectedKnowledge,
+                timeLimitMinutes: usesTimeLimit ? timeLimitMinutes : nil
             )
             model.noteLocalMutation()
             onCreated()
@@ -493,3 +980,23 @@ struct NewPracticeTestView: View {
 
 private extension String { var trimmed: String { trimmingCharacters(in: .whitespacesAndNewlines) } }
 private extension FlashcardKind { var displayName: String { rawValue.replacingOccurrences(of: "_", with: " ").capitalized } }
+private extension TestMode {
+    var studyDisplayName: String {
+        switch self {
+        case .comprehensive: "Comprehensive"
+        case .quickCheck: "Quick Check"
+        case .custom: "Custom"
+        }
+    }
+
+    var studyExplanation: String {
+        switch self {
+        case .comprehensive: "Plan broad coverage and record every objective that is not assessed."
+        case .quickCheck: "Use a short check of concepts, method selection, and verification."
+        case .custom: "Choose the exact coverage dimensions for this test."
+        }
+    }
+}
+private extension TestCoverageDimension {
+    var studyDisplayName: String { rawValue.replacingOccurrences(of: "_", with: " ").capitalized }
+}
