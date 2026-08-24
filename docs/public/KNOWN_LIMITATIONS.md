@@ -67,6 +67,12 @@ Epistoria remains in personal beta. The following limits apply to the current pr
 - A local provider can keep approved content off a hosted service, but quality, speed, context,
   vision, transcription, and reliable structured output depend on the selected model and server.
 - A live paid AI evaluation is not part of the current release evidence.
+- Source guides and exact question citations currently apply to PDFs. Other Source types do not
+  yet use this source-analysis screen.
+- Scanned pages can require OCR. Vector-only diagrams and PDFs with incomplete image metadata can
+  produce incomplete figure notes. The app shows reported coverage limits.
+- Large PDFs use a bounded analysis pass. A result can cover selected passages instead of every
+  passage and must state that limit.
 - Manual cards, tests, and typed Concept connections are available. Generated card, test, Concept,
   and Concept-connection drafts can be edited or excluded before acceptance.
 - Study Next supports pin, snooze, dismiss, irrelevant, open, and restore history.

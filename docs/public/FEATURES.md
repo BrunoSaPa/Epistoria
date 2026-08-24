@@ -86,6 +86,12 @@ the current personal beta.
   without changing its immutable versions or citations.
 - Navigate directly to an annotated or searched page.
 - Optional: extract PDF text on a paired Mac without using an AI provider.
+- Optional: create a PDF Source guide with a cited summary, translated summary, key topics,
+  suggested questions, and notes about detected images or figures.
+- Ask a question about one PDF. Each answer statement links to the supporting page and highlighted
+  region in the exact Source Version used for the answer.
+- See a coverage notice when a large PDF cannot fit in one analysis pass.
+- Turn figure input off for a text-only provider or a lower-cost text-only request.
 
 ## Organization
 

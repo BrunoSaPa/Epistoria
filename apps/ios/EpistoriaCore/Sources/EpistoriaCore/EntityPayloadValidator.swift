@@ -91,6 +91,10 @@ public enum EntityPayloadValidator {
             "ai-artifact/media-transcription/v1",
             "media-transcription-chunk/v1",
             "ai-artifact/provider-configuration/v1",
+            "ai-artifact/pdf-extraction/v1",
+            "pdf-extraction-chunk/v1",
+            "ai-artifact/source-analysis/v1",
+            "ai-artifact/source-query/v1",
         ]
         case .transcriptCorrection: ["transcript-correction/v1"]
         case .sourceVersion: ["source-version/v1"]

@@ -34,10 +34,25 @@ from .models import (
     SessionDigestArtifactV1,
     SessionDigestRequestV1,
     SessionDigestV1,
+    SourceAnalysisArtifactV1,
+    SourceAnalysisRequestV1,
+    SourceCitationV1,
+    SourceGuidePromptV1,
+    SourceGuideResponseV1,
+    SourceQueryArtifactV1,
+    SourceQueryPromptV1,
+    SourceQueryRequestV1,
+    SourceQueryResponseV1,
     TranscriptSegmentV1,
 )
 from .outbox import CachedCompletion, EncryptedOutbox
-from .pdf_extract import PDFExtractionError, chunk_pages, extract_pdf_pages
+from .pdf_extract import (
+    ExtractedSourceMaterial,
+    PDFExtractionError,
+    chunk_pages,
+    extract_pdf_materials,
+    extract_pdf_pages,
+)
 from .providers.base import DigestProvider, ProviderError
 from .providers.manager import ProviderConfigurationError, ProviderManager
 
@@ -117,6 +132,10 @@ class WorkerProcessor:
             return self._pdf_extraction(lease, plaintext)
         if lease.job_type == "NOTE_QUERY":
             return self._note_query(lease, plaintext)
+        if lease.job_type == "SOURCE_ANALYSIS":
+            return self._source_analysis(lease, plaintext)
+        if lease.job_type == "SOURCE_QUERY":
+            return self._source_query(lease, plaintext)
         if lease.job_type == "TRANSCRIPTION":
             try:
                 schema_version = json.loads(plaintext).get("schemaVersion")
@@ -143,6 +162,194 @@ class WorkerProcessor:
         }:
             return self._learning_generation(lease, plaintext)
         raise ProcessingFailure(code="UNSUPPORTED_JOB_TYPE", retryable=False)
+
+    def _source_analysis(self, lease: AIJobLease, plaintext: bytes) -> CachedCompletion:
+        if self._digest_provider is None:
+            raise ProcessingFailure(code="AI_NOT_CONFIGURED", retryable=False)
+        try:
+            request = SourceAnalysisRequestV1.model_validate_json(plaintext)
+        except ValidationError as error:
+            raise ProcessingFailure(code="INVALID_JOB_PAYLOAD", retryable=False) from error
+        extracted = self._extract_source_material(request, lease)
+        prompt = SourceGuidePromptV1(
+            title=request.title,
+            output_language=request.output_language,
+            materials=extracted.materials,
+        )
+        guide, trace = self._digest_provider.generate_source_guide(prompt)
+        allowed = {item.source_id for item in extracted.materials}
+        cited = self._guide_citations(guide, allowed)
+        for gap in extracted.coverage_gaps:
+            if gap not in guide.coverage_gaps:
+                guide.coverage_gaps.append(gap)
+        references = self._citation_snapshots(extracted, cited)
+        self._record_cost(lease.id, trace)
+        artifact_id = uuid5(lease.id, "ai-artifact/v1")
+        artifact = SourceAnalysisArtifactV1(
+            job_id=lease.id,
+            source_id=request.source_id,
+            source_version_id=request.source_version_id,
+            generated_at=datetime.now(UTC),
+            page_count=extracted.page_count,
+            analyzed_page_count=extracted.analyzed_page_count,
+            references=references,
+            trace=trace,
+            guide=guide,
+        )
+        mutation = self._encrypted_mutation(
+            entity_id=artifact_id,
+            parent_id=request.source_id,
+            relation_ids=[request.source_id, request.source_version_id, *cited][:64],
+            plaintext=json_bytes(artifact),
+        )
+        return CachedCompletion(
+            job_id=lease.id, artifact_entity_id=artifact_id, mutations=[mutation]
+        )
+
+    def _source_query(self, lease: AIJobLease, plaintext: bytes) -> CachedCompletion:
+        if self._digest_provider is None:
+            raise ProcessingFailure(code="AI_NOT_CONFIGURED", retryable=False)
+        try:
+            request = SourceQueryRequestV1.model_validate_json(plaintext)
+        except ValidationError as error:
+            raise ProcessingFailure(code="INVALID_JOB_PAYLOAD", retryable=False) from error
+        extracted = self._extract_source_material(request, lease, question=request.question)
+        prompt = SourceQueryPromptV1(
+            title=request.title,
+            output_language=request.output_language,
+            materials=extracted.materials,
+            question=request.question,
+        )
+        response, trace = self._digest_provider.generate_source_query(prompt)
+        allowed = {item.source_id for item in extracted.materials}
+        cited = self._query_citations(response, allowed)
+        references = self._citation_snapshots(extracted, cited)
+        self._record_cost(lease.id, trace)
+        artifact_id = uuid5(lease.id, "ai-artifact/v1")
+        artifact = SourceQueryArtifactV1(
+            job_id=lease.id,
+            source_id=request.source_id,
+            source_version_id=request.source_version_id,
+            question=request.question,
+            generated_at=datetime.now(UTC),
+            references=references,
+            trace=trace,
+            response=response,
+        )
+        mutation = self._encrypted_mutation(
+            entity_id=artifact_id,
+            parent_id=request.source_id,
+            relation_ids=[request.source_id, request.source_version_id, *cited][:64],
+            plaintext=json_bytes(artifact),
+        )
+        return CachedCompletion(
+            job_id=lease.id, artifact_entity_id=artifact_id, mutations=[mutation]
+        )
+
+    def _extract_source_material(
+        self,
+        request: SourceAnalysisRequestV1 | SourceQueryRequestV1,
+        lease: AIJobLease,
+        *,
+        question: str | None = None,
+    ) -> ExtractedSourceMaterial:
+        if request.account_id != self._account_id or request.job_id != lease.id:
+            raise ProcessingFailure(code="JOB_IDENTITY_MISMATCH", retryable=False)
+        try:
+            asset_key = base64url.decode(request.asset_key, field="assetKey")
+            if len(asset_key) != 32:
+                raise ValueError("asset key has the wrong length")
+        except ValueError as error:
+            raise ProcessingFailure(code="INVALID_JOB_PAYLOAD", retryable=False) from error
+        encrypted = self._api.download_encrypted_asset(
+            request.asset_id, maximum_bytes=self._maximum_asset_bytes
+        )
+        try:
+            pdf_bytes = decrypt_bytes(encrypted, key=asset_key)
+        except AssetCryptoError as error:
+            raise ProcessingFailure(code="ASSET_DECRYPTION_FAILED", retryable=False) from error
+        try:
+            actual_tag = plaintext_dedupe_tag(
+                pdf_bytes, account_key=self._account_key, account_id=self._account_id
+            )
+            if not hmac.compare_digest(actual_tag, request.expected_dedupe_tag):
+                raise ProcessingFailure(code="ASSET_DEDUPE_MISMATCH", retryable=False)
+            return extract_pdf_materials(
+                pdf_bytes,
+                source_version_id=request.source_version_id,
+                question=question,
+                include_images=request.include_images,
+            )
+        except PDFExtractionError as error:
+            raise ProcessingFailure(
+                code="SOURCE_ANALYSIS_EXTRACTION_FAILED", retryable=False
+            ) from error
+        finally:
+            pdf_bytes = b""
+
+    @staticmethod
+    def _guide_citations(response: SourceGuideResponseV1, allowed: set[UUID]) -> list[UUID]:
+        values: list[UUID] = []
+        for statement in [
+            *response.summary,
+            *response.translated_summary,
+            *response.image_insights,
+        ]:
+            values.extend(statement.source_ids)
+        for topic in response.key_topics:
+            values.extend(topic.source_ids)
+        for question in response.suggested_questions:
+            values.extend(question.source_ids)
+        return WorkerProcessor._validated_citation_ids(values, allowed)
+
+    @staticmethod
+    def _query_citations(response: SourceQueryResponseV1, allowed: set[UUID]) -> list[UUID]:
+        return WorkerProcessor._validated_citation_ids(
+            [source_id for statement in response.answer for source_id in statement.source_ids],
+            allowed,
+        )
+
+    @staticmethod
+    def _validated_citation_ids(values: list[UUID], allowed: set[UUID]) -> list[UUID]:
+        result: list[UUID] = []
+        for source_id in values:
+            if source_id not in allowed:
+                raise ProcessingFailure(code="PROVIDER_CITATION_INVALID", retryable=True)
+            if source_id not in result:
+                result.append(source_id)
+        if not result:
+            raise ProcessingFailure(code="PROVIDER_CITATION_INVALID", retryable=True)
+        return result
+
+    @staticmethod
+    def _citation_snapshots(
+        extracted: ExtractedSourceMaterial, cited: list[UUID]
+    ) -> list[SourceCitationV1]:
+        by_id = {item.source_id: item for item in extracted.materials}
+        return [
+            SourceCitationV1(
+                source_id=source_id,
+                kind=by_id[source_id].kind,
+                page_number=by_id[source_id].page_number,
+                rectangles=by_id[source_id].rectangles,
+                excerpt=by_id[source_id].excerpt,
+            )
+            for source_id in cited
+        ]
+
+    def _record_cost(self, job_id: UUID, trace: Any) -> None:
+        if self._cost_ledger is None:
+            return
+        self._cost_ledger.record(
+            job_id=job_id,
+            provider=trace.provider,
+            model=trace.model,
+            prompt_version=trace.prompt_version,
+            input_tokens=trace.input_tokens,
+            output_tokens=trace.output_tokens,
+            estimated_cost_usd=trace.estimated_cost_usd,
+            provider_request_id=trace.provider_request_id,
+        )
 
     def _provider_configuration(self, lease: AIJobLease, plaintext: bytes) -> CachedCompletion:
         if self._provider_configuration_manager is None:
@@ -423,15 +630,12 @@ class WorkerProcessor:
         if round(status.estimated_usd * 100) >= authorization.spending_limit_minor_units:
             raise ProcessingFailure(code="AUTOMATION_SPENDING_LIMIT", retryable=False)
         if status.last_recorded_at is not None and (
-            now - status.last_recorded_at
-            < timedelta(hours=authorization.minimum_interval_hours)
+            now - status.last_recorded_at < timedelta(hours=authorization.minimum_interval_hours)
         ):
             raise ProcessingFailure(code="AUTOMATION_FREQUENCY_LIMIT", retryable=False)
         return authorization
 
-    def _free_response_feedback(
-        self, lease: AIJobLease, plaintext: bytes
-    ) -> CachedCompletion:
+    def _free_response_feedback(self, lease: AIJobLease, plaintext: bytes) -> CachedCompletion:
         if self._digest_provider is None:
             raise ProcessingFailure(code="AI_NOT_CONFIGURED", retryable=False)
         try:
@@ -608,13 +812,10 @@ class WorkerProcessor:
 
         chunks = self._chunk_transcript(response.segments)
         chunk_ids = [
-            uuid5(lease.id, f"media-transcription-chunk/{index}")
-            for index in range(len(chunks))
+            uuid5(lease.id, f"media-transcription-chunk/{index}") for index in range(len(chunks))
         ]
         mutations: list[dict[str, Any]] = []
-        for index, (entity_id, selected_segments) in enumerate(
-            zip(chunk_ids, chunks, strict=True)
-        ):
+        for index, (entity_id, selected_segments) in enumerate(zip(chunk_ids, chunks, strict=True)):
             chunk = MediaTranscriptionChunkV1(
                 job_id=lease.id,
                 source_id=request.source_id,
@@ -687,9 +888,7 @@ class WorkerProcessor:
         elif extension in {"m4a", "mp4"}:
             valid = len(media) >= 12 and media[4:8] == b"ftyp"
         if not valid:
-            raise ProcessingFailure(
-                code="TRANSCRIPTION_MEDIA_IDENTITY_MISMATCH", retryable=False
-            )
+            raise ProcessingFailure(code="TRANSCRIPTION_MEDIA_IDENTITY_MISMATCH", retryable=False)
 
     @staticmethod
     def _chunk_transcript(segments: list[TranscriptSegmentV1]) -> list[list[TranscriptSegmentV1]]:

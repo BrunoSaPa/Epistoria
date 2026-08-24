@@ -1,5 +1,14 @@
 # Release notes
 
+## PDF source understanding
+
+- Added PDF Source guides with cited summaries, translated summaries, key topics, suggested
+  questions, and detected figure notes.
+- Added grounded PDF questions with statement-level citations.
+- Added citation links that open and highlight the supporting region in the exact Source Version.
+- Added explicit approval before selected text or figure input reaches the configured provider.
+- Added visible page and passage coverage limits for large or partially readable PDFs.
+
 ## AI provider choice
 
 - Added provider management in Settings.

@@ -173,4 +173,55 @@ final class CanonicalJSONTests: XCTestCase {
             try EntityPayloadValidator.validate(entityType: .aiArtifact, content: artifactData)
         )
     }
+
+    func testSourceAnalysisArtifactPreservesExactPDFCitation() throws {
+        let referenceId = UUID()
+        let statement = SourceGuideStatement(
+            text: "Entropy measures uncertainty.",
+            sourceIds: [referenceId]
+        )
+        let artifact = SourceAnalysisArtifact(
+            schemaVersion: "ai-artifact/source-analysis/v1",
+            jobId: UUID(),
+            sourceId: UUID(),
+            sourceVersionId: UUID(),
+            generatedAt: Date(timeIntervalSince1970: 1_800_000_000),
+            pageCount: 4,
+            analyzedPageCount: 4,
+            references: [SourceCitationReference(
+                sourceId: referenceId,
+                kind: .text,
+                pageNumber: 3,
+                rectangles: [AnnotationRectangle(x: 0.1, y: 0.2, width: 0.7, height: 0.1)],
+                excerpt: "Entropy measures uncertainty."
+            )],
+            trace: ProviderTrace(
+                provider: "deterministic-test",
+                model: "fixture-v1",
+                promptVersion: "source-guide/v1"
+            ),
+            guide: SourceGuideResponse(
+                schemaVersion: "source-guide-response/v1",
+                sourceLanguage: "English",
+                outputLanguage: "Spanish",
+                summary: [statement],
+                translatedSummary: [SourceGuideStatement(
+                    text: "La entropía mide la incertidumbre.",
+                    sourceIds: [referenceId]
+                )],
+                keyTopics: [],
+                suggestedQuestions: [],
+                imageInsights: [],
+                coverageGaps: []
+            )
+        )
+
+        let data = try CanonicalJSON.encode(artifact)
+        let decoded = try CanonicalJSON.decode(SourceAnalysisArtifact.self, from: data)
+        XCTAssertEqual(decoded, artifact)
+        XCTAssertEqual(decoded.references[0].locator.page, 3)
+        XCTAssertNoThrow(
+            try EntityPayloadValidator.validate(entityType: .aiArtifact, content: data)
+        )
+    }
 }

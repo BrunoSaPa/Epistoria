@@ -41,6 +41,12 @@ An approved AI request sends selected readable material to the configured provid
 processing. This is a separate privacy boundary from encrypted synchronization. Provider data
 handling and retention policies can apply.
 
+PDF Source analysis requires separate approval. The paired Mac decrypts the selected Source
+Version in memory, selects bounded text passages, and can render bounded figure images. The
+configured provider receives those selected passages and images. The returned summary,
+translation, answer, and citations are encrypted before synchronization. The original PDF does
+not change.
+
 Provider keys are stored separately in secure storage on the iPad and paired Mac. Saving a
 provider connection sends the key to the trusted Mac through the same private encrypted channel.
 The synchronization service is not intended to receive a readable key, destination, or model.

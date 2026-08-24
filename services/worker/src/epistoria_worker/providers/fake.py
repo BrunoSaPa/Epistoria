@@ -16,6 +16,13 @@ from ..models import (
     ProviderTraceV1,
     SessionDigestRequestV1,
     SessionDigestV1,
+    SourceGuidePromptV1,
+    SourceGuideResponseV1,
+    SourceGuideStatementV1,
+    SourceGuideTopicV1,
+    SourceQueryPromptV1,
+    SourceQueryResponseV1,
+    SuggestedSourceQuestionV1,
     TranscriptSegmentV1,
 )
 
@@ -76,18 +83,22 @@ class DeterministicDigestProvider:
             for index in range(plan.question_count):
                 objective = plan.objective_titles[index % len(plan.objective_titles)]
                 dimension = dimensions[index % len(dimensions)]
-                items.append(LearningDraftItemV1(
-                    id=uuid5(request.job_id, f"test-question:{index}"),
-                    kind="MULTI_STEP_APPLICATION" if dimension == "INTEGRATED" else "EXPLANATION",
-                    title=f"{objective}: {dimension.replace('_', ' ').title()}",
-                    body=(
-                        f"Evaluate {objective} for the "
-                        f"{dimension.replace('_', ' ').lower()} dimension."
-                    ),
-                    answer=source.excerpt[:500],
-                    objective_titles=[objective],
-                    cited_source_ids=[source.source_id],
-                ))
+                items.append(
+                    LearningDraftItemV1(
+                        id=uuid5(request.job_id, f"test-question:{index}"),
+                        kind="MULTI_STEP_APPLICATION"
+                        if dimension == "INTEGRATED"
+                        else "EXPLANATION",
+                        title=f"{objective}: {dimension.replace('_', ' ').title()}",
+                        body=(
+                            f"Evaluate {objective} for the "
+                            f"{dimension.replace('_', ' ').lower()} dimension."
+                        ),
+                        answer=source.excerpt[:500],
+                        objective_titles=[objective],
+                        cited_source_ids=[source.source_id],
+                    )
+                )
             covered = set(item.objective_titles[0] for item in items)
             gaps = [
                 f"No generated question covers objective: {objective}"
@@ -106,9 +117,7 @@ class DeterministicDigestProvider:
                 plan.time_limit_minutes is not None
                 and plan.time_limit_minutes < plan.question_count * 2
             ):
-                gaps.append(
-                    "The requested time limit allows under two minutes per question."
-                )
+                gaps.append("The requested time limit allows under two minutes per question.")
             response = LearningGenerationResponseV1(
                 summary=f"{plan.mode.replace('_', ' ').title()} test",
                 items=items,
@@ -116,9 +125,7 @@ class DeterministicDigestProvider:
             )
         elif request.job_type == "CONCEPT_SUGGESTIONS":
             first_name = (
-                request.known_concepts[0].name
-                if request.known_concepts
-                else "Existing concept"
+                request.known_concepts[0].name if request.known_concepts else "Existing concept"
             )
             first_id = request.known_concepts[0].id if request.known_concepts else None
             proposed_name = f"Concept from {source.title}"
@@ -132,25 +139,30 @@ class DeterministicDigestProvider:
                 )
             ]
             if first_id is None:
-                items.insert(0, LearningDraftItemV1(
-                    id=uuid5(request.job_id, "existing-concept-fixture"),
-                    kind="CONCEPT",
-                    title=first_name,
-                    body="A deterministic concept used to exercise reviewed links.",
-                    cited_source_ids=[source.source_id],
-                ))
+                items.insert(
+                    0,
+                    LearningDraftItemV1(
+                        id=uuid5(request.job_id, "existing-concept-fixture"),
+                        kind="CONCEPT",
+                        title=first_name,
+                        body="A deterministic concept used to exercise reviewed links.",
+                        cited_source_ids=[source.source_id],
+                    ),
+                )
             response = LearningGenerationResponseV1(
                 summary="Deterministic Concept suggestions",
                 items=items,
-                concept_links=[ConceptLinkDraftV1(
-                    id=uuid5(request.job_id, "concept-link:0"),
-                    source_concept_id=first_id,
-                    source_concept_name=first_name,
-                    target_concept_name=proposed_name,
-                    relation="RELATED",
-                    rationale="The supplied evidence discusses both ideas together.",
-                    cited_source_ids=[source.source_id],
-                )],
+                concept_links=[
+                    ConceptLinkDraftV1(
+                        id=uuid5(request.job_id, "concept-link:0"),
+                        source_concept_id=first_id,
+                        source_concept_name=first_name,
+                        target_concept_name=proposed_name,
+                        relation="RELATED",
+                        rationale="The supplied evidence discusses both ideas together.",
+                        cited_source_ids=[source.source_id],
+                    )
+                ],
                 coverage_gaps=[],
             )
         else:
@@ -182,8 +194,7 @@ class DeterministicDigestProvider:
         self, request: FreeResponseFeedbackRequestV1
     ) -> tuple[FreeResponseFeedbackResponseV1, ProviderTraceV1]:
         matches = (
-            request.user_response.strip().casefold()
-            == request.reference_answer.strip().casefold()
+            request.user_response.strip().casefold() == request.reference_answer.strip().casefold()
         )
         response = FreeResponseFeedbackResponseV1(
             feedback=(
@@ -201,6 +212,83 @@ class DeterministicDigestProvider:
             provider="deterministic-test",
             model="fixture-v1",
             prompt_version="free-response-feedback/v1",
+            input_tokens=None,
+            output_tokens=None,
+            estimated_cost_usd=0,
+        )
+
+    def generate_source_guide(
+        self, request: SourceGuidePromptV1
+    ) -> tuple[SourceGuideResponseV1, ProviderTraceV1]:
+        first = request.materials[0]
+        image = next((item for item in request.materials if item.kind == "IMAGE"), None)
+        response = SourceGuideResponseV1(
+            source_language="English",
+            output_language=request.output_language,
+            summary=[
+                SourceGuideStatementV1(
+                    text=f"Deterministic source summary: {first.excerpt[:500]}",
+                    source_ids=[first.source_id],
+                )
+            ],
+            translated_summary=(
+                [
+                    SourceGuideStatementV1(
+                        text=f"Deterministic translation to {request.output_language}.",
+                        source_ids=[first.source_id],
+                    )
+                ]
+                if request.output_language.casefold() != "english"
+                else []
+            ),
+            key_topics=[
+                SourceGuideTopicV1(
+                    title="Primary source topic",
+                    explanation=first.excerpt[:500],
+                    source_ids=[first.source_id],
+                )
+            ],
+            suggested_questions=[
+                SuggestedSourceQuestionV1(
+                    question="What is the main claim in this source?",
+                    source_ids=[first.source_id],
+                )
+            ],
+            image_insights=(
+                [
+                    SourceGuideStatementV1(
+                        text="The source contains a cited image region.",
+                        source_ids=[image.source_id],
+                    )
+                ]
+                if image is not None
+                else []
+            ),
+        )
+        return response, self._source_trace("source-guide/v1")
+
+    def generate_source_query(
+        self, request: SourceQueryPromptV1
+    ) -> tuple[SourceQueryResponseV1, ProviderTraceV1]:
+        first = request.materials[0]
+        response = SourceQueryResponseV1(
+            answer=[
+                SourceGuideStatementV1(
+                    text=f"Deterministic answer for {request.question}: {first.excerpt[:500]}",
+                    source_ids=[first.source_id],
+                )
+            ],
+            insufficient_evidence=False,
+            follow_up_questions=["Which cited passage should we inspect next?"],
+        )
+        return response, self._source_trace("source-query/v1")
+
+    @staticmethod
+    def _source_trace(prompt_version: str) -> ProviderTraceV1:
+        return ProviderTraceV1(
+            provider="deterministic-test",
+            model="fixture-v1",
+            prompt_version=prompt_version,
             input_tokens=None,
             output_tokens=None,
             estimated_cost_usd=0,

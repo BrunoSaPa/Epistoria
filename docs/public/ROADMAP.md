@@ -96,6 +96,10 @@ Completed:
     changing generated chunks. One segment or a continuous range can become timestamped Evidence
     with frozen reviewed text, exact Source Version, segment indexes, correction references, and
     direct local-player navigation.
+18. PDF Sources can create a cited source guide with summary, translation, key topics, suggested
+    questions, and detected figure notes. Source questions return statement-level citations that
+    open the supporting page and region in the exact Source Version. Large-source coverage limits
+    remain visible.
 
 Next stages:
 

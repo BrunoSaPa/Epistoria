@@ -147,6 +147,179 @@ class PDFExtractionManifestV1(ContractModel):
     chunk_entity_ids: list[UUID] = Field(min_length=1, max_length=64)
 
 
+class SourceRectangleV1(ContractModel):
+    """A normalized, top-left-origin rectangle within one source page."""
+
+    x: float = Field(ge=0, le=1)
+    y: float = Field(ge=0, le=1)
+    width: float = Field(gt=0, le=1)
+    height: float = Field(gt=0, le=1)
+
+    @model_validator(mode="after")
+    def validate_bounds(self) -> SourceRectangleV1:
+        if self.x + self.width > 1.000_001 or self.y + self.height > 1.000_001:
+            raise ValueError("source rectangle exceeds page bounds")
+        return self
+
+
+SourceMaterialKind = Literal["TEXT", "IMAGE"]
+
+
+class SourceMaterialV1(ContractModel):
+    source_id: UUID
+    kind: SourceMaterialKind
+    page_number: int = Field(ge=1)
+    rectangles: list[SourceRectangleV1] = Field(min_length=1, max_length=8)
+    excerpt: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=4_000)
+    ]
+    image_content: Annotated[
+        str | None, StringConstraints(strip_whitespace=True, min_length=4, max_length=2_800_000)
+    ] = None
+
+    @model_validator(mode="after")
+    def validate_material(self) -> SourceMaterialV1:
+        if self.kind == "IMAGE" and self.image_content is None:
+            raise ValueError("image material requires imageContent")
+        if self.kind == "TEXT" and self.image_content is not None:
+            raise ValueError("text material cannot contain imageContent")
+        return self
+
+
+class SourceCitationV1(ContractModel):
+    source_id: UUID
+    kind: SourceMaterialKind
+    page_number: int = Field(ge=1)
+    rectangles: list[SourceRectangleV1] = Field(min_length=1, max_length=8)
+    excerpt: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=4_000)
+    ]
+
+
+class SourceAnalysisRequestV1(ContractModel):
+    schema_version: Literal["source-analysis-request/v1"] = "source-analysis-request/v1"
+    account_id: UUID
+    job_id: UUID
+    source_id: UUID
+    source_version_id: UUID
+    title: ShortText
+    output_language: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=2, max_length=64)
+    ]
+    asset_id: UUID
+    asset_key: str = Field(min_length=43, max_length=43, pattern=r"^[A-Za-z0-9_-]+$")
+    expected_dedupe_tag: str = Field(min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$")
+    include_images: bool
+    disclosure_acknowledged: Literal[True]
+
+
+class SourceQueryRequestV1(ContractModel):
+    schema_version: Literal["source-query-request/v1"] = "source-query-request/v1"
+    account_id: UUID
+    job_id: UUID
+    source_id: UUID
+    source_version_id: UUID
+    title: ShortText
+    output_language: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=2, max_length=64)
+    ]
+    asset_id: UUID
+    asset_key: str = Field(min_length=43, max_length=43, pattern=r"^[A-Za-z0-9_-]+$")
+    expected_dedupe_tag: str = Field(min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$")
+    include_images: bool
+    disclosure_acknowledged: Literal[True]
+    question: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2_000)
+    ]
+
+
+class SourceGuidePromptV1(ContractModel):
+    schema_version: Literal["source-guide-prompt/v1"] = "source-guide-prompt/v1"
+    title: ShortText
+    output_language: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=2, max_length=64)
+    ]
+    materials: list[SourceMaterialV1] = Field(min_length=1, max_length=240)
+
+
+class SourceQueryPromptV1(ContractModel):
+    schema_version: Literal["source-query-prompt/v1"] = "source-query-prompt/v1"
+    title: ShortText
+    output_language: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=2, max_length=64)
+    ]
+    materials: list[SourceMaterialV1] = Field(min_length=1, max_length=240)
+    question: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2_000)
+    ]
+
+
+class SourceGuideStatementV1(ContractModel):
+    text: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2_000)]
+    source_ids: list[UUID] = Field(min_length=1, max_length=16)
+
+
+class SourceGuideTopicV1(ContractModel):
+    title: ShortText
+    explanation: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2_000)
+    ]
+    source_ids: list[UUID] = Field(min_length=1, max_length=16)
+
+
+class SuggestedSourceQuestionV1(ContractModel):
+    question: ShortText
+    source_ids: list[UUID] = Field(min_length=1, max_length=16)
+
+
+class SourceGuideResponseV1(ContractModel):
+    schema_version: Literal["source-guide-response/v1"] = "source-guide-response/v1"
+    source_language: ShortText
+    output_language: ShortText
+    summary: list[SourceGuideStatementV1] = Field(min_length=1, max_length=12)
+    translated_summary: list[SourceGuideStatementV1] = Field(default_factory=list, max_length=12)
+    key_topics: list[SourceGuideTopicV1] = Field(default_factory=list, max_length=16)
+    suggested_questions: list[SuggestedSourceQuestionV1] = Field(
+        default_factory=list, max_length=12
+    )
+    image_insights: list[SourceGuideStatementV1] = Field(default_factory=list, max_length=12)
+    coverage_gaps: list[ShortText] = Field(default_factory=list, max_length=20)
+
+
+class SourceQueryResponseV1(ContractModel):
+    schema_version: Literal["source-query-response/v1"] = "source-query-response/v1"
+    answer: list[SourceGuideStatementV1] = Field(min_length=1, max_length=20)
+    insufficient_evidence: bool
+    follow_up_questions: list[ShortText] = Field(default_factory=list, max_length=5)
+
+
+class SourceAnalysisArtifactV1(ContractModel):
+    schema_version: Literal["ai-artifact/source-analysis/v1"] = "ai-artifact/source-analysis/v1"
+    job_id: UUID
+    source_id: UUID
+    source_version_id: UUID
+    generated_at: AwareDatetime
+    page_count: int = Field(ge=1)
+    analyzed_page_count: int = Field(ge=1)
+    references: list[SourceCitationV1] = Field(min_length=1, max_length=240)
+    trace: ProviderTraceV1
+    guide: SourceGuideResponseV1
+
+
+class SourceQueryArtifactV1(ContractModel):
+    schema_version: Literal["ai-artifact/source-query/v1"] = "ai-artifact/source-query/v1"
+    job_id: UUID
+    source_id: UUID
+    source_version_id: UUID
+    question: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2_000)
+    ]
+    generated_at: AwareDatetime
+    references: list[SourceCitationV1] = Field(min_length=1, max_length=80)
+    trace: ProviderTraceV1
+    response: SourceQueryResponseV1
+
+
 class MediaTranscriptionRequestV1(ContractModel):
     schema_version: Literal["media-transcription-request/v1"] = "media-transcription-request/v1"
     account_id: UUID
@@ -251,9 +424,7 @@ class NoteQuerySourceV1(ContractModel):
     title: ShortText
     locator: ShortText
     excerpt: BodyText | None = None
-    image_content: Annotated[
-        str | None, StringConstraints(max_length=_MAX_IMAGE_B64_LEN)
-    ] = None
+    image_content: Annotated[str | None, StringConstraints(max_length=_MAX_IMAGE_B64_LEN)] = None
 
     @model_validator(mode="after")
     def validate_content(self) -> NoteQuerySourceV1:
@@ -485,6 +656,7 @@ class LearningGenerationRequestV1(ContractModel):
                 raise ValueError("automation does not allow this job type")
         return self
 
+
 class LearningDraftItemV1(ContractModel):
     id: UUID
     kind: ShortText
@@ -513,9 +685,7 @@ class ConceptLinkDraftV1(ContractModel):
 class LearningGenerationResponseV1(ContractModel):
     schema_version: Literal[
         "learning-generation-response/v1", "learning-generation-response/v2"
-    ] = (
-        "learning-generation-response/v2"
-    )
+    ] = "learning-generation-response/v2"
     summary: BodyText
     items: list[LearningDraftItemV1] = Field(min_length=1, max_length=100)
     concept_links: list[ConceptLinkDraftV1] = Field(default_factory=list, max_length=100)
@@ -525,9 +695,7 @@ class LearningGenerationResponseV1(ContractModel):
 class LearningGenerationArtifactV1(ContractModel):
     schema_version: Literal[
         "ai-artifact/learning-generation/v1", "ai-artifact/learning-generation/v2"
-    ] = (
-        "ai-artifact/learning-generation/v2"
-    )
+    ] = "ai-artifact/learning-generation/v2"
     job_id: UUID
     job_type: LearningJobType
     topic_id: UUID
@@ -592,6 +760,8 @@ class AIJobLease(ContractModel):
         "SESSION_DIGEST",
         "PDF_EXTRACTION",
         "NOTE_QUERY",
+        "SOURCE_ANALYSIS",
+        "SOURCE_QUERY",
         "SOURCE_EXTRACTION",
         "TRANSCRIPTION",
         "TOPIC_SYNTHESIS",

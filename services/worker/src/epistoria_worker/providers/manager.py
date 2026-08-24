@@ -21,6 +21,10 @@ from ..models import (
     ProviderTraceV1,
     SessionDigestRequestV1,
     SessionDigestV1,
+    SourceGuidePromptV1,
+    SourceGuideResponseV1,
+    SourceQueryPromptV1,
+    SourceQueryResponseV1,
 )
 from .base import DigestProvider, ProviderError
 from .openai_provider import OpenAICompatibleDigestProvider, OpenAIDigestProvider
@@ -75,9 +79,7 @@ class ProviderManager:
                 profile_id=request.profile_id,
                 operation=request.operation,
                 display_name=existing.display_name if existing else None,
-                adapter=(
-                    _provider_adapter(existing.adapter) if existing is not None else None
-                ),
+                adapter=(_provider_adapter(existing.adapter) if existing is not None else None),
                 base_url=existing.base_url if existing else None,
                 text_model=existing.text_model if existing else None,
                 transcription_model=existing.transcription_model if existing else None,
@@ -114,6 +116,22 @@ class ProviderManager:
         self, request: FreeResponseFeedbackRequestV1
     ) -> tuple[FreeResponseFeedbackResponseV1, ProviderTraceV1]:
         return self._required_provider("TEXT").generate_free_response_feedback(request)
+
+    def generate_source_guide(
+        self, request: SourceGuidePromptV1
+    ) -> tuple[SourceGuideResponseV1, ProviderTraceV1]:
+        capability: ProviderCapability = (
+            "VISION" if any(item.image_content for item in request.materials) else "TEXT"
+        )
+        return self._required_provider(capability).generate_source_guide(request)
+
+    def generate_source_query(
+        self, request: SourceQueryPromptV1
+    ) -> tuple[SourceQueryResponseV1, ProviderTraceV1]:
+        capability: ProviderCapability = (
+            "VISION" if any(item.image_content for item in request.materials) else "TEXT"
+        )
+        return self._required_provider(capability).generate_source_query(request)
 
     def transcribe_media(
         self,

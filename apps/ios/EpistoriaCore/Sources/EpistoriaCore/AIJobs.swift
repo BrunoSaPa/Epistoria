@@ -656,6 +656,124 @@ public struct PDFExtractionManifest: EntityPayload, Equatable {
     public var updatedAt: Date { generatedAt }
 }
 
+public enum SourceAnalysisMaterialKind: String, Codable, Sendable {
+    case text = "TEXT"
+    case image = "IMAGE"
+}
+
+public struct SourceCitationReference: Codable, Equatable, Sendable, Identifiable {
+    public var sourceId: UUID
+    public var kind: SourceAnalysisMaterialKind
+    public var pageNumber: Int
+    public var rectangles: [AnnotationRectangle]
+    public var excerpt: String
+    public var id: UUID { sourceId }
+
+    public var locator: SourceLocator {
+        SourceLocator(kind: .pdf, page: pageNumber, rectangles: rectangles)
+    }
+}
+
+public struct SourceAnalysisRequest: Codable, Equatable, Sendable {
+    public var schemaVersion = "source-analysis-request/v1"
+    public var accountId: UUID
+    public var jobId: UUID
+    public var sourceId: UUID
+    public var sourceVersionId: UUID
+    public var title: String
+    public var outputLanguage: String
+    public var assetId: UUID
+    public var assetKey: String
+    public var expectedDedupeTag: String
+    public var includeImages: Bool
+    public var disclosureAcknowledged: Bool
+}
+
+public struct SourceQueryRequest: Codable, Equatable, Sendable {
+    public var schemaVersion = "source-query-request/v1"
+    public var accountId: UUID
+    public var jobId: UUID
+    public var sourceId: UUID
+    public var sourceVersionId: UUID
+    public var title: String
+    public var outputLanguage: String
+    public var assetId: UUID
+    public var assetKey: String
+    public var expectedDedupeTag: String
+    public var includeImages: Bool
+    public var disclosureAcknowledged: Bool
+    public var question: String
+}
+
+public struct SourceGuideStatement: Codable, Equatable, Sendable, Identifiable {
+    public var text: String
+    public var sourceIds: [UUID]
+    public var id: String { text + sourceIds.map(\.uuidString).joined() }
+}
+
+public struct SourceGuideTopic: Codable, Equatable, Sendable, Identifiable {
+    public var title: String
+    public var explanation: String
+    public var sourceIds: [UUID]
+    public var id: String { title + sourceIds.map(\.uuidString).joined() }
+}
+
+public struct SuggestedSourceQuestion: Codable, Equatable, Sendable, Identifiable {
+    public var question: String
+    public var sourceIds: [UUID]
+    public var id: String { question + sourceIds.map(\.uuidString).joined() }
+}
+
+public struct SourceGuideResponse: Codable, Equatable, Sendable {
+    public var schemaVersion: String
+    public var sourceLanguage: String
+    public var outputLanguage: String
+    public var summary: [SourceGuideStatement]
+    public var translatedSummary: [SourceGuideStatement]
+    public var keyTopics: [SourceGuideTopic]
+    public var suggestedQuestions: [SuggestedSourceQuestion]
+    public var imageInsights: [SourceGuideStatement]
+    public var coverageGaps: [String]
+}
+
+public struct SourceQueryResponse: Codable, Equatable, Sendable {
+    public var schemaVersion: String
+    public var answer: [SourceGuideStatement]
+    public var insufficientEvidence: Bool
+    public var followUpQuestions: [String]
+}
+
+public struct SourceAnalysisArtifact: EntityPayload, Equatable {
+    public static let entityType = EntityType.aiArtifact
+    public var schemaVersion: String
+    public var jobId: UUID
+    public var sourceId: UUID
+    public var sourceVersionId: UUID
+    public var generatedAt: Date
+    public var pageCount: Int
+    public var analyzedPageCount: Int
+    public var references: [SourceCitationReference]
+    public var trace: ProviderTrace
+    public var guide: SourceGuideResponse
+    public var createdAt: Date { generatedAt }
+    public var updatedAt: Date { generatedAt }
+}
+
+public struct SourceQueryArtifact: EntityPayload, Equatable {
+    public static let entityType = EntityType.aiArtifact
+    public var schemaVersion: String
+    public var jobId: UUID
+    public var sourceId: UUID
+    public var sourceVersionId: UUID
+    public var question: String
+    public var generatedAt: Date
+    public var references: [SourceCitationReference]
+    public var trace: ProviderTrace
+    public var response: SourceQueryResponse
+    public var createdAt: Date { generatedAt }
+    public var updatedAt: Date { generatedAt }
+}
+
 public struct MediaTranscriptionRequest: Codable, Equatable, Sendable {
     public var schemaVersion = "media-transcription-request/v1"
     public var accountId: UUID
@@ -827,6 +945,8 @@ public enum AIJobCoordinatorError: Error, Equatable {
     case noReadableSources
     case disclosureNotAcknowledged
     case resourceHasNoPDF
+    case sourceAnalysisRequiresPDF
+    case sourceQuestionEmpty
     case sourceHasNoTranscribableMedia
     case transcriptionFormatUnsupported
     case transcriptionMediaTooLarge
@@ -845,6 +965,9 @@ extension AIJobCoordinatorError: LocalizedError {
         case .noReadableSources: "This scope does not contain readable note text or Evidence yet."
         case .disclosureNotAcknowledged: "Review and approve the disclosure before queueing this request."
         case .resourceHasNoPDF: "This Source does not contain a PDF that the trusted Mac can extract."
+        case .sourceAnalysisRequiresPDF:
+            "Exact Source analysis currently requires a locally available PDF Source Version."
+        case .sourceQuestionEmpty: "Enter a question about this Source."
         case .sourceHasNoTranscribableMedia:
             "This Source does not contain a current local audio or video version."
         case .transcriptionFormatUnsupported:
@@ -1040,6 +1163,143 @@ public actor AIJobCoordinator {
             }
         }
         return nil
+    }
+
+    public func submitSourceAnalysis(
+        sourceId: UUID,
+        outputLanguage: String,
+        includeImages: Bool = true,
+        disclosureAcknowledged: Bool
+    ) async throws -> AIJobSummary {
+        guard disclosureAcknowledged else {
+            throw AIJobCoordinatorError.disclosureNotAcknowledged
+        }
+        let context = try await sourcePDFContext(sourceId: sourceId)
+        let jobId = UUID()
+        let request = SourceAnalysisRequest(
+            accountId: accountId,
+            jobId: jobId,
+            sourceId: sourceId,
+            sourceVersionId: context.versionId,
+            title: context.title,
+            outputLanguage: normalizedOutputLanguage(outputLanguage),
+            assetId: context.assetId,
+            assetKey: context.asset.assetKey,
+            expectedDedupeTag: context.asset.dedupeTag,
+            includeImages: includeImages,
+            disclosureAcknowledged: true
+        )
+        let envelope = try crypto.encryptJob(
+            CanonicalJSON.encode(request),
+            accountKey: accountKey,
+            accountId: accountId,
+            jobType: "SOURCE_ANALYSIS",
+            jobId: jobId
+        )
+        return try await api.createAIJob(
+            id: jobId, type: "SOURCE_ANALYSIS", envelope: envelope
+        )
+    }
+
+    public func submitSourceQuery(
+        sourceId: UUID,
+        question: String,
+        outputLanguage: String,
+        includeImages: Bool = true,
+        disclosureAcknowledged: Bool
+    ) async throws -> AIJobSummary {
+        guard disclosureAcknowledged else {
+            throw AIJobCoordinatorError.disclosureNotAcknowledged
+        }
+        let cleanQuestion = question.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanQuestion.isEmpty else { throw AIJobCoordinatorError.sourceQuestionEmpty }
+        let context = try await sourcePDFContext(sourceId: sourceId)
+        let jobId = UUID()
+        let request = SourceQueryRequest(
+            accountId: accountId,
+            jobId: jobId,
+            sourceId: sourceId,
+            sourceVersionId: context.versionId,
+            title: context.title,
+            outputLanguage: normalizedOutputLanguage(outputLanguage),
+            assetId: context.assetId,
+            assetKey: context.asset.assetKey,
+            expectedDedupeTag: context.asset.dedupeTag,
+            includeImages: includeImages,
+            disclosureAcknowledged: true,
+            question: String(cleanQuestion.prefix(2_000))
+        )
+        let envelope = try crypto.encryptJob(
+            CanonicalJSON.encode(request),
+            accountKey: accountKey,
+            accountId: accountId,
+            jobType: "SOURCE_QUERY",
+            jobId: jobId
+        )
+        return try await api.createAIJob(id: jobId, type: "SOURCE_QUERY", envelope: envelope)
+    }
+
+    public func latestSourceAnalysis(
+        sourceId: UUID,
+        sourceVersionId: UUID? = nil
+    ) async throws -> IdentifiedPayload<SourceAnalysisArtifact>? {
+        let candidates = try await database.entities(type: .aiArtifact, parentId: sourceId)
+            .compactMap { entity -> IdentifiedPayload<SourceAnalysisArtifact>? in
+                guard let artifact = try? CanonicalJSON.decode(
+                    SourceAnalysisArtifact.self, from: entity.content
+                ), artifact.sourceId == sourceId,
+                   sourceVersionId.map({ artifact.sourceVersionId == $0 }) ?? true
+                else { return nil }
+                return IdentifiedPayload(
+                    id: entity.id,
+                    payload: artifact,
+                    revision: entity.revision,
+                    syncState: entity.syncState
+                )
+            }
+        return candidates.max { $0.payload.generatedAt < $1.payload.generatedAt }
+    }
+
+    public func sourceQueryArtifacts(
+        sourceId: UUID,
+        sourceVersionId: UUID? = nil
+    ) async throws -> [IdentifiedPayload<SourceQueryArtifact>] {
+        try await database.entities(type: .aiArtifact, parentId: sourceId)
+            .compactMap { entity -> IdentifiedPayload<SourceQueryArtifact>? in
+                guard let artifact = try? CanonicalJSON.decode(
+                    SourceQueryArtifact.self, from: entity.content
+                ), artifact.sourceId == sourceId,
+                   sourceVersionId.map({ artifact.sourceVersionId == $0 }) ?? true
+                else { return nil }
+                return IdentifiedPayload(
+                    id: entity.id,
+                    payload: artifact,
+                    revision: entity.revision,
+                    syncState: entity.syncState
+                )
+            }
+            .sorted { $0.payload.generatedAt > $1.payload.generatedAt }
+    }
+
+    private func sourcePDFContext(sourceId: UUID) async throws -> (
+        title: String, versionId: UUID, assetId: UUID, asset: AssetPayload
+    ) {
+        let source = try await store.payload(SourcePayload.self, id: sourceId).payload
+        guard source.sourceType == .pdf,
+              let versionId = source.currentVersionId,
+              let version = try? await store.payload(SourceVersionPayload.self, id: versionId).payload,
+              version.sourceId == sourceId,
+              let assetId = version.originalAssetId,
+              let asset = try? await store.payload(AssetPayload.self, id: assetId).payload
+        else { throw AIJobCoordinatorError.sourceAnalysisRequiresPDF }
+        return (source.title, versionId, assetId, asset)
+    }
+
+    private func normalizedOutputLanguage(_ value: String) -> String {
+        let clean = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !clean.isEmpty { return String(clean.prefix(64)) }
+        return Locale.current.localizedString(forLanguageCode: Locale.current.language.languageCode?.identifier ?? "en")
+            ?? "English"
     }
 
     public func submitMediaTranscription(

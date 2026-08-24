@@ -519,6 +519,18 @@ struct ResourceDetailView: View {
     @State private var annotations: [IdentifiedPayload<AnnotationPayload>] = []
     @State private var extraction: IdentifiedPayload<PDFExtractionManifest>?
     @State private var extractionJob: AIJobSummary?
+    @State private var sourceAnalysis: IdentifiedPayload<SourceAnalysisArtifact>?
+    @State private var sourceAnalysisJob: AIJobSummary?
+    @State private var sourceQueries: [IdentifiedPayload<SourceQueryArtifact>] = []
+    @State private var sourceQueryJob: AIJobSummary?
+    @State private var isApprovingSourceAnalysis = false
+    @State private var isAskingSource = false
+    @State private var sourceOutputLanguage = Locale.current.localizedString(
+        forLanguageCode: Locale.current.language.languageCode?.identifier ?? "en"
+    ) ?? "English"
+    @State private var sourceQuestion = ""
+    @State private var includeSourceImages = true
+    @State private var citationRectangles: [AnnotationRectangle] = []
     @State private var transcription: IdentifiedPayload<MediaTranscriptionManifest>?
     @State private var transcriptSegments: [TranscriptSegment] = []
     @State private var transcriptionJob: AIJobSummary?
@@ -569,7 +581,13 @@ struct ResourceDetailView: View {
                       let reference = try? YouTubeReference(url: url) {
                 YouTubeSourceView(reference: reference)
             } else if let sourceData, resource?.payload.resourceType == .pdf {
-                PDFDocumentView(data: sourceData, pageNumber: $pageNumber, pageCount: $pageCount, highlightText: highlightText)
+                PDFDocumentView(
+                    data: sourceData,
+                    pageNumber: $pageNumber,
+                    pageCount: $pageCount,
+                    highlightText: highlightText,
+                    highlightRectangles: citationRectangles
+                )
             } else if let sourceData, resource?.payload.resourceType == .image,
                       let image = UIImage(data: sourceData) {
                 ScrollView([.horizontal, .vertical]) {
@@ -726,6 +744,32 @@ struct ResourceDetailView: View {
                 Task { await queueTranscription() }
             }
         }
+        .sheet(isPresented: $isApprovingSourceAnalysis) {
+            SourceAIApprovalSheet(
+                mode: .guide,
+                filename: sourceAsset?.originalFilename ?? resource?.payload.title ?? "PDF Source",
+                byteCount: sourceAsset?.plaintextByteSize ?? Int64(sourceData?.count ?? 0),
+                outputLanguage: $sourceOutputLanguage,
+                question: $sourceQuestion,
+                includeImages: $includeSourceImages
+            ) {
+                isApprovingSourceAnalysis = false
+                Task { await queueSourceAnalysis() }
+            }
+        }
+        .sheet(isPresented: $isAskingSource) {
+            SourceAIApprovalSheet(
+                mode: .question,
+                filename: sourceAsset?.originalFilename ?? resource?.payload.title ?? "PDF Source",
+                byteCount: sourceAsset?.plaintextByteSize ?? Int64(sourceData?.count ?? 0),
+                outputLanguage: $sourceOutputLanguage,
+                question: $sourceQuestion,
+                includeImages: $includeSourceImages
+            ) {
+                isAskingSource = false
+                Task { await queueSourceQuery() }
+            }
+        }
         .sheet(isPresented: $isShowingTranscript) {
             MediaTranscriptView(
                 model: model,
@@ -818,6 +862,131 @@ struct ResourceDetailView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 } }
+
+                if resource?.payload.resourceType == .pdf { Section("Source guide") {
+                    if let sourceAnalysis {
+                        LabeledContent(
+                            "Coverage",
+                            value: "\(sourceAnalysis.payload.analyzedPageCount) of \(sourceAnalysis.payload.pageCount) pages"
+                        )
+                        ForEach(sourceAnalysis.payload.guide.summary) { statement in
+                            citedStatement(
+                                statement,
+                                references: sourceAnalysis.payload.references
+                            )
+                        }
+                        if !sourceAnalysis.payload.guide.translatedSummary.isEmpty {
+                            DisclosureGroup("Translation · \(sourceAnalysis.payload.guide.outputLanguage)") {
+                                ForEach(sourceAnalysis.payload.guide.translatedSummary) { statement in
+                                    citedStatement(
+                                        statement,
+                                        references: sourceAnalysis.payload.references
+                                    )
+                                }
+                            }
+                        }
+                        if !sourceAnalysis.payload.guide.imageInsights.isEmpty {
+                            DisclosureGroup("Images and figures") {
+                                ForEach(sourceAnalysis.payload.guide.imageInsights) { statement in
+                                    citedStatement(
+                                        statement,
+                                        references: sourceAnalysis.payload.references
+                                    )
+                                }
+                            }
+                        }
+                        if !sourceAnalysis.payload.guide.keyTopics.isEmpty {
+                            DisclosureGroup("Key topics") {
+                                ForEach(sourceAnalysis.payload.guide.keyTopics) { topic in
+                                    VStack(alignment: .leading, spacing: 5) {
+                                        Text(topic.title).font(.subheadline.weight(.semibold))
+                                        Text(topic.explanation).font(.subheadline)
+                                        citationLinks(
+                                            topic.sourceIds,
+                                            references: sourceAnalysis.payload.references
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                        if !sourceAnalysis.payload.guide.suggestedQuestions.isEmpty {
+                            DisclosureGroup("Suggested questions") {
+                                ForEach(sourceAnalysis.payload.guide.suggestedQuestions) { item in
+                                    VStack(alignment: .leading, spacing: 5) {
+                                        Button {
+                                            sourceQuestion = item.question
+                                            isAskingSource = true
+                                        } label: {
+                                            Text(item.question)
+                                                .multilineTextAlignment(.leading)
+                                        }
+                                        .buttonStyle(.plain)
+                                        citationLinks(
+                                            item.sourceIds,
+                                            references: sourceAnalysis.payload.references
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                        if !sourceAnalysis.payload.guide.coverageGaps.isEmpty {
+                            DisclosureGroup("Coverage limits") {
+                                ForEach(sourceAnalysis.payload.guide.coverageGaps, id: \.self) {
+                                    Text($0).font(.caption).foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                        Button("Refresh source guide…", systemImage: "arrow.clockwise") {
+                            isApprovingSourceAnalysis = true
+                        }
+                    } else if let sourceAnalysisJob {
+                        Label(
+                            "Trusted Mac job \(sourceAnalysisJob.status.lowercased())",
+                            systemImage: "desktopcomputer"
+                        )
+                        Text("Run the trusted worker, then sync this iPad to receive the encrypted guide.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Button("Analyze this Source…", systemImage: "doc.text.magnifyingglass") {
+                            isApprovingSourceAnalysis = true
+                        }
+                        Text("Creates a cited summary, translation, key topics, suggested questions, and figure notes for the current immutable Source Version.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Button("Ask this Source…", systemImage: "questionmark.bubble") {
+                        isAskingSource = true
+                    }
+                    .disabled(sourceData == nil || model.aiJobs == nil)
+                } }
+
+                if resource?.payload.resourceType == .pdf, !sourceQueries.isEmpty {
+                    Section("Source answers") {
+                        ForEach(sourceQueries.prefix(5), id: \.id) { artifact in
+                            DisclosureGroup(artifact.payload.question) {
+                                ForEach(artifact.payload.response.answer) { statement in
+                                    citedStatement(
+                                        statement,
+                                        references: artifact.payload.references
+                                    )
+                                }
+                                if artifact.payload.response.insufficientEvidence {
+                                    Label("The cited material was insufficient.", systemImage: "exclamationmark.circle")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                    }
+                } else if resource?.payload.resourceType == .pdf, let sourceQueryJob {
+                    Section("Source answer") {
+                        Label(
+                            "Trusted Mac job \(sourceQueryJob.status.lowercased())",
+                            systemImage: "desktopcomputer"
+                        )
+                    }
+                }
 
                 if resource?.payload.resourceType == .pdf { Section("Searchable text") {
                     if let extraction {
@@ -1090,6 +1259,44 @@ struct ResourceDetailView: View {
         return selectedVersion?.payload.capturedURL ?? source?.payload.canonicalURL
     }
 
+    private func citedStatement(
+        _ statement: SourceGuideStatement,
+        references: [SourceCitationReference]
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(statement.text)
+                .font(.subheadline)
+                .textSelection(.enabled)
+            citationLinks(statement.sourceIds, references: references)
+        }
+        .padding(.vertical, 3)
+    }
+
+    private func citationLinks(
+        _ sourceIds: [UUID],
+        references: [SourceCitationReference]
+    ) -> some View {
+        HStack(spacing: 6) {
+            ForEach(Array(sourceIds.prefix(4).enumerated()), id: \.element) { index, sourceId in
+                if let reference = references.first(where: { $0.sourceId == sourceId }) {
+                    Button {
+                        openCitation(sourceId, references: references)
+                    } label: {
+                        Label(
+                            "\(reference.pageNumber)",
+                            systemImage: reference.kind == .image ? "photo" : "doc.text"
+                        )
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.mini)
+                    .accessibilityLabel(
+                        "Open citation \(index + 1) on PDF page \(reference.pageNumber)"
+                    )
+                }
+            }
+        }
+    }
+
     private var canTranscribeCurrentMedia: Bool {
         guard let filename = sourceAsset?.originalFilename else { return false }
         let ext = URL(fileURLWithPath: filename).pathExtension.lowercased()
@@ -1139,8 +1346,21 @@ struct ResourceDetailView: View {
             }
             if loaded.payload.resourceType == .pdf {
                 extraction = try await model.aiJobs?.latestPDFExtraction(resourceId: resourceId)
+                if let currentVersionId = resolvedSource.payload.currentVersionId,
+                   let coordinator = model.aiJobs {
+                    sourceAnalysis = try await coordinator.latestSourceAnalysis(
+                        sourceId: resourceId,
+                        sourceVersionId: currentVersionId
+                    )
+                    sourceQueries = try await coordinator.sourceQueryArtifacts(
+                        sourceId: resourceId,
+                        sourceVersionId: currentVersionId
+                    )
+                }
             } else {
                 extraction = nil
+                sourceAnalysis = nil
+                sourceQueries = []
             }
             let selectedVersion = versions.first { version in
                 version.id == (selectedSourceVersionId ?? resolvedSource.payload.currentVersionId)
@@ -1336,6 +1556,61 @@ struct ResourceDetailView: View {
         }
     }
 
+    private func queueSourceAnalysis() async {
+        guard let coordinator = model.aiJobs else {
+            errorMessage = "Connect the private server and pair your trusted Mac first."
+            return
+        }
+        await model.synchronize()
+        if let syncError = model.syncError {
+            errorMessage = syncError
+            return
+        }
+        do {
+            sourceAnalysisJob = try await coordinator.submitSourceAnalysis(
+                sourceId: resourceId,
+                outputLanguage: sourceOutputLanguage,
+                includeImages: includeSourceImages,
+                disclosureAcknowledged: true
+            )
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func queueSourceQuery() async {
+        guard let coordinator = model.aiJobs else {
+            errorMessage = "Connect the private server and pair your trusted Mac first."
+            return
+        }
+        await model.synchronize()
+        if let syncError = model.syncError {
+            errorMessage = syncError
+            return
+        }
+        do {
+            sourceQueryJob = try await coordinator.submitSourceQuery(
+                sourceId: resourceId,
+                question: sourceQuestion,
+                outputLanguage: sourceOutputLanguage,
+                includeImages: includeSourceImages,
+                disclosureAcknowledged: true
+            )
+            sourceQuestion = ""
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func openCitation(
+        _ sourceId: UUID,
+        references: [SourceCitationReference]
+    ) {
+        guard let reference = references.first(where: { $0.sourceId == sourceId }) else { return }
+        citationRectangles = reference.rectangles
+        pageNumber = reference.pageNumber
+    }
+
     private func reviewTranscription(_ state: AIArtifactReviewState) async {
         guard let store = model.store, var transcription else { return }
         transcription.payload.reviewState = state
@@ -1484,6 +1759,102 @@ private struct YouTubeEmbedWebView: UIViewRepresentable {
                 || host == "youtube.com"
             return allowed ? .allow : .cancel
         }
+    }
+}
+
+private struct SourceAIApprovalSheet: View {
+    enum Mode: Equatable {
+        case guide
+        case question
+
+        var title: String { self == .guide ? "Approve source analysis" : "Ask this Source" }
+        var action: String { self == .guide ? "Approve and analyze" : "Approve and ask" }
+    }
+
+    let mode: Mode
+    let filename: String
+    let byteCount: Int64
+    @Binding var outputLanguage: String
+    @Binding var question: String
+    @Binding var includeImages: Bool
+    let approve: () -> Void
+
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Source Version") {
+                    LabeledContent("File", value: filename)
+                    LabeledContent(
+                        "Size",
+                        value: ByteCountFormatter.string(
+                            fromByteCount: byteCount, countStyle: .file
+                        )
+                    )
+                }
+                if mode == .question {
+                    Section("Question") {
+                        TextField("Ask about this PDF", text: $question, axis: .vertical)
+                            .lineLimit(3 ... 8)
+                    }
+                }
+                Section("Output language") {
+                    TextField("Language, such as English or Spanish", text: $outputLanguage)
+                    Text("The source summary stays in its detected language. Epistoria also asks for a translated summary or answer in this language.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Section("Figures") {
+                    Toggle("Include detected images and figures", isOn: $includeImages)
+                    Text("Turn this off to reduce input cost or use a text-only provider. The guide or answer will not evaluate PDF images.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Section("Before you approve") {
+                    LabeledContent(
+                        "Maximum text input",
+                        value: mode == .guide ? "About 45,000 tokens" : "About 27,000 tokens"
+                    )
+                    LabeledContent(
+                        "Maximum figure input",
+                        value: includeImages ? "8 images" : "None"
+                    )
+                    Label("The trusted Mac decrypts and reads this PDF for this job.", systemImage: "desktopcomputer")
+                    Label(
+                        includeImages
+                            ? "The active AI provider receives selected text and bounded figure images."
+                            : "The active AI provider receives selected text only.",
+                        systemImage: "network"
+                    )
+                    Label("Every result is encrypted and bound to this exact Source Version.", systemImage: "lock.doc")
+                    Text("The sync service receives only encrypted content. The original PDF is not changed. Large PDFs report any pages or passages omitted from the current analysis pass.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text("Actual charges depend on the active provider and model. Epistoria records the provider-reported token use and configured cost estimate on the result.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .navigationTitle(mode.title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(mode.action) { approve() }
+                        .fontWeight(.semibold)
+                        .disabled(
+                            byteCount <= 0
+                                || outputLanguage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                || (mode == .question
+                                    && question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        )
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
     }
 }
 
@@ -3053,6 +3424,7 @@ private struct PDFDocumentView: UIViewRepresentable {
     @Binding var pageNumber: Int
     @Binding var pageCount: Int
     let highlightText: String?
+    var highlightRectangles: [AnnotationRectangle] = []
 
     func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
 
@@ -3073,6 +3445,7 @@ private struct PDFDocumentView: UIViewRepresentable {
         DispatchQueue.main.async {
             context.coordinator.updatePage()
             context.coordinator.applyHighlightIfNeeded(highlightText)
+            context.coordinator.applyRectangleHighlightsIfNeeded(highlightRectangles)
         }
         return view
     }
@@ -3082,6 +3455,7 @@ private struct PDFDocumentView: UIViewRepresentable {
         // `data` is immutable for the lifetime of this detail view. Re-serializing the
         // PDFDocument here would copy the entire file on routine page/highlight updates.
         context.coordinator.applyHighlightIfNeeded(highlightText)
+        context.coordinator.applyRectangleHighlightsIfNeeded(highlightRectangles)
         guard let document = view.document,
               pageNumber > 0,
               pageNumber <= document.pageCount,
@@ -3100,6 +3474,9 @@ private struct PDFDocumentView: UIViewRepresentable {
         var parent: PDFDocumentView
         weak var pdfView: PDFView?
         private var lastHighlight: String?
+        private var lastRectangles: [AnnotationRectangle] = []
+        private var lastRectanglePage = 0
+        private var transientAnnotations: [(PDFPage, PDFAnnotation)] = []
 
         init(parent: PDFDocumentView) { self.parent = parent }
 
@@ -3133,6 +3510,49 @@ private struct PDFDocumentView: UIViewRepresentable {
             view.go(to: preferred)
             updatePage()
             UIAccessibility.post(notification: .announcement, argument: "Matched PDF text highlighted")
+        }
+
+        func applyRectangleHighlightsIfNeeded(_ rectangles: [AnnotationRectangle]) {
+            guard rectangles != lastRectangles || parent.pageNumber != lastRectanglePage else {
+                return
+            }
+            lastRectangles = rectangles
+            lastRectanglePage = parent.pageNumber
+            for (page, annotation) in transientAnnotations {
+                page.removeAnnotation(annotation)
+            }
+            transientAnnotations = []
+            guard !rectangles.isEmpty,
+                  let view = pdfView,
+                  let document = view.document,
+                  parent.pageNumber > 0,
+                  parent.pageNumber <= document.pageCount,
+                  let page = document.page(at: parent.pageNumber - 1)
+            else { return }
+            let pageBounds = page.bounds(for: .cropBox)
+            for rectangle in rectangles {
+                let bounds = CGRect(
+                    x: pageBounds.minX + rectangle.x * pageBounds.width,
+                    y: pageBounds.maxY
+                        - (rectangle.y + rectangle.height) * pageBounds.height,
+                    width: rectangle.width * pageBounds.width,
+                    height: rectangle.height * pageBounds.height
+                )
+                let annotation = PDFAnnotation(bounds: bounds, forType: .highlight, withProperties: nil)
+                annotation.color = UIColor.systemGray.withAlphaComponent(0.35)
+                page.addAnnotation(annotation)
+                transientAnnotations.append((page, annotation))
+            }
+            view.go(to: CGRect(
+                x: pageBounds.minX,
+                y: transientAnnotations.first?.1.bounds.midY ?? pageBounds.midY,
+                width: pageBounds.width,
+                height: 1
+            ), on: page)
+            UIAccessibility.post(
+                notification: .announcement,
+                argument: "Opened cited region on PDF page \(parent.pageNumber)"
+            )
         }
 
         private func viewClearHighlights() {

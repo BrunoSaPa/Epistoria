@@ -13,6 +13,10 @@ from ..models import (
     ProviderTraceV1,
     SessionDigestRequestV1,
     SessionDigestV1,
+    SourceGuidePromptV1,
+    SourceGuideResponseV1,
+    SourceQueryPromptV1,
+    SourceQueryResponseV1,
 )
 
 
@@ -44,6 +48,18 @@ class DigestProvider(Protocol):
         self, request: FreeResponseFeedbackRequestV1
     ) -> tuple[FreeResponseFeedbackResponseV1, ProviderTraceV1]:
         """Return source-cited proposed feedback without changing a saved response or score."""
+        ...
+
+    def generate_source_guide(
+        self, request: SourceGuidePromptV1
+    ) -> tuple[SourceGuideResponseV1, ProviderTraceV1]:
+        """Create a translated, source-cited guide from bounded immutable material."""
+        ...
+
+    def generate_source_query(
+        self, request: SourceQueryPromptV1
+    ) -> tuple[SourceQueryResponseV1, ProviderTraceV1]:
+        """Answer from supplied source material and cite exact material IDs."""
         ...
 
     def transcribe_media(

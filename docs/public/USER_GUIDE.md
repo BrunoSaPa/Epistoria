@@ -359,6 +359,28 @@ Comparison decrypts available files on this iPad. It does not refresh a Source o
 player. A version that is not stored on this device remains unavailable until its encrypted asset
 has been restored through the normal Source workflow.
 
+To create a PDF Source guide:
+
+1. Open a PDF Source and show its inspector.
+2. Select **Analyze this Source…**.
+3. Enter the output language. Leave figure input on, or turn it off for a text-only provider or
+   lower input cost. Review the file, size, input limits, and provider disclosure.
+4. Select **Approve and analyze**.
+5. Run the trusted Mac worker and synchronize the iPad.
+6. Read the summary, translation, key topics, image notes, and coverage limits under
+   **Source guide**.
+7. Select a numbered citation to open and highlight the supporting PDF region.
+
+To ask about one PDF, select **Ask this Source…**, enter the question and output language, review
+the same disclosure, and select **Approve and ask**. The saved answer appears under **Source
+answers**. Each answer statement has its own citation. The answer remains bound to the Source
+Version used for that request. Refreshing the Source does not rewrite an earlier answer.
+
+Source analysis sends selected PDF text and detected figure regions to the active provider. It
+does not run when the approval sheet is cancelled. A provider profile must support image input
+when detected figures are included. Large, scanned, or unusually structured PDFs can show
+coverage limits.
+
 - Use the page controls to navigate.
 - Open the inspector for extraction and annotation details.
 - Add or edit an annotation without changing the original PDF.

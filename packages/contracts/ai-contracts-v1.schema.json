@@ -8,11 +8,120 @@
     { "$ref": "#/$defs/pdfExtractionRequest" },
     { "$ref": "#/$defs/noteQueryRequest" },
     { "$ref": "#/$defs/noteQueryResponse" },
+    { "$ref": "#/$defs/sourceAnalysisRequest" },
+    { "$ref": "#/$defs/sourceQueryRequest" },
+    { "$ref": "#/$defs/sourceGuideResponse" },
+    { "$ref": "#/$defs/sourceQueryResponse" },
     { "$ref": "#/$defs/providerConfigurationRequest" },
     { "$ref": "#/$defs/providerConfigurationArtifact" }
   ],
   "$defs": {
     "uuid": { "type": "string", "format": "uuid" },
+    "sourceRectangle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["x", "y", "width", "height"],
+      "properties": {
+        "x": { "type": "number", "minimum": 0, "maximum": 1 },
+        "y": { "type": "number", "minimum": 0, "maximum": 1 },
+        "width": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 },
+        "height": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 }
+      }
+    },
+    "sourceAnalysisRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "accountId", "jobId", "sourceId", "sourceVersionId", "title", "outputLanguage", "assetId", "assetKey", "expectedDedupeTag", "includeImages", "disclosureAcknowledged"],
+      "properties": {
+        "schemaVersion": { "const": "source-analysis-request/v1" },
+        "accountId": { "$ref": "#/$defs/uuid" },
+        "jobId": { "$ref": "#/$defs/uuid" },
+        "sourceId": { "$ref": "#/$defs/uuid" },
+        "sourceVersionId": { "$ref": "#/$defs/uuid" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "outputLanguage": { "type": "string", "minLength": 2, "maxLength": 64 },
+        "assetId": { "$ref": "#/$defs/uuid" },
+        "assetKey": { "type": "string", "minLength": 43, "maxLength": 43, "pattern": "^[A-Za-z0-9_-]+$" },
+        "expectedDedupeTag": { "type": "string", "minLength": 64, "maxLength": 64, "pattern": "^[0-9a-f]{64}$" },
+        "includeImages": { "type": "boolean" },
+        "disclosureAcknowledged": { "const": true }
+      }
+    },
+    "sourceQueryRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "accountId", "jobId", "sourceId", "sourceVersionId", "title", "outputLanguage", "assetId", "assetKey", "expectedDedupeTag", "includeImages", "disclosureAcknowledged", "question"],
+      "properties": {
+        "schemaVersion": { "const": "source-query-request/v1" },
+        "accountId": { "$ref": "#/$defs/uuid" },
+        "jobId": { "$ref": "#/$defs/uuid" },
+        "sourceId": { "$ref": "#/$defs/uuid" },
+        "sourceVersionId": { "$ref": "#/$defs/uuid" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "outputLanguage": { "type": "string", "minLength": 2, "maxLength": 64 },
+        "assetId": { "$ref": "#/$defs/uuid" },
+        "assetKey": { "type": "string", "minLength": 43, "maxLength": 43, "pattern": "^[A-Za-z0-9_-]+$" },
+        "expectedDedupeTag": { "type": "string", "minLength": 64, "maxLength": 64, "pattern": "^[0-9a-f]{64}$" },
+        "includeImages": { "type": "boolean" },
+        "disclosureAcknowledged": { "const": true },
+        "question": { "type": "string", "minLength": 1, "maxLength": 2000 }
+      }
+    },
+    "sourceGuideStatement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["text", "sourceIds"],
+      "properties": {
+        "text": { "type": "string", "minLength": 1, "maxLength": 2000 },
+        "sourceIds": { "type": "array", "minItems": 1, "maxItems": 16, "items": { "$ref": "#/$defs/uuid" } }
+      }
+    },
+    "sourceGuideTopic": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["title", "explanation", "sourceIds"],
+      "properties": {
+        "title": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "explanation": { "type": "string", "minLength": 1, "maxLength": 2000 },
+        "sourceIds": { "type": "array", "minItems": 1, "maxItems": 16, "items": { "$ref": "#/$defs/uuid" } }
+      }
+    },
+    "suggestedSourceQuestion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["question", "sourceIds"],
+      "properties": {
+        "question": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "sourceIds": { "type": "array", "minItems": 1, "maxItems": 16, "items": { "$ref": "#/$defs/uuid" } }
+      }
+    },
+    "sourceGuideResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "sourceLanguage", "outputLanguage", "summary", "translatedSummary", "keyTopics", "suggestedQuestions", "imageInsights", "coverageGaps"],
+      "properties": {
+        "schemaVersion": { "const": "source-guide-response/v1" },
+        "sourceLanguage": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "outputLanguage": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "summary": { "type": "array", "minItems": 1, "maxItems": 12, "items": { "$ref": "#/$defs/sourceGuideStatement" } },
+        "translatedSummary": { "type": "array", "maxItems": 12, "items": { "$ref": "#/$defs/sourceGuideStatement" } },
+        "keyTopics": { "type": "array", "maxItems": 16, "items": { "$ref": "#/$defs/sourceGuideTopic" } },
+        "suggestedQuestions": { "type": "array", "maxItems": 12, "items": { "$ref": "#/$defs/suggestedSourceQuestion" } },
+        "imageInsights": { "type": "array", "maxItems": 12, "items": { "$ref": "#/$defs/sourceGuideStatement" } },
+        "coverageGaps": { "type": "array", "maxItems": 20, "items": { "type": "string", "maxLength": 500 } }
+      }
+    },
+    "sourceQueryResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "answer", "insufficientEvidence", "followUpQuestions"],
+      "properties": {
+        "schemaVersion": { "const": "source-query-response/v1" },
+        "answer": { "type": "array", "minItems": 1, "maxItems": 20, "items": { "$ref": "#/$defs/sourceGuideStatement" } },
+        "insufficientEvidence": { "type": "boolean" },
+        "followUpQuestions": { "type": "array", "maxItems": 5, "items": { "type": "string", "maxLength": 500 } }
+      }
+    },
     "providerConfigurationRequest": {
       "type": "object",
       "additionalProperties": false,
