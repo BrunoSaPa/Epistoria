@@ -17,6 +17,23 @@
   ],
   "$defs": {
     "uuid": { "type": "string", "format": "uuid" },
+    "providerRoute": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "profileId", "configurationRevisionId", "displayName", "adapter", "baseURL", "textModel", "capabilities", "structuredOutput"],
+      "properties": {
+        "schemaVersion": { "const": "provider-route/v1" },
+        "profileId": { "$ref": "#/$defs/uuid" },
+        "configurationRevisionId": { "$ref": "#/$defs/uuid" },
+        "displayName": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "adapter": { "enum": ["OPENAI_RESPONSES", "OPENAI_COMPATIBLE"] },
+        "baseURL": { "type": "string", "minLength": 1, "maxLength": 2048 },
+        "textModel": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "transcriptionModel": { "type": ["string", "null"], "minLength": 1, "maxLength": 500 },
+        "capabilities": { "type": "array", "minItems": 1, "maxItems": 4, "uniqueItems": true, "items": { "enum": ["TEXT", "VISION", "TRANSCRIPTION", "STRUCTURED_OUTPUT"] } },
+        "structuredOutput": { "type": "boolean" }
+      }
+    },
     "sourceRectangle": {
       "type": "object",
       "additionalProperties": false,
@@ -44,7 +61,8 @@
         "assetKey": { "type": "string", "minLength": 43, "maxLength": 43, "pattern": "^[A-Za-z0-9_-]+$" },
         "expectedDedupeTag": { "type": "string", "minLength": 64, "maxLength": 64, "pattern": "^[0-9a-f]{64}$" },
         "includeImages": { "type": "boolean" },
-        "disclosureAcknowledged": { "const": true }
+        "disclosureAcknowledged": { "const": true },
+        "providerRoute": { "$ref": "#/$defs/providerRoute" }
       }
     },
     "sourceQueryRequest": {
@@ -64,7 +82,8 @@
         "expectedDedupeTag": { "type": "string", "minLength": 64, "maxLength": 64, "pattern": "^[0-9a-f]{64}$" },
         "includeImages": { "type": "boolean" },
         "disclosureAcknowledged": { "const": true },
-        "question": { "type": "string", "minLength": 1, "maxLength": 2000 }
+        "question": { "type": "string", "minLength": 1, "maxLength": 2000 },
+        "providerRoute": { "$ref": "#/$defs/providerRoute" }
       }
     },
     "sourceGuideStatement": {
@@ -132,6 +151,7 @@
         "jobId": { "$ref": "#/$defs/uuid" },
         "operation": { "enum": ["UPSERT", "ACTIVATE", "DELETE"] },
         "profileId": { "$ref": "#/$defs/uuid" },
+        "configurationRevisionId": { "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }] },
         "displayName": { "type": ["string", "null"], "minLength": 1, "maxLength": 500 },
         "adapter": { "type": ["string", "null"], "enum": ["OPENAI_RESPONSES", "OPENAI_COMPATIBLE", null] },
         "baseURL": { "type": ["string", "null"], "maxLength": 2048 },
@@ -155,6 +175,7 @@
         "schemaVersion": { "const": "ai-artifact/provider-configuration/v1" },
         "jobId": { "$ref": "#/$defs/uuid" },
         "profileId": { "$ref": "#/$defs/uuid" },
+        "configurationRevisionId": { "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }] },
         "operation": { "enum": ["UPSERT", "ACTIVATE", "DELETE"] },
         "displayName": { "type": ["string", "null"], "maxLength": 500 },
         "adapter": { "type": ["string", "null"], "enum": ["OPENAI_RESPONSES", "OPENAI_COMPATIBLE", null] },
@@ -215,7 +236,8 @@
           "type": "array", "minItems": 0, "maxItems": 200,
           "items": { "$ref": "#/$defs/noteQuerySource" }
         },
-        "disclosureAcknowledged": { "const": true }
+        "disclosureAcknowledged": { "const": true },
+        "providerRoute": { "$ref": "#/$defs/providerRoute" }
       }
     },
     "noteQueryResponse": {
@@ -250,7 +272,8 @@
         "endedAt": { "type": "string", "format": "date-time" },
         "sources": { "type": "array", "minItems": 1, "maxItems": 200, "uniqueItems": true, "items": { "$ref": "#/$defs/source" } },
         "userInstructions": { "type": ["string", "null"], "maxLength": 2000 },
-        "disclosureAcknowledged": { "const": true }
+        "disclosureAcknowledged": { "const": true },
+        "providerRoute": { "$ref": "#/$defs/providerRoute" }
       }
     },
     "citedStatement": {

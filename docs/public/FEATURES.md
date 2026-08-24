@@ -93,6 +93,16 @@ the current personal beta.
 - See a coverage notice when a large PDF cannot fit in one analysis pass.
 - Turn figure input off for a text-only provider or a lower-cost text-only request.
 
+## AI providers
+
+- Choose an official or compatible local or hosted AI provider from Settings.
+- Review the provider destination and model before approving generated work.
+- Keep the approved provider connection and model attached to the queued request. Changing the
+  active provider later does not reroute it.
+- Stop an older queued request if its approved provider connection was edited or removed. Submit
+  it again after reviewing the new settings.
+- Keep provider keys in secure device storage and out of notebook exports.
+
 ## Organization
 
 - Keep subjects in one connected private notebook.

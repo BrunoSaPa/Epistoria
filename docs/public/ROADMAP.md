@@ -100,6 +100,9 @@ Completed:
     questions, and detected figure notes. Source questions return statement-level citations that
     open the supporting page and region in the exact Source Version. Large-source coverage limits
     remain visible.
+19. Newly approved AI work keeps an encrypted, non-secret snapshot of the reviewed provider
+    connection and model. Later activation of another provider cannot reroute queued work. An
+    edited or removed connection stops older work and requires a new approval.
 
 Next stages:
 

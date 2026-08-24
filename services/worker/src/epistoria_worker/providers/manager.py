@@ -18,6 +18,7 @@ from ..models import (
     ProviderCapability,
     ProviderConfigurationArtifactV1,
     ProviderConfigurationRequestV1,
+    ProviderRouteSnapshotV1,
     ProviderTraceV1,
     SessionDigestRequestV1,
     SessionDigestV1,
@@ -95,12 +96,12 @@ class ProviderManager:
         raise ProviderConfigurationError("unsupported provider configuration operation")
 
     def generate(self, request: SessionDigestRequestV1) -> tuple[SessionDigestV1, ProviderTraceV1]:
-        return self._required_provider("TEXT").generate(request)
+        return self._required_provider("TEXT", request.provider_route).generate(request)
 
     def generate_learning(
         self, request: LearningGenerationRequestV1
     ) -> tuple[LearningGenerationResponseV1, ProviderTraceV1]:
-        return self._required_provider("TEXT").generate_learning(request)
+        return self._required_provider("TEXT", request.provider_route).generate_learning(request)
 
     def generate_note_query(
         self, request: NoteQueryRequestV1
@@ -110,12 +111,16 @@ class ProviderManager:
             if any(source.image_content for source in request.selection_sources)
             else "TEXT"
         )
-        return self._required_provider(capability).generate_note_query(request)
+        return self._required_provider(capability, request.provider_route).generate_note_query(
+            request
+        )
 
     def generate_free_response_feedback(
         self, request: FreeResponseFeedbackRequestV1
     ) -> tuple[FreeResponseFeedbackResponseV1, ProviderTraceV1]:
-        return self._required_provider("TEXT").generate_free_response_feedback(request)
+        return self._required_provider(
+            "TEXT", request.provider_route
+        ).generate_free_response_feedback(request)
 
     def generate_source_guide(
         self, request: SourceGuidePromptV1
@@ -123,7 +128,9 @@ class ProviderManager:
         capability: ProviderCapability = (
             "VISION" if any(item.image_content for item in request.materials) else "TEXT"
         )
-        return self._required_provider(capability).generate_source_guide(request)
+        return self._required_provider(capability, request.provider_route).generate_source_guide(
+            request
+        )
 
     def generate_source_query(
         self, request: SourceQueryPromptV1
@@ -131,7 +138,9 @@ class ProviderManager:
         capability: ProviderCapability = (
             "VISION" if any(item.image_content for item in request.materials) else "TEXT"
         )
-        return self._required_provider(capability).generate_source_query(request)
+        return self._required_provider(capability, request.provider_route).generate_source_query(
+            request
+        )
 
     def transcribe_media(
         self,
@@ -140,8 +149,9 @@ class ProviderManager:
         mime_type: str,
         media: bytes,
         language: str | None,
+        provider_route: ProviderRouteSnapshotV1 | None = None,
     ) -> tuple[MediaTranscriptionResponseV1, ProviderTraceV1]:
-        return self._required_provider("TRANSCRIPTION").transcribe_media(
+        return self._required_provider("TRANSCRIPTION", provider_route).transcribe_media(
             filename=filename,
             mime_type=mime_type,
             media=media,
@@ -163,6 +173,7 @@ class ProviderManager:
             raise ProviderConfigurationError("the provider must support text generation")
         profile = StoredProviderProfile(
             profile_id=request.profile_id,
+            configuration_revision_id=request.configuration_revision_id or request.profile_id,
             display_name=request.display_name.strip(),
             adapter=request.adapter,
             base_url=base_url,
@@ -183,8 +194,12 @@ class ProviderManager:
         self._store.mark_managed(self._account_id)
         return profile
 
-    def _required_provider(self, capability: ProviderCapability) -> DigestProvider:
-        profile = self._active_profile()
+    def _required_provider(
+        self,
+        capability: ProviderCapability,
+        route: ProviderRouteSnapshotV1 | None = None,
+    ) -> DigestProvider:
+        profile = self._profile_for_route(route) if route is not None else self._active_profile()
         if profile is None:
             if self._fallback is None or self._store.managed(self._account_id):
                 raise ProviderError(
@@ -231,6 +246,50 @@ class ProviderManager:
             retryable=False,
         )
 
+    def _profile_for_route(self, route: ProviderRouteSnapshotV1) -> StoredProviderProfile:
+        profile = self._store.get(self._account_id, route.profile_id)
+        if profile is None:
+            raise ProviderError(
+                "The approved provider connection was deleted",
+                code="PROVIDER_ROUTE_REVOKED",
+                retryable=False,
+            )
+        expected = (
+            profile.configuration_revision_id,
+            profile.display_name,
+            profile.adapter,
+            profile.base_url,
+            profile.text_model,
+            profile.transcription_model,
+            tuple(sorted(profile.capabilities)),
+            profile.structured_output,
+        )
+        try:
+            reviewed_base_url = safe_provider_base_url(route.base_url, adapter=route.adapter)
+        except ProviderConfigurationError as error:
+            raise ProviderError(
+                "The approved provider route is invalid",
+                code="PROVIDER_ROUTE_INVALID",
+                retryable=False,
+            ) from error
+        reviewed = (
+            route.configuration_revision_id,
+            route.display_name,
+            route.adapter,
+            reviewed_base_url,
+            route.text_model,
+            route.transcription_model,
+            tuple(sorted(route.capabilities)),
+            route.structured_output,
+        )
+        if expected != reviewed:
+            raise ProviderError(
+                "The approved provider connection changed after this job was queued",
+                code="PROVIDER_ROUTE_CHANGED",
+                retryable=False,
+            )
+        return profile
+
     def _active_profile(self) -> StoredProviderProfile | None:
         profile_id = self._store.active(self._account_id)
         if profile_id is None:
@@ -248,6 +307,7 @@ class ProviderManager:
         return ProviderConfigurationArtifactV1(
             job_id=request.job_id,
             profile_id=profile.profile_id,
+            configuration_revision_id=profile.configuration_revision_id,
             operation=request.operation,
             display_name=profile.display_name,
             adapter=_provider_adapter(profile.adapter),

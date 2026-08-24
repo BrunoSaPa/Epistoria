@@ -1,5 +1,12 @@
 # Release notes
 
+## Stable provider routing
+
+- Attached the reviewed provider connection and model to each newly approved AI request.
+- Prevented an active-provider change from redirecting work that was already queued.
+- Added a clear failure when the approved connection was edited or removed before processing.
+- Kept API keys out of queued route details and readable exports.
+
 ## PDF source understanding
 
 - Added PDF Source guides with cited summaries, translated summaries, key topics, suggested

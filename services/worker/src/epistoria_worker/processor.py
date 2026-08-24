@@ -175,6 +175,7 @@ class WorkerProcessor:
             title=request.title,
             output_language=request.output_language,
             materials=extracted.materials,
+            provider_route=request.provider_route,
         )
         guide, trace = self._digest_provider.generate_source_guide(prompt)
         allowed = {item.source_id for item in extracted.materials}
@@ -219,6 +220,7 @@ class WorkerProcessor:
             output_language=request.output_language,
             materials=extracted.materials,
             question=request.question,
+            provider_route=request.provider_route,
         )
         response, trace = self._digest_provider.generate_source_query(prompt)
         allowed = {item.source_id for item in extracted.materials}
@@ -806,6 +808,7 @@ class WorkerProcessor:
                 mime_type=request.mime_type,
                 media=media,
                 language=request.language,
+                provider_route=request.provider_route,
             )
         finally:
             media = b""

@@ -376,7 +376,9 @@ the same disclosure, and select **Approve and ask**. The saved answer appears un
 answers**. Each answer statement has its own citation. The answer remains bound to the Source
 Version used for that request. Refreshing the Source does not rewrite an earlier answer.
 
-Source analysis sends selected PDF text and detected figure regions to the active provider. It
+Source analysis sends selected PDF text and detected figure regions to the provider shown in the
+approval. That provider and model stay attached to the queued request even if you activate a
+different provider later. It
 does not run when the approval sheet is cancelled. A provider profile must support image input
 when detected figures are included. Large, scanned, or unusually structured PDFs can show
 coverage limits.
@@ -458,6 +460,11 @@ The trusted Mac must be paired and running before a provider change can finish.
 Only one provider is active. Swipe a ready inactive provider and select **Use** to activate it.
 Open a provider to update its model, capabilities, price estimates, or key. Swipe from the other
 side to remove it.
+
+Every new AI approval keeps the active provider connection and model shown at that time. Later
+activation of another provider does not change queued work. If you edit or remove the approved
+connection before the Mac processes a request, that request stops. Open the task again and review
+the new provider settings before submitting it.
 
 Changing the provider connection type clears the previous key unless a replacement is entered.
 This prevents a key for one service from being sent to another service.

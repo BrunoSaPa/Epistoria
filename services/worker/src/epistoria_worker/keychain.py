@@ -25,6 +25,7 @@ class AccountKeyStore(Protocol):
 @dataclass(frozen=True, slots=True)
 class StoredProviderProfile:
     profile_id: UUID
+    configuration_revision_id: UUID
     display_name: str
     adapter: str
     base_url: str
@@ -41,6 +42,7 @@ class StoredProviderProfile:
         return json.dumps(
             {
                 "profileId": str(self.profile_id),
+                "configurationRevisionId": str(self.configuration_revision_id),
                 "displayName": self.display_name,
                 "adapter": self.adapter,
                 "baseURL": self.base_url,
@@ -76,6 +78,9 @@ class StoredProviderProfile:
                 raise ValueError
             return cls(
                 profile_id=UUID(str(raw["profileId"])),
+                configuration_revision_id=UUID(
+                    str(raw.get("configurationRevisionId", raw["profileId"]))
+                ),
                 display_name=str(raw["displayName"]),
                 adapter=str(raw["adapter"]),
                 base_url=str(raw["baseURL"]),

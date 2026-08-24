@@ -15,6 +15,7 @@ from ..models import (
     MediaTranscriptionResponseV1,
     NoteQueryRequestV1,
     NoteQueryResponseV1,
+    ProviderRouteSnapshotV1,
     ProviderTraceV1,
     SessionDigestRequestV1,
     SessionDigestV1,
@@ -82,6 +83,24 @@ insufficientEvidence to true and explain the limitation without adding outside k
 the requested output language. Use image evidence when it supports the answer."""
 
 _MAX_IMAGE_BYTES = 2 * 1024 * 1024  # 2 MiB decoded
+
+
+def _provider_request_json(
+    request: BaseModel,
+    *,
+    exclude: set[str] | None = None,
+) -> str:
+    omitted = {"provider_route", *(exclude or set())}
+    return json_bytes(
+        request.model_dump(
+            mode="json",
+            by_alias=True,
+            exclude_none=True,
+            exclude=omitted,
+        )
+    ).decode("utf-8")
+
+
 _StructuredResponse = TypeVar("_StructuredResponse", bound=BaseModel)
 
 
@@ -218,6 +237,7 @@ class OpenAIDigestProvider:
         mime_type: str,
         media: bytes,
         language: str | None,
+        provider_route: ProviderRouteSnapshotV1 | None = None,
     ) -> tuple[MediaTranscriptionResponseV1, ProviderTraceV1]:
         timestamp_granularities: list[Literal["word", "segment"]] = ["segment"]
         try:
@@ -299,7 +319,7 @@ class OpenAIDigestProvider:
         return output, trace
 
     def generate(self, request: SessionDigestRequestV1) -> tuple[SessionDigestV1, ProviderTraceV1]:
-        disclosure = json_bytes(request).decode("utf-8")
+        disclosure = _provider_request_json(request)
         try:
             response = self._client.responses.parse(
                 model=self._model,
@@ -385,14 +405,9 @@ class OpenAIDigestProvider:
                     {"role": "system", "content": _LEARNING_SYSTEM_PROMPT},
                     {
                         "role": "user",
-                        "content": json_bytes(
-                            request.model_dump(
-                                mode="json",
-                                by_alias=True,
-                                exclude_none=True,
-                                exclude={"automation_authorization"},
-                            )
-                        ).decode("utf-8"),
+                        "content": _provider_request_json(
+                            request, exclude={"automation_authorization"}
+                        ),
                     },
                 ],
                 text_format=LearningGenerationResponseV1,
@@ -492,7 +507,7 @@ class OpenAIDigestProvider:
                 store=False,
                 input=[
                     {"role": "system", "content": _FEEDBACK_SYSTEM_PROMPT},
-                    {"role": "user", "content": json_bytes(request).decode("utf-8")},
+                    {"role": "user", "content": _provider_request_json(request)},
                 ],
                 text_format=FreeResponseFeedbackResponseV1,
             )
@@ -584,21 +599,14 @@ class OpenAICompatibleDigestProvider(OpenAIDigestProvider):
         output, response = self._chat(
             response_type=SessionDigestV1,
             system_prompt=_DIGEST_SYSTEM_PROMPT,
-            user_content=json_bytes(request).decode("utf-8"),
+            user_content=_provider_request_json(request),
         )
         return output, self._chat_trace(response, prompt_version=self._prompt_version)
 
     def generate_learning(
         self, request: LearningGenerationRequestV1
     ) -> tuple[LearningGenerationResponseV1, ProviderTraceV1]:
-        disclosure = json_bytes(
-            request.model_dump(
-                mode="json",
-                by_alias=True,
-                exclude_none=True,
-                exclude={"automation_authorization"},
-            )
-        ).decode("utf-8")
+        disclosure = _provider_request_json(request, exclude={"automation_authorization"})
         output, response = self._chat(
             response_type=LearningGenerationResponseV1,
             system_prompt=_LEARNING_SYSTEM_PROMPT,
@@ -612,7 +620,7 @@ class OpenAICompatibleDigestProvider(OpenAIDigestProvider):
         output, response = self._chat(
             response_type=FreeResponseFeedbackResponseV1,
             system_prompt=_FEEDBACK_SYSTEM_PROMPT,
-            user_content=json_bytes(request).decode("utf-8"),
+            user_content=_provider_request_json(request),
         )
         return output, self._chat_trace(response, prompt_version="free-response-feedback/v1")
 

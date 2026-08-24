@@ -454,10 +454,29 @@ final class AppModel {
     }
 
     var activeAIProviderDescription: String {
-        guard let profile = try? aiProviderProfiles().first(where: \.isActive) else {
+        let profiles = (try? aiProviderProfiles()) ?? []
+        guard let profile = profiles.first(where: { $0.isActive && $0.state == .ready }) else {
+            if !profiles.isEmpty {
+                return "the provider after its trusted-Mac configuration is confirmed"
+            }
             return "the provider active on your trusted Mac"
         }
         return "\(profile.displayName) at \(profile.destinationHost) using \(profile.textModel)"
+    }
+
+    private func activeProviderRouteState(
+        accountId: UUID
+    ) -> (snapshot: AIProviderRouteSnapshot?, required: Bool) {
+        guard let profiles = try? aiProviderProfileStore.load(accountId: accountId) else {
+            return (nil, true)
+        }
+        let active = profiles.first { $0.isActive && $0.state == .ready }
+        return (active?.routeSnapshot, !profiles.isEmpty)
+    }
+
+    private func refreshAIJobProviderRoute(accountId: UUID) async {
+        let route = activeProviderRouteState(accountId: accountId)
+        await aiJobs?.setProviderRouteSnapshot(route.snapshot, required: route.required)
     }
 
     func saveAIProviderProfile(
@@ -499,16 +518,19 @@ final class AppModel {
         }
         pending.state = .queued
         pending.pendingOperation = .upsert
+        pending.configurationRevisionId = UUID()
         pending.lastErrorCode = nil
         pending.updatedAt = Date()
         upsert(pending, in: &profiles)
         try aiProviderProfileStore.save(profiles, accountId: accountId)
+        await refreshAIJobProviderRoute(accountId: accountId)
 
         do {
             let request = AIProviderConfigurationRequest(
                 accountId: accountId,
                 operation: .upsert,
                 profileId: pending.id,
+                configurationRevisionId: pending.configurationRevisionId,
                 displayName: pending.displayName,
                 adapter: pending.adapter,
                 baseURL: pending.baseURL.absoluteString,
@@ -526,6 +548,7 @@ final class AppModel {
             pending.lastJobId = job.id
             upsert(pending, in: &profiles)
             try aiProviderProfileStore.save(profiles, accountId: accountId)
+            await refreshAIJobProviderRoute(accountId: accountId)
         } catch {
             pending.state = .failed
             pending.lastErrorCode = "SUBMISSION_FAILED"
@@ -554,6 +577,7 @@ final class AppModel {
         profile.updatedAt = Date()
         upsert(profile, in: &profiles)
         try aiProviderProfileStore.save(profiles, accountId: accountId)
+        await refreshAIJobProviderRoute(accountId: accountId)
     }
 
     func removeAIProviderProfile(id: UUID) async throws {
@@ -575,6 +599,7 @@ final class AppModel {
         profile.updatedAt = Date()
         upsert(profile, in: &profiles)
         try aiProviderProfileStore.save(profiles, accountId: accountId)
+        await refreshAIJobProviderRoute(accountId: accountId)
     }
 
     func refreshAIProviderProfiles() async throws {
@@ -639,6 +664,7 @@ final class AppModel {
             changed = true
         }
         if changed { try aiProviderProfileStore.save(refreshed, accountId: accountId) }
+        await refreshAIJobProviderRoute(accountId: accountId)
     }
 
     private func upsert(_ profile: AIProviderProfile, in profiles: inout [AIProviderProfile]) {
@@ -736,11 +762,14 @@ final class AppModel {
             database: database,
             api: client
         )
+        let providerRoute = activeProviderRouteState(accountId: configuration.accountId)
         let nextAIJobs = AIJobCoordinator(
             accountId: configuration.accountId,
             accountKey: accountKey,
             store: store,
-            api: client
+            api: client,
+            providerRouteSnapshot: providerRoute.snapshot,
+            requiresProviderRouteSnapshot: providerRoute.required
         )
         configuration.deviceId = credentials.deviceId
         configuration.apiURL = apiURL
@@ -1264,11 +1293,14 @@ final class AppModel {
                         database: database,
                         api: api
                     )
+                    let providerRoute = activeProviderRouteState(accountId: configuration.accountId)
                     openedAIJobs = AIJobCoordinator(
                         accountId: configuration.accountId,
                         accountKey: key,
                         store: store,
-                        api: api
+                        api: api,
+                        providerRouteSnapshot: providerRoute.snapshot,
+                        requiresProviderRouteSnapshot: providerRoute.required
                     )
                 } else {
                     connectionWarning = "Private sync needs to be reconnected; local work remains available."

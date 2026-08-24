@@ -12,6 +12,7 @@ final class AIProviderProfileStoreTests: XCTestCase {
         let accountId = UUID()
         let profile = AIProviderProfile(
             id: UUID(),
+            configurationRevisionId: UUID(),
             displayName: "Local test",
             adapter: .openAICompatible,
             baseURL: try XCTUnwrap(URL(string: "http://127.0.0.1:11434/v1")),
@@ -72,5 +73,37 @@ final class AIProviderProfileStoreTests: XCTestCase {
                 adapter: .openAICompatible
             )
         )
+    }
+
+    func testLegacyProfileWithoutConfigurationRevisionUsesStableProfileFallback() throws {
+        let suite = "AIProviderProfileStoreTests.legacy.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let accountId = UUID()
+        let profileId = UUID()
+        let key = "epistoria.ai-provider-profiles.v1.\(accountId.uuidString.lowercased())"
+        let data = try XCTUnwrap(
+            """
+            [{
+              "id":"\(profileId.uuidString)",
+              "displayName":"Existing local model",
+              "adapter":"OPENAI_COMPATIBLE",
+              "baseURL":"http://127.0.0.1:11434/v1",
+              "textModel":"legacy-model",
+              "capabilities":["TEXT"],
+              "structuredOutput":true,
+              "isActive":true,
+              "state":"READY",
+              "updatedAt":0
+            }]
+            """.data(using: .utf8)
+        )
+        defaults.set(data, forKey: key)
+
+        let profile = try XCTUnwrap(
+            AIProviderProfileStore(defaults: defaults).load(accountId: accountId).first
+        )
+        XCTAssertNil(profile.configurationRevisionId)
+        XCTAssertEqual(profile.routeSnapshot.configurationRevisionId, profileId)
     }
 }

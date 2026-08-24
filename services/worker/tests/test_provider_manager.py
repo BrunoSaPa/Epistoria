@@ -5,7 +5,7 @@ from uuid import uuid4
 import pytest
 
 from epistoria_worker.keychain import MemoryProviderProfileStore, StoredProviderProfile
-from epistoria_worker.models import ProviderConfigurationRequestV1
+from epistoria_worker.models import ProviderConfigurationRequestV1, ProviderRouteSnapshotV1
 from epistoria_worker.providers.base import ProviderError
 from epistoria_worker.providers.fake import DeterministicDigestProvider
 from epistoria_worker.providers.manager import (
@@ -30,6 +30,20 @@ def request(*, account_id, profile_id, job_id=None, api_key="secret-value"):
         structured_output=True,
         make_active=True,
         disclosure_acknowledged=True,
+    )
+
+
+def route(profile: StoredProviderProfile) -> ProviderRouteSnapshotV1:
+    return ProviderRouteSnapshotV1(
+        profile_id=profile.profile_id,
+        configuration_revision_id=profile.configuration_revision_id,
+        display_name=profile.display_name,
+        adapter=profile.adapter,
+        base_url=profile.base_url,
+        text_model=profile.text_model,
+        transcription_model=profile.transcription_model,
+        capabilities=list(profile.capabilities),
+        structured_output=profile.structured_output,
     )
 
 
@@ -77,6 +91,7 @@ def test_adapter_change_never_reuses_previous_provider_secret() -> None:
         account_id,
         StoredProviderProfile(
             profile_id=profile_id,
+            configuration_revision_id=profile_id,
             display_name="Hosted",
             adapter="OPENAI_RESPONSES",
             base_url="https://api.openai.com/v1",
@@ -133,6 +148,7 @@ def test_capability_is_enforced_before_provider_request() -> None:
         account_id,
         StoredProviderProfile(
             profile_id=profile_id,
+            configuration_revision_id=profile_id,
             display_name="Text only",
             adapter="OPENAI_COMPATIBLE",
             base_url="http://127.0.0.1:11434/v1",
@@ -156,6 +172,7 @@ def test_capability_is_enforced_before_provider_request() -> None:
 def test_stored_profile_round_trip_keeps_secret_out_of_repr() -> None:
     profile = StoredProviderProfile(
         profile_id=uuid4(),
+        configuration_revision_id=uuid4(),
         display_name="Private",
         adapter="OPENAI_RESPONSES",
         base_url="https://api.openai.com/v1",
@@ -192,3 +209,73 @@ def test_removing_last_managed_profile_does_not_silently_restore_fallback() -> N
 
     assert store.managed(account_id)
     assert manager.is_ready is False
+
+
+def test_reviewed_route_uses_selected_profile_after_active_profile_changes() -> None:
+    account_id = uuid4()
+    selected_id = uuid4()
+    active_id = uuid4()
+    selected = StoredProviderProfile(
+        profile_id=selected_id,
+        configuration_revision_id=uuid4(),
+        display_name="Reviewed local model",
+        adapter="OPENAI_COMPATIBLE",
+        base_url="http://127.0.0.1:11434/v1",
+        text_model="qwen3:8b",
+        capabilities=("TEXT",),
+    )
+    active = StoredProviderProfile(
+        profile_id=active_id,
+        configuration_revision_id=uuid4(),
+        display_name="New active model",
+        adapter="OPENAI_COMPATIBLE",
+        base_url="http://127.0.0.1:1234/v1",
+        text_model="another-model",
+        capabilities=("TEXT",),
+    )
+    store = MemoryProviderProfileStore()
+    store.set(account_id, selected)
+    store.set(account_id, active)
+    store.set_active(account_id, active_id)
+    manager = ProviderManager(account_id=account_id, store=store, fallback=None)
+
+    assert manager._profile_for_route(route(selected)) == selected
+
+
+def test_reviewed_route_fails_closed_after_profile_edit_or_delete() -> None:
+    account_id = uuid4()
+    profile_id = uuid4()
+    original = StoredProviderProfile(
+        profile_id=profile_id,
+        configuration_revision_id=uuid4(),
+        display_name="Reviewed model",
+        adapter="OPENAI_COMPATIBLE",
+        base_url="http://127.0.0.1:11434/v1",
+        text_model="qwen3:8b",
+        capabilities=("TEXT",),
+    )
+    reviewed = route(original)
+    store = MemoryProviderProfileStore()
+    store.set(account_id, original)
+    manager = ProviderManager(account_id=account_id, store=store, fallback=None)
+
+    store.set(
+        account_id,
+        StoredProviderProfile(
+            profile_id=profile_id,
+            configuration_revision_id=uuid4(),
+            display_name=original.display_name,
+            adapter=original.adapter,
+            base_url=original.base_url,
+            text_model="qwen3:14b",
+            capabilities=original.capabilities,
+        ),
+    )
+    with pytest.raises(ProviderError) as changed:
+        manager._profile_for_route(reviewed)
+    assert changed.value.code == "PROVIDER_ROUTE_CHANGED"
+
+    store.delete(account_id, profile_id)
+    with pytest.raises(ProviderError) as revoked:
+        manager._profile_for_route(reviewed)
+    assert revoked.value.code == "PROVIDER_ROUTE_REVOKED"

@@ -323,7 +323,7 @@ private struct AIProviderEditorView: View {
             } header: {
                 Text("Routing")
             } footer: {
-                Text("Approved AI requests use the active provider when the trusted Mac processes them. The saved result records the actual provider and model.")
+                Text("An approved AI request freezes this connection and model. Changing the active provider later does not reroute queued work. The saved result records the provider and model used.")
             }
 
             Section("Estimated pricing (optional)") {
@@ -431,6 +431,7 @@ private extension AIProviderProfile {
     static var newCompatible: AIProviderProfile {
         AIProviderProfile(
             id: UUID(),
+            configurationRevisionId: nil,
             displayName: "Local AI",
             adapter: .openAICompatible,
             baseURL: URL(string: "http://127.0.0.1:11434/v1")!,

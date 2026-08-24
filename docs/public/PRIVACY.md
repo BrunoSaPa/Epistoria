@@ -52,6 +52,11 @@ provider connection sends the key to the trusted Mac through the same private en
 The synchronization service is not intended to receive a readable key, destination, or model.
 Provider keys and connections are not included in readable notebook exports.
 
+When you approve an AI request, Epistoria records the selected provider connection, destination,
+model, and declared capabilities inside the encrypted request. Changing the active provider does
+not redirect already approved work. The trusted Mac stops the request if the approved connection
+was edited or removed. The recorded route does not contain the provider key.
+
 A local provider can avoid sending approved content to a hosted provider. The local service still
 receives readable approved content. Its software, host computer, and local network must be
 trusted.

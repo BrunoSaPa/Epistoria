@@ -13,6 +13,7 @@ enum AIProviderProfileState: String, Codable {
 
 struct AIProviderProfile: Codable, Equatable, Identifiable {
     var id: UUID
+    var configurationRevisionId: UUID?
     var displayName: String
     var adapter: AIProviderAdapter
     var baseURL: URL
@@ -31,6 +32,20 @@ struct AIProviderProfile: Codable, Equatable, Identifiable {
     var updatedAt: Date
 
     var destinationHost: String { baseURL.host() ?? baseURL.absoluteString }
+
+    var routeSnapshot: AIProviderRouteSnapshot {
+        AIProviderRouteSnapshot(
+            profileId: id,
+            configurationRevisionId: configurationRevisionId ?? id,
+            displayName: displayName,
+            adapter: adapter,
+            baseURL: baseURL.absoluteString,
+            textModel: textModel,
+            transcriptionModel: transcriptionModel,
+            capabilities: capabilities,
+            structuredOutput: structuredOutput
+        )
+    }
 }
 
 @MainActor

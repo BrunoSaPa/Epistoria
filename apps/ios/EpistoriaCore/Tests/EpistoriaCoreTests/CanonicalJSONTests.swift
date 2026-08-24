@@ -122,10 +122,12 @@ final class CanonicalJSONTests: XCTestCase {
     func testProviderConfigurationContractsRoundTrip() throws {
         let accountId = UUID()
         let profileId = UUID()
+        let configurationRevisionId = UUID()
         let request = AIProviderConfigurationRequest(
             accountId: accountId,
             operation: .upsert,
             profileId: profileId,
+            configurationRevisionId: configurationRevisionId,
             displayName: "Local model",
             adapter: .openAICompatible,
             baseURL: "http://127.0.0.1:11434/v1",
@@ -144,12 +146,31 @@ final class CanonicalJSONTests: XCTestCase {
         XCTAssertEqual(decodedRequest, request)
         XCTAssertEqual(decodedRequest.capabilities, [.text, .vision])
 
+        let route = AIProviderRouteSnapshot(
+            profileId: profileId,
+            configurationRevisionId: configurationRevisionId,
+            displayName: "Local model",
+            adapter: .openAICompatible,
+            baseURL: "http://127.0.0.1:11434/v1",
+            textModel: "test-model",
+            transcriptionModel: nil,
+            capabilities: [.vision, .text],
+            structuredOutput: true
+        )
+        let routeData = try CanonicalJSON.encode(route)
+        XCTAssertEqual(
+            try CanonicalJSON.decode(AIProviderRouteSnapshot.self, from: routeData),
+            route
+        )
+        XCTAssertNil(routeData.range(of: Data("synthetic-key".utf8)))
+
         let artifactData = try XCTUnwrap(
             """
             {
               "schemaVersion":"ai-artifact/provider-configuration/v1",
               "jobId":"\(request.jobId.uuidString)",
               "profileId":"\(profileId.uuidString)",
+              "configurationRevisionId":"\(configurationRevisionId.uuidString)",
               "operation":"UPSERT",
               "displayName":"Local model",
               "adapter":"OPENAI_COMPATIBLE",
@@ -167,6 +188,7 @@ final class CanonicalJSONTests: XCTestCase {
             from: artifactData
         )
         XCTAssertEqual(artifact.profileId, profileId)
+        XCTAssertEqual(artifact.configurationRevisionId, configurationRevisionId)
         XCTAssertTrue(artifact.secretStored)
         XCTAssertNil(artifactData.range(of: Data("synthetic-key".utf8)))
         XCTAssertNoThrow(

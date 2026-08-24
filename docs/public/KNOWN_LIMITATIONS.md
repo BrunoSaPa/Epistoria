@@ -59,8 +59,9 @@ Epistoria remains in personal beta. The following limits apply to the current pr
 
 - PDF extraction and AI features require a paired Mac.
 - AI features require a separately configured provider account and can incur provider charges.
-- One provider is active for all generated work. A queued request uses the provider active when
-  the trusted Mac processes it.
+- One provider is active for newly approved work. Each new request keeps the provider and model
+  reviewed at approval. Editing or removing that connection before processing stops the request;
+  it must be reviewed and submitted again.
 - Compatible local and hosted services are supported. Provider-specific connection formats that
   do not offer the compatible interface are not connected directly.
 - Provider connections do not transfer to a fresh iPad. Enter the key again after recovery.

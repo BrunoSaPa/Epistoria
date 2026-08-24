@@ -92,6 +92,7 @@ public struct LearningGenerationRequest: Codable, Equatable, Sendable {
     public var testPlan: TestGenerationPlan? = nil
     public var automationAuthorization: AutomationAuthorization? = nil
     public var disclosureAcknowledged: Bool
+    public var providerRoute: AIProviderRouteSnapshot? = nil
 }
 
 public struct KnownConceptReference: Codable, Equatable, Sendable, Identifiable {
@@ -337,6 +338,7 @@ public struct FreeResponseFeedbackRequest: Codable, Equatable, Sendable {
     public var confidence: Int?
     public var evidence: [FeedbackEvidenceExcerpt]
     public var disclosureAcknowledged: Bool
+    public var providerRoute: AIProviderRouteSnapshot? = nil
 }
 
 public struct FreeResponseFeedbackResponse: Codable, Equatable, Sendable {
@@ -462,6 +464,7 @@ public struct NoteQueryRequest: Codable, Equatable, Sendable {
     /// All other blocks from the same note for context — at most 200.
     public var contextSources: [NoteQuerySourceExcerpt]
     public var disclosureAcknowledged: Bool
+    public var providerRoute: AIProviderRouteSnapshot? = nil
 }
 
 public struct NoteQueryResponse: Codable, Equatable, Sendable {
@@ -532,6 +535,7 @@ public struct SessionDigestRequest: Codable, Equatable, Sendable {
     public var sources: [DigestSourceExcerpt]
     public var userInstructions: String?
     public var disclosureAcknowledged: Bool
+    public var providerRoute: AIProviderRouteSnapshot? = nil
 }
 
 public struct CitedStatement: Codable, Equatable, Sendable, Identifiable {
@@ -687,6 +691,7 @@ public struct SourceAnalysisRequest: Codable, Equatable, Sendable {
     public var expectedDedupeTag: String
     public var includeImages: Bool
     public var disclosureAcknowledged: Bool
+    public var providerRoute: AIProviderRouteSnapshot? = nil
 }
 
 public struct SourceQueryRequest: Codable, Equatable, Sendable {
@@ -703,6 +708,7 @@ public struct SourceQueryRequest: Codable, Equatable, Sendable {
     public var includeImages: Bool
     public var disclosureAcknowledged: Bool
     public var question: String
+    public var providerRoute: AIProviderRouteSnapshot? = nil
 }
 
 public struct SourceGuideStatement: Codable, Equatable, Sendable, Identifiable {
@@ -789,6 +795,7 @@ public struct MediaTranscriptionRequest: Codable, Equatable, Sendable {
     public var mimeType: String
     public var language: String?
     public var disclosureAcknowledged: Bool
+    public var providerRoute: AIProviderRouteSnapshot? = nil
 }
 
 public struct TranscriptSegment: Codable, Equatable, Sendable, Identifiable {
@@ -956,6 +963,7 @@ public enum AIJobCoordinatorError: Error, Equatable {
     case attemptNotSubmitted
     case responseEmpty
     case questionNotFound
+    case providerRouteUnavailable
 }
 
 extension AIJobCoordinatorError: LocalizedError {
@@ -981,6 +989,8 @@ extension AIJobCoordinatorError: LocalizedError {
         case .attemptNotSubmitted: "Submit the test before requesting feedback."
         case .responseEmpty: "Write an answer before requesting feedback."
         case .questionNotFound: "The frozen question is no longer available in this attempt."
+        case .providerRouteUnavailable:
+            "Wait for the selected AI provider configuration to finish before approving a request."
         }
     }
 }
@@ -992,18 +1002,39 @@ public actor AIJobCoordinator {
     private let store: EpistoriaStore
     let api: EpistoriaAPIClient
     private let crypto = EntityCrypto()
+    private var providerRouteSnapshot: AIProviderRouteSnapshot?
+    private var requiresProviderRouteSnapshot: Bool
 
     public init(
         accountId: UUID,
         accountKey: Data,
         store: EpistoriaStore,
-        api: EpistoriaAPIClient
+        api: EpistoriaAPIClient,
+        providerRouteSnapshot: AIProviderRouteSnapshot? = nil,
+        requiresProviderRouteSnapshot: Bool = false
     ) {
         self.accountId = accountId
         self.accountKey = accountKey
         self.store = store
         database = store.database
         self.api = api
+        self.providerRouteSnapshot = providerRouteSnapshot
+        self.requiresProviderRouteSnapshot = requiresProviderRouteSnapshot
+    }
+
+    public func setProviderRouteSnapshot(
+        _ snapshot: AIProviderRouteSnapshot?,
+        required: Bool
+    ) {
+        providerRouteSnapshot = snapshot
+        requiresProviderRouteSnapshot = required
+    }
+
+    private func reviewedProviderRoute() throws -> AIProviderRouteSnapshot? {
+        if requiresProviderRouteSnapshot, providerRouteSnapshot == nil {
+            throw AIJobCoordinatorError.providerRouteUnavailable
+        }
+        return providerRouteSnapshot
     }
 
     public func prepareSessionDigest(
@@ -1087,6 +1118,7 @@ public actor AIJobCoordinator {
         var request = prepared.request
         guard !request.sources.isEmpty else { throw AIJobCoordinatorError.noReadableSources }
         request.disclosureAcknowledged = true
+        request.providerRoute = try reviewedProviderRoute()
         let plaintext = try CanonicalJSON.encode(request)
         let envelope = try crypto.encryptJob(
             plaintext,
@@ -1187,7 +1219,8 @@ public actor AIJobCoordinator {
             assetKey: context.asset.assetKey,
             expectedDedupeTag: context.asset.dedupeTag,
             includeImages: includeImages,
-            disclosureAcknowledged: true
+            disclosureAcknowledged: true,
+            providerRoute: try reviewedProviderRoute()
         )
         let envelope = try crypto.encryptJob(
             CanonicalJSON.encode(request),
@@ -1227,7 +1260,8 @@ public actor AIJobCoordinator {
             expectedDedupeTag: context.asset.dedupeTag,
             includeImages: includeImages,
             disclosureAcknowledged: true,
-            question: String(cleanQuestion.prefix(2_000))
+            question: String(cleanQuestion.prefix(2_000)),
+            providerRoute: try reviewedProviderRoute()
         )
         let envelope = try crypto.encryptJob(
             CanonicalJSON.encode(request),
@@ -1345,7 +1379,8 @@ public actor AIJobCoordinator {
             filename: asset.originalFilename,
             mimeType: asset.mimeType,
             language: cleanLanguage?.isEmpty == false ? cleanLanguage : nil,
-            disclosureAcknowledged: true
+            disclosureAcknowledged: true,
+            providerRoute: try reviewedProviderRoute()
         )
         let envelope = try crypto.encryptJob(
             CanonicalJSON.encode(request),
@@ -1501,6 +1536,7 @@ public actor AIJobCoordinator {
             throw AIJobCoordinatorError.noReadableSources
         }
         request.disclosureAcknowledged = true
+        request.providerRoute = try reviewedProviderRoute()
         let plaintext = try CanonicalJSON.encode(request)
         let envelope = try crypto.encryptJob(
             plaintext,
@@ -1704,6 +1740,7 @@ public actor AIJobCoordinator {
         var request = prepared.request
         guard !request.evidence.isEmpty else { throw AIJobCoordinatorError.noReadableSources }
         request.disclosureAcknowledged = true
+        request.providerRoute = try reviewedProviderRoute()
         let type = LearningAIJobType.freeResponseFeedback.rawValue
         let envelope = try crypto.encryptJob(
             CanonicalJSON.encode(request),
@@ -1856,6 +1893,7 @@ public actor AIJobCoordinator {
         var request = prepared.request
         guard !request.sources.isEmpty else { throw AIJobCoordinatorError.noReadableSources }
         request.disclosureAcknowledged = true
+        request.providerRoute = try reviewedProviderRoute()
         let type = request.jobType.rawValue
         let envelope = try crypto.encryptJob(
             CanonicalJSON.encode(request),

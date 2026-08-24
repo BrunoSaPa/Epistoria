@@ -13,6 +13,7 @@ from ..models import (
     MediaTranscriptionResponseV1,
     NoteQueryRequestV1,
     NoteQueryResponseV1,
+    ProviderRouteSnapshotV1,
     ProviderTraceV1,
     SessionDigestRequestV1,
     SessionDigestV1,
@@ -301,6 +302,7 @@ class DeterministicDigestProvider:
         mime_type: str,
         media: bytes,
         language: str | None,
+        provider_route: ProviderRouteSnapshotV1 | None = None,
     ) -> tuple[MediaTranscriptionResponseV1, ProviderTraceV1]:
         del mime_type
         if not media:

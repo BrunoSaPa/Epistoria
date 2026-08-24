@@ -17,6 +17,8 @@ from pydantic.alias_generators import to_camel
 
 ShortText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)]
 BodyText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=12_000)]
+ProviderAdapter = Literal["OPENAI_RESPONSES", "OPENAI_COMPATIBLE"]
+ProviderCapability = Literal["TEXT", "VISION", "TRANSCRIPTION", "STRUCTURED_OUTPUT"]
 
 
 class ContractModel(BaseModel):
@@ -26,6 +28,25 @@ class ContractModel(BaseModel):
         extra="forbid",
         str_strip_whitespace=True,
     )
+
+
+class ProviderRouteSnapshotV1(ContractModel):
+    schema_version: Literal["provider-route/v1"] = "provider-route/v1"
+    profile_id: UUID
+    configuration_revision_id: UUID
+    display_name: ShortText
+    adapter: ProviderAdapter
+    base_url: str = Field(min_length=1, max_length=2048)
+    text_model: ShortText
+    transcription_model: ShortText | None = None
+    capabilities: list[ProviderCapability] = Field(min_length=1, max_length=4)
+    structured_output: bool
+
+    @model_validator(mode="after")
+    def validate_capabilities_unique(self) -> ProviderRouteSnapshotV1:
+        if len(self.capabilities) != len(set(self.capabilities)):
+            raise ValueError("provider route capabilities must be unique")
+        return self
 
 
 class SourceKind(StrEnum):
@@ -61,6 +82,7 @@ class SessionDigestRequestV1(ContractModel):
         str | None, StringConstraints(strip_whitespace=True, max_length=2_000)
     ] = None
     disclosure_acknowledged: Literal[True]
+    provider_route: ProviderRouteSnapshotV1 | None = None
 
     @model_validator(mode="after")
     def validate_session(self) -> SessionDigestRequestV1:
@@ -211,6 +233,7 @@ class SourceAnalysisRequestV1(ContractModel):
     expected_dedupe_tag: str = Field(min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$")
     include_images: bool
     disclosure_acknowledged: Literal[True]
+    provider_route: ProviderRouteSnapshotV1 | None = None
 
 
 class SourceQueryRequestV1(ContractModel):
@@ -231,6 +254,7 @@ class SourceQueryRequestV1(ContractModel):
     question: Annotated[
         str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2_000)
     ]
+    provider_route: ProviderRouteSnapshotV1 | None = None
 
 
 class SourceGuidePromptV1(ContractModel):
@@ -240,6 +264,7 @@ class SourceGuidePromptV1(ContractModel):
         str, StringConstraints(strip_whitespace=True, min_length=2, max_length=64)
     ]
     materials: list[SourceMaterialV1] = Field(min_length=1, max_length=240)
+    provider_route: ProviderRouteSnapshotV1 | None = None
 
 
 class SourceQueryPromptV1(ContractModel):
@@ -249,6 +274,7 @@ class SourceQueryPromptV1(ContractModel):
         str, StringConstraints(strip_whitespace=True, min_length=2, max_length=64)
     ]
     materials: list[SourceMaterialV1] = Field(min_length=1, max_length=240)
+    provider_route: ProviderRouteSnapshotV1 | None = None
     question: Annotated[
         str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2_000)
     ]
@@ -337,6 +363,7 @@ class MediaTranscriptionRequestV1(ContractModel):
         str | None, StringConstraints(strip_whitespace=True, min_length=2, max_length=16)
     ] = None
     disclosure_acknowledged: Literal[True]
+    provider_route: ProviderRouteSnapshotV1 | None = None
 
     @model_validator(mode="after")
     def validate_media_metadata(self) -> MediaTranscriptionRequestV1:
@@ -446,6 +473,7 @@ class NoteQueryRequestV1(ContractModel):
     selection_sources: list[NoteQuerySourceV1] = Field(min_length=1, max_length=10)
     context_sources: list[NoteQuerySourceV1] = Field(default_factory=list, max_length=200)
     disclosure_acknowledged: Literal[True]
+    provider_route: ProviderRouteSnapshotV1 | None = None
 
     @model_validator(mode="after")
     def validate_source_ids_unique(self) -> NoteQueryRequestV1:
@@ -505,6 +533,7 @@ class FreeResponseFeedbackRequestV1(ContractModel):
     confidence: int | None = Field(default=None, ge=1, le=5)
     evidence: list[FeedbackEvidenceExcerptV1] = Field(min_length=1, max_length=50)
     disclosure_acknowledged: Literal[True]
+    provider_route: ProviderRouteSnapshotV1 | None = None
 
     @model_validator(mode="after")
     def validate_evidence_ids_unique(self) -> FreeResponseFeedbackRequestV1:
@@ -636,6 +665,7 @@ class LearningGenerationRequestV1(ContractModel):
     test_plan: TestGenerationPlanV1 | None = None
     automation_authorization: AutomationAuthorizationV1 | None = None
     disclosure_acknowledged: Literal[True]
+    provider_route: ProviderRouteSnapshotV1 | None = None
 
     @model_validator(mode="after")
     def validate_source_ids_unique(self) -> LearningGenerationRequestV1:
@@ -708,8 +738,6 @@ class LearningGenerationArtifactV1(ContractModel):
     known_concept_ids: list[UUID] = Field(default_factory=list, max_length=200)
 
 
-ProviderAdapter = Literal["OPENAI_RESPONSES", "OPENAI_COMPATIBLE"]
-ProviderCapability = Literal["TEXT", "VISION", "TRANSCRIPTION", "STRUCTURED_OUTPUT"]
 ProviderConfigurationOperation = Literal["UPSERT", "ACTIVATE", "DELETE"]
 
 
@@ -721,6 +749,7 @@ class ProviderConfigurationRequestV1(ContractModel):
     job_id: UUID
     operation: ProviderConfigurationOperation
     profile_id: UUID
+    configuration_revision_id: UUID | None = None
     display_name: ShortText | None = None
     adapter: ProviderAdapter | None = None
     base_url: str | None = Field(default=None, max_length=2048)
@@ -742,6 +771,7 @@ class ProviderConfigurationArtifactV1(ContractModel):
     )
     job_id: UUID
     profile_id: UUID
+    configuration_revision_id: UUID | None = None
     operation: ProviderConfigurationOperation
     display_name: ShortText | None = None
     adapter: ProviderAdapter | None = None

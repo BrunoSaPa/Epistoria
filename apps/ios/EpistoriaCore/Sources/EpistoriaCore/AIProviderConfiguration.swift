@@ -18,12 +18,52 @@ public enum AIProviderConfigurationOperation: String, Codable, Sendable {
     case delete = "DELETE"
 }
 
+/// The non-secret provider route reviewed when an AI job is approved.
+///
+/// This value is encrypted inside the job payload. The trusted Mac verifies it against the
+/// matching Keychain profile before sending any content. API keys are never part of this value.
+public struct AIProviderRouteSnapshot: Codable, Equatable, Sendable {
+    public var schemaVersion = "provider-route/v1"
+    public var profileId: UUID
+    public var configurationRevisionId: UUID
+    public var displayName: String
+    public var adapter: AIProviderAdapter
+    public var baseURL: String
+    public var textModel: String
+    public var transcriptionModel: String?
+    public var capabilities: [AIProviderCapability]
+    public var structuredOutput: Bool
+
+    public init(
+        profileId: UUID,
+        configurationRevisionId: UUID,
+        displayName: String,
+        adapter: AIProviderAdapter,
+        baseURL: String,
+        textModel: String,
+        transcriptionModel: String?,
+        capabilities: [AIProviderCapability],
+        structuredOutput: Bool
+    ) {
+        self.profileId = profileId
+        self.configurationRevisionId = configurationRevisionId
+        self.displayName = displayName
+        self.adapter = adapter
+        self.baseURL = baseURL
+        self.textModel = textModel
+        self.transcriptionModel = transcriptionModel
+        self.capabilities = Array(Set(capabilities)).sorted { $0.rawValue < $1.rawValue }
+        self.structuredOutput = structuredOutput
+    }
+}
+
 public struct AIProviderConfigurationRequest: Codable, Equatable, Sendable {
     public var schemaVersion = "provider-configuration-request/v1"
     public var accountId: UUID
     public var jobId: UUID
     public var operation: AIProviderConfigurationOperation
     public var profileId: UUID
+    public var configurationRevisionId: UUID?
     public var displayName: String?
     public var adapter: AIProviderAdapter?
     public var baseURL: String?
@@ -43,6 +83,7 @@ public struct AIProviderConfigurationRequest: Codable, Equatable, Sendable {
         jobId: UUID = UUID(),
         operation: AIProviderConfigurationOperation,
         profileId: UUID,
+        configurationRevisionId: UUID? = nil,
         displayName: String? = nil,
         adapter: AIProviderAdapter? = nil,
         baseURL: String? = nil,
@@ -61,6 +102,7 @@ public struct AIProviderConfigurationRequest: Codable, Equatable, Sendable {
         self.jobId = jobId
         self.operation = operation
         self.profileId = profileId
+        self.configurationRevisionId = configurationRevisionId
         self.displayName = displayName
         self.adapter = adapter
         self.baseURL = baseURL
@@ -82,6 +124,7 @@ public struct AIProviderConfigurationArtifact: EntityPayload, Equatable {
     public var schemaVersion = "ai-artifact/provider-configuration/v1"
     public var jobId: UUID
     public var profileId: UUID
+    public var configurationRevisionId: UUID?
     public var operation: AIProviderConfigurationOperation
     public var displayName: String?
     public var adapter: AIProviderAdapter?
