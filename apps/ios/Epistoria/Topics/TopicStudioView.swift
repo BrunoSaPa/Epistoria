@@ -19,7 +19,7 @@ struct TopicStudioView: View {
     @State private var selectedObjectiveTitles: Set<String> = []
     @State private var isDetectingObjectives = false
     @State private var prepared: PreparedLearningGenerationRequest?
-    @State private var submittedJob: AIJobSummary?
+    @State private var directDisclosure: DirectProviderDisclosure?
     @State private var artifact: IdentifiedPayload<LearningGenerationArtifact>?
     @State private var selectedItemIds: Set<UUID> = []
     @State private var reviewedItems: [UUID: LearningDraftItem] = [:]
@@ -74,23 +74,28 @@ struct TopicStudioView: View {
                             LabeledContent("Coverage", value: plan.coverageDimensions.map(\.displayName).joined(separator: ", "))
                             LabeledContent("Time limit", value: plan.timeLimitMinutes.map { "\($0) min" } ?? "None")
                         }
-                        Label("Paid provider processing requires this approval", systemImage: "hand.raised")
+                        if let disclosure = directDisclosure {
+                            LabeledContent("Provider", value: disclosure.provider)
+                            LabeledContent("Model", value: disclosure.model)
+                            LabeledContent("Destination", value: disclosure.destination)
+                            LabeledContent(
+                                "Maximum estimate",
+                                value: disclosure.maximumEstimatedCostUsd.map {
+                                    $0.formatted(.currency(code: "USD"))
+                                } ?? "Pricing not configured"
+                            )
+                        }
+                        Label(
+                            "The approved excerpts go directly from this iPad to this provider.",
+                            systemImage: "hand.raised"
+                        )
                             .font(.subheadline)
-                        Button("Approve and queue", systemImage: "desktopcomputer") {
+                        Button("Approve and generate", systemImage: "ipad.and.arrow.forward") {
                             Task { await submit() }
                         }
                         .buttonStyle(.borderedProminent)
                         .tint(EpistoriaDesign.ink)
                         .disabled(isWorking)
-                    }
-                }
-
-                if let submittedJob {
-                    Section("Queued") {
-                        LabeledContent("Status", value: submittedJob.status.capitalized)
-                        Text("Your trusted Mac processes the encrypted request. Sync after it finishes.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
                     }
                 }
 
@@ -297,16 +302,18 @@ struct TopicStudioView: View {
             }
             .onChange(of: jobType) {
                 prepared = nil
-                submittedJob = nil
+                directDisclosure = nil
                 Task { await loadArtifact() }
             }
             .onChange(of: includeConnectedKnowledge) {
                 prepared = nil
+                directDisclosure = nil
                 detectedObjectives = []
                 selectedObjectiveTitles = []
             }
             .onChange(of: testMode) {
                 prepared = nil
+                directDisclosure = nil
                 applyTestModeDefaults()
             }
         }
@@ -390,7 +397,7 @@ struct TopicStudioView: View {
 
     private func prepare() async {
         guard let coordinator = model.aiJobs else {
-            errorMessage = "Connect the private server and pair your trusted Mac in Settings first."
+            errorMessage = "Unlock the notebook before preparing this request."
             return
         }
         isWorking = true
@@ -404,7 +411,7 @@ struct TopicStudioView: View {
                 coverageDimensions: effectiveCoverage,
                 objectiveTitles: objectiveTitles
             ) : nil
-            prepared = try await coordinator.prepareTopicGeneration(
+            let candidate = try await coordinator.prepareTopicGeneration(
                 topicId: topicId,
                 jobType: jobType,
                 objectiveTitles: objectiveTitles,
@@ -412,13 +419,18 @@ struct TopicStudioView: View {
                 userInstructions: instructions.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty,
                 includeConnectedKnowledge: includeConnectedKnowledge
             )
+            directDisclosure = try model.directTopicStudioDisclosure(
+                approximateInputTokens: candidate.approximateTokens,
+                jobType: candidate.request.jobType
+            )
+            prepared = candidate
             errorMessage = nil
         } catch { errorMessage = error.localizedDescription }
     }
 
     private func detectObjectives() async {
         guard let coordinator = model.aiJobs else {
-            errorMessage = "Connect the private server and pair your trusted Mac in Settings first."
+            errorMessage = "Unlock the notebook before detecting objectives."
             return
         }
         isDetectingObjectives = true
@@ -430,6 +442,7 @@ struct TopicStudioView: View {
             )
             applyTestModeSelection()
             prepared = nil
+            directDisclosure = nil
             errorMessage = nil
         } catch { errorMessage = error.localizedDescription }
     }
@@ -519,13 +532,18 @@ struct TopicStudioView: View {
     }
 
     private func submit() async {
-        guard let coordinator = model.aiJobs, let prepared else { return }
+        guard let prepared, let approvedDisclosure = directDisclosure else { return }
         isWorking = true
         defer { isWorking = false }
         do {
-            submittedJob = try await coordinator.submitTopicGeneration(prepared)
+            _ = try await model.generateTopicStudioDirect(
+                prepared,
+                approvedRoute: approvedDisclosure.route
+            )
             self.prepared = nil
+            directDisclosure = nil
             errorMessage = nil
+            await loadArtifact()
         } catch { errorMessage = error.localizedDescription }
     }
 

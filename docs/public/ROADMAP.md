@@ -124,12 +124,17 @@ Completed:
    recognition records provide labeled search matches and exact-region return. A downloaded Core
    ML formula runtime is implemented but remains disabled until a permissively licensed model
    passes accuracy and physical-iPad performance gates. A Mac is optional as a Compute Node.
+27. Manual Topic Studio generation runs directly from the iPad for synthesis, flashcard drafts,
+   test blueprints and questions, Concept suggestions, and weekly-review drafts. Approval shows
+   the provider, model, destination, bounded scope, and configured maximum estimate. The iPad
+   validates the complete response and every citation before saving an encrypted draft.
 
 Next stages:
 
 1. Validate related-result quality, performance, battery use, VoiceOver, and direct Source
    navigation during representative daily use on a physical iPad.
-2. Complete typed direct-provider execution for every generation screen. Each remaining Compute
+2. Move Tutor, note questions, Source analysis, session review, written-response feedback, and
+   other remaining typed generation screens to direct-provider execution. Each remaining Compute
    Node route must remain explicit during the transition.
 
 ## Competitor-informed opportunities

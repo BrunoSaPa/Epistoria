@@ -98,8 +98,10 @@ the current personal beta.
 - Choose the official Responses service, Anthropic, Gemini, or a compatible local or hosted AI
   provider from Settings.
 - Review the provider destination and model before approving generated work.
-- Keep the approved provider connection and model attached to the queued request. Changing the
-  active provider later does not reroute it.
+- Send reviewed Topic Studio requests directly from the iPad. The review shows the provider,
+  model, destination, excerpt count, token estimate, and configured maximum cost estimate.
+- Keep the approved provider connection and model attached to each request. Changing the active
+  provider later does not reroute work that was already approved.
 - Stop an older queued request if its approved provider connection was edited or removed. Submit
   it again after reviewing the new settings.
 - Keep provider keys in secure device storage and out of notebook exports.
@@ -279,6 +281,8 @@ require representative device validation.
   and low-confidence answers.
 - Use Topic Studio to review the exact Topic scope before requesting cited synthesis, flashcard
   drafts, test work, Concept suggestions, or a weekly review.
+- Run those manual Topic Studio requests directly from the iPad without a Compute Node. Invalid
+  response formats and citations outside the approved excerpts create no draft.
 - Review generated flashcards, test questions, Concepts, and proposed Concept connections one item
   at a time. Edit their
   content, include supported items, and exclude unsupported items before acceptance.

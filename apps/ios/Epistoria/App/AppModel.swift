@@ -15,6 +15,7 @@ private enum AppModelOperationError: Error, LocalizedError {
     case aiProviderUnavailable
     case aiProviderSecretRequired
     case aiProviderURLInvalid
+    case aiProviderRouteChanged
 
     var errorDescription: String? {
         switch self {
@@ -38,6 +39,8 @@ private enum AppModelOperationError: Error, LocalizedError {
             "This provider requires an API key. The existing key was not changed."
         case .aiProviderURLInvalid:
             "Use HTTPS for a remote provider. Plain HTTP is allowed only for a local or private-network address."
+        case .aiProviderRouteChanged:
+            "The active provider changed after this request was reviewed. Review the request again before sending it."
         }
     }
 }
@@ -55,6 +58,14 @@ struct MacPairingMaterial: Identifiable {
     let accountId: UUID
     let deviceId: UUID
     let deviceToken: String
+}
+
+struct DirectProviderDisclosure: Equatable {
+    var provider: String
+    var model: String
+    var destination: String
+    var maximumEstimatedCostUsd: Double?
+    var route: AIProviderRouteSnapshot
 }
 
 @MainActor
@@ -669,6 +680,161 @@ final class AppModel {
         }
     }
 
+    func directTopicStudioDisclosure(
+        approximateInputTokens: Int,
+        jobType: LearningAIJobType
+    ) throws -> DirectProviderDisclosure {
+        guard let accountId = configuration?.accountId else {
+            throw AppModelOperationError.aiProviderUnavailable
+        }
+        let profile = try activeDirectProviderProfile(accountId: accountId)
+        let maximumOutputTokens = DirectLearningGeneration.maximumOutputTokens(for: jobType)
+        let maximumEstimatedCostUsd: Double?
+        if let inputRate = profile.inputUSDPerMillion,
+           let outputRate = profile.outputUSDPerMillion {
+            maximumEstimatedCostUsd =
+                (Double(max(approximateInputTokens, 0)) / 1_000_000 * max(inputRate, 0))
+                + (Double(maximumOutputTokens) / 1_000_000 * max(outputRate, 0))
+        } else {
+            maximumEstimatedCostUsd = nil
+        }
+        return DirectProviderDisclosure(
+            provider: profile.displayName,
+            model: profile.textModel,
+            destination: profile.destinationHost,
+            maximumEstimatedCostUsd: maximumEstimatedCostUsd,
+            route: profile.routeSnapshot
+        )
+    }
+
+    /// Runs a reviewed Topic Studio request directly from the iPad. Provider text is decoded and
+    /// citation-checked before the encrypted artifact is saved. A schema failure leaves no draft.
+    @discardableResult
+    func generateTopicStudioDirect(
+        _ prepared: PreparedLearningGenerationRequest,
+        approvedRoute: AIProviderRouteSnapshot
+    ) async throws -> UUID {
+        guard let accountId = configuration?.accountId, let database, let store else {
+            throw AppModelOperationError.aiProviderUnavailable
+        }
+        let profile = try activeDirectProviderProfile(accountId: accountId)
+        guard profile.routeSnapshot == approvedRoute else {
+            throw AppModelOperationError.aiProviderRouteChanged
+        }
+        var request = prepared.request
+        request.disclosureAcknowledged = true
+        request.providerRoute = approvedRoute
+        let providerRequest = try DirectLearningGeneration.providerRequest(for: request)
+        let disclosedCost = try directTopicStudioDisclosure(
+            approximateInputTokens: prepared.approximateTokens,
+            jobType: request.jobType
+        ).maximumEstimatedCostUsd
+        let approval = ProcessingApproval(
+            providerProfileId: profile.id,
+            sourceIds: request.sources.map(\.sourceId),
+            maximumCostMinorUnits: disclosedCost.map { Int(ceil(max($0, 0) * 100)) },
+            currencyCode: disclosedCost == nil ? nil : "USD",
+            expiresAt: Date().addingTimeInterval(30 * 60)
+        )
+        let fingerprint = SHA256.hash(data: Data(providerRequest.prompt.utf8))
+            .map { String(format: "%02x", $0) }.joined()
+        let processingJob = ProcessingJob(
+            id: request.jobId,
+            kind: request.jobType.rawValue,
+            inputEntityId: request.topicId,
+            inputFingerprint: fingerprint,
+            requiredCapabilities: [.hostedProvider],
+            selectedRoute: .directProvider,
+            approval: approval
+        )
+        _ = try await database.saveProcessingJob(processingJob)
+        _ = try await database.transitionProcessingJob(
+            id: processingJob.id,
+            to: .running,
+            route: .directProvider
+        )
+        do {
+            let secret = try aiProviderSecretStore.secret(
+                accountId: accountId,
+                profileId: profile.id
+            )
+            let providerResponse = try await directProviderClient.performText(
+                providerRequest,
+                route: profile.routeSnapshot,
+                apiKey: secret
+            )
+            let response = try DirectLearningGeneration.validatedResponse(
+                from: providerResponse.text,
+                request: request
+            )
+            let estimatedCost: Double?
+            if let inputTokens = providerResponse.inputTokens,
+               let outputTokens = providerResponse.outputTokens,
+               let inputRate = profile.inputUSDPerMillion,
+               let outputRate = profile.outputUSDPerMillion {
+                estimatedCost =
+                    (Double(inputTokens) / 1_000_000 * max(inputRate, 0))
+                    + (Double(outputTokens) / 1_000_000 * max(outputRate, 0))
+            } else {
+                estimatedCost = nil
+            }
+            let trace = ProviderTrace(
+                provider: profile.displayName,
+                model: profile.textModel,
+                promptVersion: DirectLearningGeneration.promptVersion,
+                inputTokens: providerResponse.inputTokens,
+                outputTokens: providerResponse.outputTokens,
+                estimatedCostUsd: estimatedCost,
+                providerRequestId: providerResponse.providerRequestId
+            )
+            let artifact = try DirectLearningGeneration.artifact(
+                request: request,
+                response: response,
+                trace: trace
+            )
+            let artifactId = DirectLearningGeneration.artifactId(for: request.jobId)
+            _ = try await store.save(
+                id: artifactId,
+                payload: artifact,
+                parentId: request.topicId,
+                relationIds: [request.topicId] + artifact.sourceIds
+            )
+            _ = try await database.transitionProcessingJob(
+                id: processingJob.id,
+                to: .completed,
+                progress: 1
+            )
+            return artifactId
+        } catch DirectProviderError.transport {
+            _ = try? await database.transitionProcessingJob(
+                id: processingJob.id,
+                to: .waitingForNetwork,
+                errorCode: "PROVIDER_UNREACHABLE"
+            )
+            throw DirectProviderError.transport
+        } catch is CancellationError {
+            _ = try? await database.transitionProcessingJob(
+                id: processingJob.id,
+                to: .cancelled
+            )
+            throw CancellationError()
+        } catch let error as DirectLearningGenerationError {
+            _ = try? await database.transitionProcessingJob(
+                id: processingJob.id,
+                to: .failed,
+                errorCode: "PROVIDER_SCHEMA_INVALID"
+            )
+            throw error
+        } catch {
+            _ = try? await database.transitionProcessingJob(
+                id: processingJob.id,
+                to: .failed,
+                errorCode: "PROVIDER_REQUEST_FAILED"
+            )
+            throw error
+        }
+    }
+
     func recognizeFormulaOnDevice(_ request: LocalOCRRequest) async throws -> LocalOCRResponse {
         guard let database else { throw AppModelOperationError.unlockedSessionUnavailable }
         let fingerprint = SHA256.hash(data: Data(request.imageContent.utf8))
@@ -723,6 +889,13 @@ final class AppModel {
         } else {
             profiles.append(profile)
         }
+    }
+
+    private func activeDirectProviderProfile(accountId: UUID) throws -> AIProviderProfile {
+        guard let profile = try aiProviderProfileStore.load(accountId: accountId).first(where: {
+            $0.isActive && $0.state == .ready && $0.capabilities.contains(.text)
+        }) else { throw AppModelOperationError.aiProviderUnavailable }
+        return profile
     }
 
     #if DEBUG

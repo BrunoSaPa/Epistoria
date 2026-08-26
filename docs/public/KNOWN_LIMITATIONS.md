@@ -72,9 +72,10 @@ Epistoria remains in personal beta. The following limits apply to the current pr
 
 ## Optional processing
 
-- A Mac is optional. Existing typed generation screens are moving to direct iPad execution in
-  stages; a screen that still uses the encrypted Compute Node queue identifies that route before
-  approval.
+- A Mac is optional. Topic Studio sends reviewed synthesis, flashcard, test, Concept, and weekly
+  review requests directly from the iPad to the selected provider. Other typed generation screens
+  are moving to direct iPad execution in stages; a screen that still uses the encrypted Compute
+  Node queue identifies that route before approval.
 - AI features require a separately configured provider account and can incur provider charges.
 - One provider is active for newly approved work. Each new request keeps the provider and model
   reviewed at approval. Editing or removing that connection before processing stops the request;
@@ -87,6 +88,9 @@ Epistoria remains in personal beta. The following limits apply to the current pr
 - Anthropic and Gemini native connections support text and optional vision only. Timestamped
   transcription requires the official Responses or a compatible connection.
 - A live paid AI evaluation is not part of the current release evidence.
+- Topic Studio rejects malformed provider output, unknown fields, duplicate draft identifiers,
+  and citations outside the approved excerpts. Provider compatibility still depends on the
+  selected model following the displayed JSON response contract.
 - Source guides and exact question citations currently apply to PDFs. Other Source types do not
   yet use this source-analysis screen.
 - Scanned pages can use local OCR. Recognition quality varies with handwriting, rotation,

@@ -181,7 +181,9 @@ cards, and tests. Academic details are optional. Archiving a Topic preserves lin
 
 Topic Studio uses the current Topic by default. Turn on **Include connected knowledge** only when
 the request should also use Topics connected through the same Areas. Review the excerpt and token
-estimate before approving a paid request.
+estimate before approving a paid request. The final review also shows the active provider, model,
+destination, and maximum estimate when price metadata is configured. The request goes directly
+from the iPad to that provider. A Compute Node is not required for Topic Studio.
 
 For a generated test:
 
@@ -195,7 +197,11 @@ For a generated test:
 6. Set the question count and optional time limit. Custom also allows exact coverage dimensions.
 7. Select **Review request**. Check the final mode, question count, objective count, dimensions,
    time limit, excerpts, and approximate token count.
-8. Select **Approve and queue** only when the plan is correct.
+8. Select **Approve and generate** only when the plan and provider disclosure are correct.
+
+Epistoria saves a Topic Studio result only after the iPad validates the response format and every
+citation. A malformed response or a citation outside the reviewed excerpts produces an error and
+does not create a draft.
 
 Comprehensive generation can use a broader or multi-part question for related objectives. The
 accepted test still lists objectives without a reviewed question and keeps provider-reported

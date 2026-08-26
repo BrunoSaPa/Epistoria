@@ -1,5 +1,16 @@
 # Release notes
 
+## Direct Topic Studio processing
+
+- Moved manual Topic Studio synthesis, flashcard, test, Concept, and weekly-review generation from
+  the Compute Node queue to direct iPad provider execution.
+- Added provider, model, destination, scope-size, and configured maximum-cost details to the final
+  approval screen.
+- Added strict local response validation. Unknown fields, malformed JSON, duplicate identifiers,
+  unsupported Concept references, and citations outside the approved excerpts create no draft.
+- Kept the provider response separate from accepted cards, tests, Concepts, and other learning
+  records. Review and acceptance are still required.
+
 ## iPad-first processing and search
 
 - Made the iPad authoritative for notebook storage, recognition, search, local processing jobs,

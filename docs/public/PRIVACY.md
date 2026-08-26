@@ -51,6 +51,11 @@ An approved AI request sends selected readable material to the configured provid
 processing. This is a separate privacy boundary from encrypted synchronization. Provider data
 handling and retention policies can apply.
 
+Manual Topic Studio requests travel directly from the iPad to the provider shown during approval.
+They do not pass through the synchronization service or a Compute Node. The local processing job
+stores only routing metadata and an opaque input fingerprint. It does not store the prompt,
+provider response, or key. A validated result is stored as a separate encrypted draft.
+
 PDF Source analysis requires separate approval. The paired Mac decrypts the selected Source
 Version in memory, selects bounded text passages, and can render bounded figure images. The
 configured provider receives those selected passages and images. The returned summary,
@@ -61,9 +66,9 @@ Provider keys are stored in device-only iPad Keychain items. They do not synchro
 included in notebook exports. A Compute Node or another iPad requires its own credential.
 
 When you approve an AI request, Epistoria records the selected provider connection, destination,
-model, and declared capabilities inside the encrypted request. Changing the active provider does
-not redirect already approved work. The trusted Mac stops the request if the approved connection
-was edited or removed. The recorded route does not contain the provider key.
+model, and declared capabilities with the encrypted result or request. Changing the active
+provider does not redirect already approved work. A queued Compute Node request stops if its
+approved connection was edited or removed. The recorded route does not contain the provider key.
 
 The official Responses, Anthropic, and Gemini connections use fixed official HTTPS destinations.
 A custom destination is available only for a compatible connection. Epistoria does not include a

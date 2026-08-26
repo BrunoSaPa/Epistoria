@@ -252,6 +252,7 @@ public struct LearningGenerationArtifact: EntityPayload, Equatable {
     public var generatedAt: Date
     public var sourceIds: [UUID]
     public var trace: ProviderTrace
+    public var providerRoute: AIProviderRouteSnapshot?
     public var response: LearningGenerationResponse
     public var reviewState: AIArtifactReviewState?
     public var reviewedAt: Date?
@@ -271,6 +272,7 @@ public struct LearningGenerationArtifact: EntityPayload, Equatable {
         generatedAt: Date,
         sourceIds: [UUID],
         trace: ProviderTrace,
+        providerRoute: AIProviderRouteSnapshot? = nil,
         response: LearningGenerationResponse,
         testPlan: TestGenerationPlan? = nil,
         knownConceptIds: [UUID] = []
@@ -283,6 +285,7 @@ public struct LearningGenerationArtifact: EntityPayload, Equatable {
         self.generatedAt = generatedAt
         self.sourceIds = sourceIds
         self.trace = trace
+        self.providerRoute = providerRoute
         self.response = response
         reviewState = nil
         reviewedAt = nil
