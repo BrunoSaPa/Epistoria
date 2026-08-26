@@ -165,6 +165,26 @@ This feature requires a paired Mac and a configured AI provider. It is optional.
 
 ## Learning
 
+### Adaptive Tutor
+
+- Start a Learning Guide from Study, a Topic, or the persistent notebook tool rail.
+- Limit each session to one Topic, selected immutable Source Versions, a turn count, an expiration,
+  and a spending limit.
+- Include connected knowledge only through an explicit session option.
+- Receive cited diagnostics, hints, direct explanations, worked examples, retrieval prompts,
+  error analysis, and transfer problems.
+- Open every citation at its exact Source Version and saved page, region, timestamp, or text
+  location.
+- Use **Hint**, **Explain directly**, **Another example**, and **Why this next?** during a session.
+- Save learner messages on the iPad before provider work completes. An unavailable provider does
+  not remove the transcript.
+- Keep complete Tutor sessions and turns after relaunch and in readable notebook exports.
+- Review proposed learning signals before they affect the local mastery explanation. Rejecting a
+  proposal leaves accepted learning history unchanged.
+- Use the same configured provider interface for official, hosted, Ollama, LM Studio, vLLM, and
+  LocalAI connections.
+- Keep the notebook usable when no provider is available.
+
 - Create and manage flashcard decks.
 - Edit cards by creating durable revisions. Suspend or archive cards without deleting reviews.
 - Edit goals and unresolved questions. Mark goals completed and questions resolved or reopen them.

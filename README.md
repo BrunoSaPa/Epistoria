@@ -46,6 +46,8 @@ The app also provides:
 - Validated version 5 export import into an empty notebook under a new local encryption key.
 - AI provider management for OpenAI, Anthropic, Gemini, and OpenAI-compatible local or hosted
   endpoints, with device Keychain storage and encrypted trusted-Mac configuration.
+- An Adaptive Tutor that keeps durable encrypted transcripts, cites frozen Source Versions, and
+  changes its next activity only from reviewed learning signals.
 
 The learning system stores durable source-linked flashcards, practice tests, review history, and a
 **Study Next** queue. Accepted cards and tests are notebook records, not temporary chat output. A
@@ -100,6 +102,7 @@ The current system supports these processing jobs:
 | Flashcard and test drafts | A reviewed Topic scope and frozen sources | Cited reviewable learning drafts | Yes |
 | Written-answer feedback | A frozen response, rubric, and linked Evidence | Cited feedback and proposed score | Yes |
 | Media transcription | One approved local media Source | Timestamped transcript segments | Yes |
+| Adaptive Tutor turn | Bounded transcript, accepted learning history, and hybrid-search excerpts | Cited response and proposed learning signals | Yes |
 
 Generated material remains a draft until the user reviews it. Accepted cards, tests, attempts,
 and review schedules remain available without a network connection.

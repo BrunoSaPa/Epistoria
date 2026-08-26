@@ -102,6 +102,9 @@ actor EpistoriaExportService {
         var recommendations: [Record<StudyRecommendationPayload>]
         var recommendationResponses: [Record<RecommendationResponsePayload>]
         var automationGrants: [Record<AutomationGrantPayload>]
+        var tutorSessions: [Record<TutorSessionPayload>]
+        var tutorTurns: [Record<TutorTurnPayload>]
+        var learningSignals: [Record<LearningSignalPayload>]
     }
 
     private struct CollectionRecords: Codable {
@@ -655,6 +658,9 @@ actor EpistoriaExportService {
         async let recommendations = store.list(StudyRecommendationPayload.self)
         async let recommendationResponses = store.list(RecommendationResponsePayload.self)
         async let grants = store.list(AutomationGrantPayload.self)
+        async let tutorSessions = store.list(TutorSessionPayload.self)
+        async let tutorTurns = store.list(TutorTurnPayload.self)
+        async let learningSignals = store.list(LearningSignalPayload.self)
         let value = try await LearningRecords(
             goals: goals.map { Record(id: $0.id, payload: $0.payload) },
             unresolvedQuestions: unresolved.map { Record(id: $0.id, payload: $0.payload) },
@@ -671,7 +677,10 @@ actor EpistoriaExportService {
             testResponses: responses.map { Record(id: $0.id, payload: $0.payload) },
             recommendations: recommendations.map { Record(id: $0.id, payload: $0.payload) },
             recommendationResponses: recommendationResponses.map { Record(id: $0.id, payload: $0.payload) },
-            automationGrants: grants.map { Record(id: $0.id, payload: $0.payload) }
+            automationGrants: grants.map { Record(id: $0.id, payload: $0.payload) },
+            tutorSessions: tutorSessions.map { Record(id: $0.id, payload: $0.payload) },
+            tutorTurns: tutorTurns.map { Record(id: $0.id, payload: $0.payload) },
+            learningSignals: learningSignals.map { Record(id: $0.id, payload: $0.payload) }
         )
         try write(value, to: root.appendingPathComponent("learning.json"))
     }

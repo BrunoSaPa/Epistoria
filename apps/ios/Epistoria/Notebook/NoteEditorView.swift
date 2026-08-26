@@ -63,6 +63,8 @@ struct NoteEditorView: View {
     @Bindable var model: AppModel
     @Environment(\.dismiss) private var dismiss
     @Environment(\.epistoriaWorkspacePresentation) private var workspacePresentation
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     let noteId: UUID
     var focusedBlockId: UUID?
     var highlightText: String?
@@ -123,6 +125,7 @@ struct NoteEditorView: View {
     @State private var showNoteQueryArtifacts = false
     @State private var showOrganization = false
     @State private var showEvidenceShelf = false
+    @State private var showTutor = false
     @State private var openedEvidenceId: UUID?
     @State private var inspectedEvidenceId: UUID?
     @State private var inspectedEvidenceBacklinks: [EvidenceBacklink] = []
@@ -162,6 +165,9 @@ struct NoteEditorView: View {
             .safeAreaInset(edge: .leading, spacing: 0) { notebookToolRail }
             .safeAreaInset(edge: .trailing, spacing: 0) {
                 if showEvidenceShelf { evidenceShelf }
+            }
+            .overlay(alignment: .trailing) {
+                if showTutor { tutorOverlay }
             }
             .safeAreaInset(edge: .bottom, spacing: 0) { transientBottomMessage }
             .sensoryFeedback(.selection, trigger: currentPageIndex)
@@ -748,6 +754,19 @@ struct NoteEditorView: View {
             .accessibilityHint("Shows reusable excerpts anchored to their original Source Version")
             .accessibilityIdentifier("note.tool.evidence")
 
+            railToolButton(
+                "Tutor",
+                systemImage: "graduationcap",
+                selected: showTutor
+            ) {
+                showEvidenceShelf = false
+                withAnimation(reduceMotion ? .easeOut(duration: 0.12) : .snappy(duration: 0.26, extraBounce: 0)) {
+                    showTutor.toggle()
+                }
+            }
+            .accessibilityHint("Opens an adaptive Tutor without closing or resizing the notebook")
+            .accessibilityIdentifier("note.tool.tutor")
+
             if model.aiJobs != nil {
                 railToolButton(
                     lassoSelection.isEmpty ? "Ask" : "Send",
@@ -800,6 +819,38 @@ struct NoteEditorView: View {
         .background(.regularMaterial)
         .overlay(alignment: .trailing) { Divider() }
         .accessibilityElement(children: .contain)
+    }
+
+    private var tutorOverlay: some View {
+        AdaptiveTutorView(
+            model: model,
+            topicId: note?.payload.courseId,
+            initialMessage: tutorSelectionMessage,
+            preferredEvidenceIds: tutorSelectionEvidenceIds,
+            compact: true
+        )
+            .frame(width: 410)
+            .frame(maxHeight: .infinity)
+            .background(reduceTransparency ? EpistoriaDesign.page : Color.clear)
+            .overlay(alignment: .leading) { Divider() }
+            .shadow(color: reduceTransparency ? .clear : .black.opacity(0.12), radius: 18, x: -4)
+            .transition(reduceMotion ? .opacity : .move(edge: .trailing).combined(with: .opacity))
+    }
+
+    private var tutorSelectionEvidenceIds: [UUID] {
+        blocks.filter { lassoSelection.selectedBlockIds.contains($0.id) }
+            .compactMap(\.payload.evidenceId)
+    }
+
+    private var tutorSelectionMessage: String? {
+        let selected = blocks.filter { lassoSelection.selectedBlockIds.contains($0.id) }
+        let text = selected.compactMap { block -> String? in
+            let value = block.payload.plainText.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !value.isEmpty { return value }
+            return block.payload.transcription?.trimmingCharacters(in: .whitespacesAndNewlines)
+        }.filter { !$0.isEmpty }.joined(separator: "\n\n")
+        guard !text.isEmpty else { return nil }
+        return "Help me understand this selected notebook material:\n\n\(String(text.prefix(8_000)))"
     }
 
     private var evidenceShelf: some View {

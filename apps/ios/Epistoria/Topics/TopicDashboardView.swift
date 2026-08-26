@@ -22,6 +22,7 @@ struct TopicDashboardView: View {
     @State private var showNewTest = false
     @State private var showNewConcept = false
     @State private var showStudio = false
+    @State private var showTutor = false
     @State private var showNewGoal = false
     @State private var showNewQuestion = false
     @State private var isImportingSources = false
@@ -66,6 +67,9 @@ struct TopicDashboardView: View {
         }
         .sheet(isPresented: $showStudio) {
             TopicStudioView(model: model, topicId: topicId)
+        }
+        .sheet(isPresented: $showTutor) {
+            AdaptiveTutorView(model: model, topicId: topicId)
         }
         .sheet(isPresented: $showNewGoal) {
             NewStudyGoalView(model: model, topicId: topicId) { Task { await load() } }
@@ -116,6 +120,7 @@ struct TopicDashboardView: View {
             }
             EpistoriaQuickAction(title: "Add Source", subtitle: "Documents, books, sheets, or images", symbol: "doc.badge.plus") { isImportingSources = true }
             EpistoriaQuickAction(title: "Ask Topic", subtitle: "Review a cited AI request", symbol: "sparkles") { showStudio = true }
+            EpistoriaQuickAction(title: "Tutor", subtitle: "Start an adaptive cited lesson", symbol: "graduationcap") { showTutor = true }
             EpistoriaQuickAction(title: "Create cards", subtitle: "Durable review material", symbol: "rectangle.stack") { showNewCard = true }
             EpistoriaQuickAction(title: "Create test", subtitle: "Coverage-first blueprint", symbol: "checkmark.square") { showNewTest = true }
             EpistoriaQuickAction(title: "New Concept", subtitle: "Define an idea and connect evidence", symbol: "point.3.connected.trianglepath.dotted") { showNewConcept = true }

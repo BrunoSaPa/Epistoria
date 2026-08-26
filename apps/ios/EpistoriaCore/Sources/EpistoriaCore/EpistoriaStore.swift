@@ -140,6 +140,15 @@ public enum EntitySearchIndexer {
             case .studyRecommendation:
                 let value = try CanonicalJSON.decode(StudyRecommendationPayload.self, from: content)
                 return SearchDocument(title: value.title, body: value.explanation)
+            case .tutorSession:
+                let value = try CanonicalJSON.decode(TutorSessionPayload.self, from: content)
+                return SearchDocument(title: "Tutor session", body: value.objective ?? "")
+            case .tutorTurn:
+                let value = try CanonicalJSON.decode(TutorTurnPayload.self, from: content)
+                return SearchDocument(title: value.role == .learner ? "Learner" : "Tutor", body: value.text)
+            case .learningSignal:
+                let value = try CanonicalJSON.decode(LearningSignalPayload.self, from: content)
+                return SearchDocument(title: value.objective, body: value.rationale ?? value.outcome.rawValue)
             case .asset:
                 let value = try CanonicalJSON.decode(AssetPayload.self, from: content)
                 return SearchDocument(title: value.originalFilename, body: value.mimeType)

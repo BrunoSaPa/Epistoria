@@ -24,6 +24,8 @@ from ..models import (
     SourceGuideResponseV1,
     SourceQueryPromptV1,
     SourceQueryResponseV1,
+    TutorTurnRequestV1,
+    TutorTurnResponseV1,
 )
 from .base import ProviderError
 from .openai_provider import (
@@ -34,6 +36,7 @@ from .openai_provider import (
     _NOTE_QUERY_SYSTEM_PROMPT,
     _SOURCE_GUIDE_SYSTEM_PROMPT,
     _SOURCE_QUERY_SYSTEM_PROMPT,
+    _TUTOR_SYSTEM_PROMPT,
     _provider_request_json,
 )
 
@@ -216,6 +219,16 @@ class _NativeStructuredDigestProvider:
                 }
             ],
             prompt_version="learning-generation/v1",
+        )
+
+    def generate_tutor_turn(
+        self, request: TutorTurnRequestV1
+    ) -> tuple[TutorTurnResponseV1, ProviderTraceV1]:
+        return self._generate(
+            response_type=TutorTurnResponseV1,
+            system_prompt=_TUTOR_SYSTEM_PROMPT,
+            user_content=[{"type": "text", "text": _provider_request_json(request)}],
+            prompt_version="adaptive-tutor/v1",
         )
 
     def generate_note_query(

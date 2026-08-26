@@ -396,6 +396,7 @@ public enum ConceptLinkKind: String, Codable, CaseIterable, Sendable {
 
 public enum RecordProvenance: String, Codable, Sendable {
     case user = "USER"
+    case generatedAI = "GENERATED_AI"
     case reviewedAI = "REVIEWED_AI"
 }
 

@@ -44,6 +44,8 @@ from .models import (
     SourceQueryRequestV1,
     SourceQueryResponseV1,
     TranscriptSegmentV1,
+    TutorTurnArtifactV1,
+    TutorTurnRequestV1,
 )
 from .outbox import CachedCompletion, EncryptedOutbox
 from .pdf_extract import (
@@ -149,6 +151,8 @@ class WorkerProcessor:
             return self._free_response_feedback(lease, plaintext)
         if lease.job_type == "PROVIDER_CONFIGURATION":
             return self._provider_configuration(lease, plaintext)
+        if lease.job_type == "TUTOR_TURN":
+            return self._tutor_turn(lease, plaintext)
         if lease.job_type in {
             "SOURCE_EXTRACTION",
             "TOPIC_SYNTHESIS",
@@ -162,6 +166,84 @@ class WorkerProcessor:
         }:
             return self._learning_generation(lease, plaintext)
         raise ProcessingFailure(code="UNSUPPORTED_JOB_TYPE", retryable=False)
+
+    def _tutor_turn(self, lease: AIJobLease, plaintext: bytes) -> CachedCompletion:
+        if self._digest_provider is None:
+            raise ProcessingFailure(code="AI_NOT_CONFIGURED", retryable=False)
+        try:
+            request = TutorTurnRequestV1.model_validate_json(plaintext)
+        except ValidationError as error:
+            raise ProcessingFailure(code="INVALID_JOB_PAYLOAD", retryable=False) from error
+        if (
+            request.account_id != self._account_id
+            or request.job_id != lease.id
+            or request.tutor_session_id != request.authorization.tutor_session_id
+            or request.topic_id != request.authorization.topic_id
+        ):
+            raise ProcessingFailure(code="JOB_IDENTITY_MISMATCH", retryable=False)
+        now = datetime.now(UTC)
+        authorization = request.authorization
+        if (
+            authorization.approved_at > now + timedelta(minutes=5)
+            or authorization.expires_at <= now
+            or authorization.approved_turn_count >= authorization.maximum_turns
+            or authorization.estimated_spent_minor_units
+            >= authorization.spending_limit_minor_units
+        ):
+            raise ProcessingFailure(code="TUTOR_AUTHORIZATION_INVALID", retryable=False)
+
+        response, trace = self._digest_provider.generate_tutor_turn(request)
+        allowed = {source.excerpt_id for source in request.sources}
+        if any(excerpt_id not in allowed for excerpt_id in response.cited_excerpt_ids):
+            raise ProcessingFailure(code="PROVIDER_CITATION_INVALID", retryable=True)
+        for signal in response.proposed_signals:
+            if signal.objective.casefold() != request.objective.casefold():
+                raise ProcessingFailure(code="PROVIDER_SIGNAL_INVALID", retryable=True)
+            if any(excerpt_id not in allowed for excerpt_id in signal.cited_excerpt_ids):
+                raise ProcessingFailure(code="PROVIDER_CITATION_INVALID", retryable=True)
+        estimated_minor_units = round((trace.estimated_cost_usd or 0) * 100)
+        if (
+            authorization.estimated_spent_minor_units + estimated_minor_units
+            > authorization.spending_limit_minor_units
+        ):
+            raise ProcessingFailure(code="TUTOR_SPENDING_LIMIT", retryable=False)
+        self._record_cost(lease.id, trace)
+
+        source_ids = list(dict.fromkeys(source.source_id for source in request.sources))
+        source_version_ids = list(
+            dict.fromkeys(source.source_version_id for source in request.sources)
+        )
+        artifact_id = uuid5(lease.id, "ai-artifact/v1")
+        artifact = TutorTurnArtifactV1(
+            job_id=lease.id,
+            tutor_session_id=request.tutor_session_id,
+            topic_id=request.topic_id,
+            sequence=request.sequence,
+            generated_at=now,
+            sources=request.sources,
+            source_excerpt_ids=[source.excerpt_id for source in request.sources],
+            source_ids=source_ids,
+            source_version_ids=source_version_ids,
+            trace=trace,
+            response=response,
+        )
+        relation_ids = [
+            request.tutor_session_id,
+            request.topic_id,
+            *source_ids,
+            *source_version_ids,
+        ]
+        mutation = self._encrypted_mutation(
+            entity_id=artifact_id,
+            parent_id=request.tutor_session_id,
+            relation_ids=list(dict.fromkeys(relation_ids))[:64],
+            plaintext=json_bytes(artifact),
+        )
+        return CachedCompletion(
+            job_id=lease.id,
+            artifact_entity_id=artifact_id,
+            mutations=[mutation],
+        )
 
     def _source_analysis(self, lease: AIJobLease, plaintext: bytes) -> CachedCompletion:
         if self._digest_provider is None:

@@ -1,5 +1,13 @@
 # Release notes
 
+## Adaptive Tutor
+
+- Added durable encrypted Tutor sessions, transcripts, cited responses, confidence, bounded
+  provider approval, and reviewed learning signals.
+- Added Tutor entry points in Study, Topic dashboards, and the notebook tool rail.
+- Added the final standalone logo as the canonical app icon and runtime mark.
+- Added Tutor records to readable notebook export.
+
 ## Automatic related search
 
 - Kept exact text matches first.

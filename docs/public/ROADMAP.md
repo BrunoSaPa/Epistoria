@@ -71,48 +71,92 @@ Completed:
 10. AI provider connections can be managed from Settings. The current choices include the
     official supported service and compatible local or hosted services. Keys stay in secure
     device storage and completed results identify the provider connection and model used.
-10. MP3, M4A, AAC, WAV, and CAF recordings import after local format and decoder validation and
+11. MP3, M4A, AAC, WAV, and CAF recordings import after local format and decoder validation and
     play from decrypted memory on the iPad.
-11. MP4, M4V, and MOV files import after bounded container and decoder validation. Video uses
+12. MP4, M4V, and MOV files import after bounded container and decoder validation. Video uses
     protected local playback files that are excluded from backup and removed after use.
-12. HTTPS pages can be captured manually as bounded encrypted HTML snapshots. Readable
+13. HTTPS pages can be captured manually as bounded encrypted HTML snapshots. Readable
     text is available offline. Manual refresh creates an immutable version, reports readable-text
     changes, and keeps earlier versions selectable.
-13. Shared Google Docs, Slides, and Sheets can be captured through native share links as bounded
+14. Shared Google Docs, Slides, and Sheets can be captured through native share links as bounded
     DOCX, PPTX, or XLSX exports. Originals are encrypted, readable text works offline, and manual
     refresh keeps immutable earlier versions and reports readable-text changes.
-14. YouTube videos can be stored as normalized online references and opened through an explicitly
+15. YouTube videos can be stored as normalized online references and opened through an explicitly
     loaded privacy-enhanced player. Local MP3, M4A, WAV, and MP4 Sources up to 25 MB can request
     timestamped trusted-Mac transcription after provider disclosure. Accepted transcripts remain
     encrypted, Source-Version-bound, and exportable as derived data.
-15. Evidence can be opened from a note-side shelf, dragged or inserted onto a page, and reused
+16. Evidence can be opened from a note-side shelf, dragged or inserted onto a page, and reused
     without copying the Evidence record. Inserted cards retain their Source Version and locator,
     return to the original Source, list backlinks, and include a readable citation in note PDF
     export.
-16. Any two Sources, or two immutable versions of one Source, can be opened in a full-screen local
+17. Any two Sources, or two immutable versions of one Source, can be opened in a full-screen local
     comparison workspace. Concepts support durable typed connections with optional Evidence,
     manual editing and removal, and reviewed source-cited AI proposals.
-17. Transcript segments can be corrected through separate encrypted owner records without
+18. Transcript segments can be corrected through separate encrypted owner records without
     changing generated chunks. One segment or a continuous range can become timestamped Evidence
     with frozen reviewed text, exact Source Version, segment indexes, correction references, and
     direct local-player navigation.
-18. PDF Sources can create a cited source guide with summary, translation, key topics, suggested
+19. PDF Sources can create a cited source guide with summary, translation, key topics, suggested
     questions, and detected figure notes. Source questions return statement-level citations that
     open the supporting page and region in the exact Source Version. Large-source coverage limits
     remain visible.
-19. Newly approved AI work keeps an encrypted, non-secret snapshot of the reviewed provider
+20. Newly approved AI work keeps an encrypted, non-secret snapshot of the reviewed provider
     connection and model. Later activation of another provider cannot reroute queued work. An
     edited or removed connection stops older work and requires a new approval.
-20. Anthropic Messages and Google Gemini `generateContent` can be configured directly. Both use
+21. Anthropic Messages and Google Gemini `generateContent` can be configured directly. Both use
     fixed official HTTPS destinations, Keychain credentials, native JSON Schema output, optional
     image input, and the same encrypted route and artifact boundaries as other providers.
-21. Search automatically combines exact text results with a separate related-results section.
+22. Search automatically combines exact text results with a separate related-results section.
     Both run on the iPad. Exact results remain available when related matching is unavailable.
+23. The Adaptive Tutor keeps encrypted session transcripts, uses cited automatic hybrid-search
+    excerpts, adapts its next activity from accepted learning signals, and requires bounded
+    provider approval. It is available from Study, Topics, and the notebook.
 
 Next stages:
 
 1. Validate related-result quality, performance, battery use, VoiceOver, and direct Source
    navigation during representative daily use on a physical iPad.
+
+## Competitor-informed opportunities
+
+The next product work is ordered by learning value. An item remains here until it is available in
+the app.
+
+### Next
+
+- Add an interactive Concept and Evidence map. One Evidence item should open as source material,
+  a notebook object, a Concept relationship, or a study prompt. This direction is informed by
+  MarginNote.
+- Add deadline-aware learning plans. A plan should use an exam or target date, remaining coverage,
+  daily workload, missed-day catch-up, and an explanation of readiness. This direction is informed
+  by RemNote.
+- Add a daily Evidence review that can resurface highlights, difficult Concepts, and earlier
+  mistakes without AI. Add reusable Studio recipes defined by the notebook owner. This direction
+  is informed by Readwise.
+
+### Later
+
+- Add cited audio briefs and optional spoken Tutor sessions. Start with one clear narrator. Do not
+  simulate a podcast conversation.
+- Add handwriting-aware mathematics support after Pencil validation. The intended scope includes
+  equation recognition, worked steps, graphing, and error diagnosis.
+- Add source-grounded slide decks, infographics, and visual explanations. Every revision must
+  remain bound to the Source Versions used to create it.
+
+### Explore
+
+- Evaluate sandboxed spreadsheet and dataset analysis on the trusted Mac. File, network, and code
+  execution permissions must be explicit and revocable.
+
+## More subjects
+
+A future subject suggestion control will separate three requests:
+
+1. Find gaps inside the current Topic.
+2. Suggest prerequisite or adjacent Topics from accepted Concepts and notebook Evidence.
+3. Find external material through reviewed source discovery.
+
+External results will not create Topics or Sources until the user selects them.
 
 Opening the app will not by itself send notebook content for processing. Review scheduling and the
 base daily queue will run on the iPad without paid processing.

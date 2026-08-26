@@ -57,6 +57,12 @@ public enum EntityPayloadValidator {
             _ = try CanonicalJSON.decode(RecommendationResponsePayload.self, from: content)
         case .automationGrant:
             _ = try CanonicalJSON.decode(AutomationGrantPayload.self, from: content)
+        case .tutorSession:
+            _ = try CanonicalJSON.decode(TutorSessionPayload.self, from: content)
+        case .tutorTurn:
+            _ = try CanonicalJSON.decode(TutorTurnPayload.self, from: content)
+        case .learningSignal:
+            _ = try CanonicalJSON.decode(LearningSignalPayload.self, from: content)
         }
     }
 
@@ -95,6 +101,7 @@ public enum EntityPayloadValidator {
             "pdf-extraction-chunk/v1",
             "ai-artifact/source-analysis/v1",
             "ai-artifact/source-query/v1",
+            "ai-artifact/tutor-turn/v1",
         ]
         case .transcriptCorrection: ["transcript-correction/v1"]
         case .sourceVersion: ["source-version/v1"]
@@ -118,6 +125,9 @@ public enum EntityPayloadValidator {
         case .studyRecommendation: ["study-recommendation/v1"]
         case .recommendationResponse: ["recommendation-response/v1", "recommendation-response/v2"]
         case .automationGrant: ["automation-grant/v1", "automation-grant/v2"]
+        case .tutorSession: ["tutor-session/v1"]
+        case .tutorTurn: ["tutor-turn/v1"]
+        case .learningSignal: ["learning-signal/v1"]
         }
     }
 }

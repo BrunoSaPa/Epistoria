@@ -46,6 +46,11 @@ from epistoria_worker.models import (
     SourceKind,
     SourceQueryArtifactV1,
     SourceQueryRequestV1,
+    TutorSessionAuthorizationV1,
+    TutorSourceExcerptV1,
+    TutorSourceLocatorV1,
+    TutorTurnArtifactV1,
+    TutorTurnRequestV1,
 )
 from epistoria_worker.models import TestGenerationPlanV1 as GenerationPlanV1
 from epistoria_worker.outbox import EncryptedOutbox
@@ -69,6 +74,7 @@ def lease_for(
         "TEST_GENERATION",
         "FREE_RESPONSE_FEEDBACK",
         "PROVIDER_CONFIGURATION",
+        "TUTOR_TURN",
     ],
     payload: bytes,
     job_id: UUID | None = None,
@@ -157,6 +163,13 @@ class UnknownConceptLinkProvider(DeterministicDigestProvider):
         return response, trace
 
 
+class UnknownTutorCitationProvider(DeterministicDigestProvider):
+    def generate_tutor_turn(self, request: TutorTurnRequestV1):
+        response, trace = super().generate_tutor_turn(request)
+        response.cited_excerpt_ids = [uuid4()]
+        return response, trace
+
+
 def decrypt_artifact(mutation: dict[str, Any]) -> bytes:
     wire = mutation["envelope"]
     envelope = EncryptedEnvelope(
@@ -206,6 +219,88 @@ def processor(api: FakeAPI, outbox_path: Path, provider=None) -> WorkerProcessor
         digest_provider=provider,
         maximum_asset_bytes=10_000_000,
     )
+
+
+def tutor_request(job_id: UUID, *, expires_at: datetime | None = None) -> TutorTurnRequestV1:
+    session_id = uuid4()
+    topic_id = uuid4()
+    source_version_id = uuid4()
+    source = TutorSourceExcerptV1(
+        excerpt_id=uuid4(),
+        source_id=uuid4(),
+        source_version_id=source_version_id,
+        title="Factoring notes",
+        locator=TutorSourceLocatorV1(kind="PDF", page=3),
+        excerpt="Factor the greatest common factor before applying another method.",
+    )
+    now = datetime.now(UTC)
+    return TutorTurnRequestV1(
+        account_id=ACCOUNT_ID,
+        job_id=job_id,
+        tutor_session_id=session_id,
+        topic_id=topic_id,
+        sequence=0,
+        action="BEGIN",
+        objective="Factor quadratics",
+        guidance_style="ADAPTIVE",
+        recommended_turn_kind="DIAGNOSTIC",
+        recommendation_reason="No accepted assessment is available.",
+        sources=[source],
+        authorization=TutorSessionAuthorizationV1(
+            tutor_session_id=session_id,
+            topic_id=topic_id,
+            source_version_ids=[source_version_id],
+            maximum_turns=12,
+            approved_turn_count=0,
+            spending_limit_minor_units=100,
+            estimated_spent_minor_units=0,
+            currency_code="USD",
+            approved_at=now - timedelta(minutes=1),
+            expires_at=expires_at or now + timedelta(hours=2),
+        ),
+        disclosure_acknowledged=True,
+    )
+
+
+def test_tutor_turn_is_grounded_and_synced_as_an_encrypted_artifact(tmp_path) -> None:
+    job_id = uuid4()
+    request = tutor_request(job_id)
+    api = FakeAPI([lease_for("TUTOR_TURN", json_bytes(request), job_id)])
+    worker = processor(api, tmp_path / "tutor-outbox", DeterministicDigestProvider())
+
+    assert worker.process_once()
+    assert len(api.pushed) == 1
+    artifact = TutorTurnArtifactV1.model_validate_json(decrypt_artifact(api.pushed[0]))
+    assert artifact.tutor_session_id == request.tutor_session_id
+    assert artifact.topic_id == request.topic_id
+    assert artifact.response.cited_excerpt_ids == [request.sources[0].excerpt_id]
+    assert artifact.sources[0].locator.page == 3
+    assert b"Factor quadratics" not in json_bytes(api.pushed)
+    assert api.completed == [(job_id, artifact_id(api.pushed[0]))]
+
+
+def test_tutor_turn_rejects_provider_citation_outside_approved_excerpts(tmp_path) -> None:
+    job_id = uuid4()
+    request = tutor_request(job_id)
+    api = FakeAPI([lease_for("TUTOR_TURN", json_bytes(request), job_id)])
+    worker = processor(api, tmp_path / "invalid-tutor-outbox", UnknownTutorCitationProvider())
+
+    assert worker.process_once()
+    assert api.pushed == []
+    assert api.failed == [(job_id, "PROVIDER_CITATION_INVALID", True)]
+
+
+def test_tutor_turn_rejects_expired_session_authorization(tmp_path) -> None:
+    job_id = uuid4()
+    request = tutor_request(job_id)
+    request.authorization.expires_at = datetime.now(UTC) - timedelta(seconds=1)
+    # Build the now-invalid payload without asking Pydantic to validate it again.
+    api = FakeAPI([lease_for("TUTOR_TURN", json_bytes(request), job_id)])
+    worker = processor(api, tmp_path / "expired-tutor-outbox", DeterministicDigestProvider())
+
+    assert worker.process_once()
+    assert api.pushed == []
+    assert api.failed == [(job_id, "TUTOR_AUTHORIZATION_INVALID", False)]
 
 
 def automated_learning_request(

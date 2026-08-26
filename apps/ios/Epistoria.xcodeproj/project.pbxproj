@@ -41,6 +41,7 @@
 		AC37C44E07929B7D23EE6A20 /* AIProviderProfileStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9168A7AD8732315016FE923D /* AIProviderProfileStore.swift */; };
 		B0BDDE9736A79A9B4EC8FEB0 /* LearningDetailViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F587C85FB9CDBD4AD20B0D1 /* LearningDetailViews.swift */; };
 		B1545FB1ED851A4A6F5AA038 /* AppRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 994FB1067AAB271804368E81 /* AppRootView.swift */; };
+		B1E650B2FF8F504AA6045930 /* AdaptiveTutorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8935DE5EF28714C1897ECF7F /* AdaptiveTutorView.swift */; };
 		B9DACEB1B0ED2EA6FAB4734C /* DeveloperNotebookResetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2ADF9EA8B4CC8ABB172FB42 /* DeveloperNotebookResetView.swift */; };
 		C020D783090ACF29E186284D /* KnowledgeSearchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 296046E5F66D2C6212FE9F27 /* KnowledgeSearchView.swift */; };
 		C5F82045B47F32CFF46D15CE /* LibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7931BB0B2776308E4D8C7656 /* LibraryView.swift */; };
@@ -103,6 +104,7 @@
 		77B3805565CF9C5E40505BCF /* NoteQueryArtifactsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteQueryArtifactsView.swift; sourceTree = "<group>"; };
 		7931BB0B2776308E4D8C7656 /* LibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryView.swift; sourceTree = "<group>"; };
 		84F79068F407B2C7BBC367E9 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		8935DE5EF28714C1897ECF7F /* AdaptiveTutorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdaptiveTutorView.swift; sourceTree = "<group>"; };
 		9168A7AD8732315016FE923D /* AIProviderProfileStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIProviderProfileStore.swift; sourceTree = "<group>"; };
 		98E92AF31F99B4E43AAC5CFF /* EpistoriaApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EpistoriaApp.swift; sourceTree = "<group>"; };
 		994FB1067AAB271804368E81 /* AppRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppRootView.swift; sourceTree = "<group>"; };
@@ -173,6 +175,7 @@
 		2087FC90D98C093C81A5E24F /* Study */ = {
 			isa = PBXGroup;
 			children = (
+				8935DE5EF28714C1897ECF7F /* AdaptiveTutorView.swift */,
 				9F587C85FB9CDBD4AD20B0D1 /* LearningDetailViews.swift */,
 				CB7D498397579BAB468C3052 /* LearningManagementView.swift */,
 				08B89468624166AB5B132D9F /* StudyView.swift */,
@@ -477,6 +480,7 @@
 				AC37C44E07929B7D23EE6A20 /* AIProviderProfileStore.swift in Sources */,
 				ED3175F1927D08497010BC4A /* AIProviderSettingsView.swift in Sources */,
 				A423FEC02233BDC185DF7430 /* AccountConfiguration.swift in Sources */,
+				B1E650B2FF8F504AA6045930 /* AdaptiveTutorView.swift in Sources */,
 				35EF6CB34C88412ED6ED3677 /* AppModel.swift in Sources */,
 				B1545FB1ED851A4A6F5AA038 /* AppRootView.swift in Sources */,
 				4295FF11D9057AB5501F087E /* CollectionDetailView.swift in Sources */,

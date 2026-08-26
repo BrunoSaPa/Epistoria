@@ -26,6 +26,8 @@ from ..models import (
     SourceGuideResponseV1,
     SourceQueryPromptV1,
     SourceQueryResponseV1,
+    TutorTurnRequestV1,
+    TutorTurnResponseV1,
 )
 from .base import DigestProvider, ProviderError
 from .native_provider import (
@@ -145,6 +147,11 @@ class ProviderManager:
         return self._required_provider(capability, request.provider_route).generate_source_query(
             request
         )
+
+    def generate_tutor_turn(
+        self, request: TutorTurnRequestV1
+    ) -> tuple[TutorTurnResponseV1, ProviderTraceV1]:
+        return self._required_provider("TEXT", request.provider_route).generate_tutor_turn(request)
 
     def transcribe_media(
         self,

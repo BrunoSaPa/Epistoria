@@ -39,6 +39,9 @@ public enum EntityType: String, Codable, CaseIterable, Sendable {
     case studyRecommendation = "STUDY_RECOMMENDATION"
     case recommendationResponse = "RECOMMENDATION_RESPONSE"
     case automationGrant = "AUTOMATION_GRANT"
+    case tutorSession = "TUTOR_SESSION"
+    case tutorTurn = "TUTOR_TURN"
+    case learningSignal = "LEARNING_SIGNAL"
 }
 
 public enum NoteBlockKind: String, Codable, CaseIterable, Sendable {

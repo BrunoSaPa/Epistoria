@@ -18,6 +18,8 @@ from ..models import (
     SourceGuideResponseV1,
     SourceQueryPromptV1,
     SourceQueryResponseV1,
+    TutorTurnRequestV1,
+    TutorTurnResponseV1,
 )
 
 
@@ -61,6 +63,12 @@ class DigestProvider(Protocol):
         self, request: SourceQueryPromptV1
     ) -> tuple[SourceQueryResponseV1, ProviderTraceV1]:
         """Answer from supplied source material and cite exact material IDs."""
+        ...
+
+    def generate_tutor_turn(
+        self, request: TutorTurnRequestV1
+    ) -> tuple[TutorTurnResponseV1, ProviderTraceV1]:
+        """Return one source-grounded adaptive Tutor turn without accepting learning signals."""
         ...
 
     def transcribe_media(

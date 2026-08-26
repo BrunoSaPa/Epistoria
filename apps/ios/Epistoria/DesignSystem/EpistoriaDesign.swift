@@ -97,16 +97,11 @@ struct EpistoriaBrandMark: View {
     var size: CGFloat = 42
 
     var body: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: size * 0.22, style: .continuous)
-                .fill(EpistoriaDesign.brandPaper)
-            Circle()
-                .fill(EpistoriaDesign.brandInk)
-                .frame(
-                    width: size * EpistoriaDesign.brandCircleScale,
-                    height: size * EpistoriaDesign.brandCircleScale
-                )
-        }
+        Image("EpistoriaMark")
+            .resizable()
+            .interpolation(.high)
+            .antialiased(true)
+            .aspectRatio(contentMode: .fit)
         .frame(width: size, height: size)
         .accessibilityHidden(true)
     }

@@ -34,6 +34,28 @@ final class EpistoriaExportServiceTests: XCTestCase {
             parentId: topicId,
             relationIds: [topicId]
         )
+        let tutorSessionId = try await fixture.store.createTutorSession(
+            topicId: topicId,
+            objective: "Factor quadratics"
+        )
+        _ = try await fixture.store.appendOfflineTutorTurn(
+            sessionId: tutorSessionId,
+            text: "I would identify the leading coefficient.",
+            confidence: 3
+        )
+        let learningSignalId = try await fixture.store.save(
+            payload: LearningSignalPayload(
+                tutorSessionId: tutorSessionId,
+                topicId: topicId,
+                objective: "Factor quadratics",
+                assessmentKind: .selfExplanation,
+                outcome: .partial,
+                rationale: "The explanation needs the factor pair."
+            ),
+            parentId: tutorSessionId,
+            relationIds: [tutorSessionId, topicId]
+        )
+        try await fixture.store.reviewLearningSignal(id: learningSignalId, state: .accepted)
         _ = try await fixture.store.appendTextBlock(
             noteId: noteId,
             text: "Evidence stays portable."
@@ -283,6 +305,8 @@ final class EpistoriaExportServiceTests: XCTestCase {
         XCTAssertTrue(knowledge.lowercased().contains(conceptLinkId.uuidString.lowercased()))
         XCTAssertTrue(knowledge.contains("Factoring can expose roots."))
         XCTAssertTrue(learning.contains("Review factoring"))
+        XCTAssertTrue(learning.contains("I would identify the leading coefficient."))
+        XCTAssertTrue(learning.contains("The explanation needs the factor pair."))
 
         let exportedBytes = try recursiveFileData(in: package)
         XCTAssertFalse(exportedBytes.contains { $0.range(of: fixture.accountKey) != nil })

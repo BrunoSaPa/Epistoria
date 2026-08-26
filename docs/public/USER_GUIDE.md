@@ -177,7 +177,38 @@ encrypted and remains available after relaunch. Acceptance cannot be repeated to
 
 ## Use Study
 
-Study contains Study Next, Week, Sessions, Flashcards, Tests, and History.
+Study contains Tutor, Study Next, Week, Sessions, Flashcards, Tests, and History.
+
+### Use the Adaptive Tutor
+
+1. Open **Study → Tutor → Start or resume Tutor**, or select **Tutor** from a Topic dashboard or
+   notebook tool rail.
+2. Select a Topic. When you start from a Topic or assigned note, it is selected automatically.
+3. Enter an objective or leave it empty to use the Topic name.
+4. Set a time target.
+5. Select the Source Versions the Tutor may use. A cited session cannot start without one. The
+   selected versions must contain reviewed Evidence or an analyzed Source guide so the Tutor can
+   cite exact material.
+6. Leave **Include connected knowledge** off unless the request should use related Topics.
+7. Review the maximum turns and spending limit. The approval expires after four hours.
+8. Select **Start Learning Guide**, then select **Begin** for the first diagnostic.
+9. Enter an answer and set confidence from 1 to 5. Select **Send**. The answer is saved locally
+   before provider processing completes.
+10. Use **Hint**, **Explain directly**, **Another example**, or **Why this next?** when needed.
+11. Select **Check response** after the trusted Mac completes the encrypted job. Each Source button
+    opens the exact frozen Source Version and locator used by the response.
+12. Review each proposed learning signal. Select **Accept** only when the assessment is accurate.
+    A proposed or rejected signal does not affect the mastery explanation.
+13. Pause, end, or abandon the session from its menu. The transcript remains available in
+    **Previous sessions** and in notebook export.
+
+The notebook Tutor appears over the right edge. It does not resize the page, block Pencil input on
+the visible canvas, or add a blocking background. Close it from the same edge. Reduce Motion uses
+a cross-fade instead of a slide.
+
+If no provider or private sync connection is available, Epistoria still saves your session and
+messages locally. Provider answers remain pending. Manual cards, tests, notes, and local Study Next
+continue to work.
 
 - Study Next runs on the iPad and explains why an item is recommended.
 - Select a Study Next row to open the recommended due card, paused session, unfinished attempt,

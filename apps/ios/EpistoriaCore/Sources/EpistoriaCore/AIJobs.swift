@@ -2091,4 +2091,479 @@ public actor AIJobCoordinator {
         }
         return nil
     }
+
+    // MARK: - Adaptive Tutor
+
+    public func createTutorSession(
+        topicId: UUID,
+        studySessionId: UUID? = nil,
+        goalId: UUID? = nil,
+        objective: String? = nil,
+        timeTargetMinutes: Int? = nil,
+        sourceVersionIds: [UUID] = [],
+        includeConnectedKnowledge: Bool = false,
+        guidanceStyle: TutorGuidanceStyle = .adaptive,
+        budget: TutorSessionBudget = TutorSessionBudget()
+    ) async throws -> UUID {
+        try await store.createTutorSession(
+            topicId: topicId,
+            studySessionId: studySessionId,
+            goalId: goalId,
+            objective: objective,
+            timeTargetMinutes: timeTargetMinutes,
+            sourceVersionIds: sourceVersionIds,
+            includeConnectedKnowledge: includeConnectedKnowledge,
+            guidanceStyle: guidanceStyle,
+            providerRoute: try reviewedProviderRoute(),
+            budget: budget
+        )
+    }
+
+    public func prepareTutorTurn(
+        sessionId: UUID,
+        action: TutorTurnAction,
+        learnerMessage: String? = nil,
+        learnerConfidence: Int? = nil,
+        preferredEvidenceIds: [UUID] = []
+    ) async throws -> PreparedTutorTurnRequest {
+        let identified = try await store.payload(TutorSessionPayload.self, id: sessionId)
+        let session = identified.payload
+        guard session.state == .active else { throw TutorContractError.sessionNotActive }
+        guard Date() < session.budget.expiresAt else { throw TutorContractError.approvalExpired }
+        guard session.approvedTurnCount < session.budget.maximumTurns else {
+            throw TutorContractError.turnLimitReached
+        }
+        guard session.estimatedSpentMinorUnits < session.budget.spendingLimitMinorUnits else {
+            throw TutorContractError.spendingLimitReached
+        }
+        let topic = try await store.topic(id: session.topicId)
+        let objective = session.objective?.trimmingCharacters(in: .whitespacesAndNewlines)
+            .nilIfEmpty ?? topic.payload.name
+        let cleanMessage = learnerMessage?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+        if action == .answer, cleanMessage == nil { throw TutorContractError.messageRequired }
+
+        let turns = try await store.tutorTurns(sessionId: sessionId)
+        let signals = try await store.learningSignals()
+        let projection = TutorAdaptationEngine.project(
+            objective: objective,
+            signals: signals.filter { $0.payload.topicId == session.topicId }
+        )
+        let sources = try await tutorSources(
+            for: session,
+            query: cleanMessage ?? objective,
+            preferredEvidenceIds: preferredEvidenceIds
+        )
+        guard !sources.isEmpty else { throw TutorContractError.noGroundingMaterial }
+
+        let recentTranscript = turns.suffix(12).map {
+            TutorTranscriptExcerpt(
+                turnId: $0.id,
+                sequence: $0.payload.sequence,
+                role: $0.payload.role,
+                kind: $0.payload.kind,
+                text: String($0.payload.text.prefix(4_000)),
+                confidence: $0.payload.confidence
+            )
+        }
+        let history = signals
+            .filter { $0.payload.topicId == session.topicId && $0.payload.reviewState == .accepted }
+            .prefix(50)
+            .map {
+                TutorLearningHistoryExcerpt(
+                    objective: $0.payload.objective,
+                    assessmentKind: $0.payload.assessmentKind,
+                    outcome: $0.payload.outcome,
+                    confidence: $0.payload.confidence,
+                    observedAt: $0.payload.createdAt
+                )
+            }
+        let sequence = (turns.map(\.payload.sequence).max() ?? -1) + 1
+        let jobId = UUID()
+        let request = TutorTurnRequest(
+            accountId: accountId,
+            jobId: jobId,
+            tutorSessionId: sessionId,
+            topicId: session.topicId,
+            sequence: sequence,
+            action: action,
+            objective: objective,
+            guidanceStyle: session.guidanceStyle,
+            learnerMessage: cleanMessage,
+            learnerConfidence: learnerConfidence.map { min(max($0, 1), 5) },
+            recommendedTurnKind: recommendedTutorKind(action: action, projection: projection),
+            recommendationReason: projection.explanation,
+            conversationSummary: turns.count > 12
+                ? "Earlier turns are retained in the encrypted session. Continue from the recent transcript and accepted learning history."
+                : nil,
+            recentTranscript: recentTranscript,
+            learningHistory: Array(history),
+            sources: sources,
+            authorization: TutorSessionAuthorization(
+                tutorSessionId: sessionId,
+                topicId: session.topicId,
+                sourceVersionIds: session.sourceVersionIds.isEmpty
+                    ? Array(Set(sources.map(\.sourceVersionId)))
+                    : session.sourceVersionIds,
+                includeConnectedKnowledge: session.includeConnectedKnowledge,
+                maximumTurns: session.budget.maximumTurns,
+                approvedTurnCount: session.approvedTurnCount,
+                spendingLimitMinorUnits: session.budget.spendingLimitMinorUnits,
+                estimatedSpentMinorUnits: session.estimatedSpentMinorUnits,
+                currencyCode: session.budget.currencyCode,
+                expiresAt: session.budget.expiresAt,
+                approvedAt: session.budget.approvedAt
+            ),
+            disclosureAcknowledged: false,
+            providerRoute: session.providerRoute
+        )
+        let characters = sources.reduce(0) { $0 + $1.excerpt.count }
+            + recentTranscript.reduce(0) { $0 + $1.text.count }
+            + (cleanMessage?.count ?? 0)
+        return PreparedTutorTurnRequest(
+            request: request,
+            sourceCount: sources.count,
+            approximateTokens: max(1, characters / 4),
+            projectedCostLimitMinorUnits: max(
+                0,
+                session.budget.spendingLimitMinorUnits - session.estimatedSpentMinorUnits
+            )
+        )
+    }
+
+    public func submitTutorTurn(
+        _ prepared: PreparedTutorTurnRequest,
+        now: Date = .now
+    ) async throws -> AIJobSummary {
+        var request = prepared.request
+        var session = try await store.payload(TutorSessionPayload.self, id: request.tutorSessionId)
+        guard session.payload.topicId == request.topicId else { throw TutorContractError.sessionUnavailable }
+        guard session.payload.canQueueTurn(at: now) else {
+            if session.payload.state != .active { throw TutorContractError.sessionNotActive }
+            if now >= session.payload.budget.expiresAt { throw TutorContractError.approvalExpired }
+            if session.payload.approvedTurnCount >= session.payload.budget.maximumTurns {
+                throw TutorContractError.turnLimitReached
+            }
+            throw TutorContractError.spendingLimitReached
+        }
+        request.disclosureAcknowledged = true
+        request.providerRoute = session.payload.providerRoute
+
+        let learnerTurnId = UUID()
+        let learnerText = request.learnerMessage ?? request.action.displayLabel
+        let learnerTurn = TutorTurnPayload(
+            tutorSessionId: request.tutorSessionId,
+            sequence: request.sequence,
+            role: .learner,
+            kind: request.recommendedTurnKind,
+            text: learnerText,
+            confidence: request.learnerConfidence,
+            jobId: request.jobId,
+            pending: true,
+            now: now
+        )
+        session.payload.approvedTurnCount += 1
+        session.payload.updatedAt = now
+        try await database.saveLocalBatch([
+            try tutorWrite(
+                id: learnerTurnId,
+                payload: learnerTurn,
+                parentId: request.tutorSessionId,
+                relationIds: [request.tutorSessionId, request.topicId, request.jobId]
+            ),
+            try tutorWrite(
+                id: session.id,
+                payload: session.payload,
+                parentId: session.payload.topicId,
+                relationIds: [session.payload.topicId, session.payload.studySessionId, session.payload.goalId]
+                    .compactMap { $0 } + session.payload.sourceVersionIds
+            ),
+        ])
+
+        let envelope = try crypto.encryptJob(
+            CanonicalJSON.encode(request),
+            accountKey: accountKey,
+            accountId: accountId,
+            jobType: "TUTOR_TURN",
+            jobId: request.jobId
+        )
+        return try await api.createAIJob(id: request.jobId, type: "TUTOR_TURN", envelope: envelope)
+    }
+
+    public func tutorJob(id: UUID) async throws -> AIJobSummary {
+        try await api.aiJob(id: id)
+    }
+
+    public func cancelTutorJob(id: UUID) async throws -> AIJobSummary {
+        try await api.cancelAIJob(id: id)
+    }
+
+    public func latestTutorTurnArtifact(
+        sessionId: UUID,
+        jobId: UUID? = nil
+    ) async throws -> IdentifiedPayload<TutorTurnArtifact>? {
+        let entities = try await database.entities(type: .aiArtifact, parentId: sessionId)
+        for entity in entities {
+            guard let artifact = try? CanonicalJSON.decode(TutorTurnArtifact.self, from: entity.content),
+                  artifact.tutorSessionId == sessionId,
+                  jobId == nil || artifact.jobId == jobId
+            else { continue }
+            return IdentifiedPayload(
+                id: entity.id,
+                payload: artifact,
+                revision: entity.revision,
+                syncState: entity.syncState
+            )
+        }
+        return nil
+    }
+
+    @discardableResult
+    public func importTutorTurnArtifact(
+        artifactId: UUID,
+        now: Date = .now
+    ) async throws -> UUID {
+        let artifact = try await store.payload(TutorTurnArtifact.self, id: artifactId)
+        var session = try await store.payload(TutorSessionPayload.self, id: artifact.payload.tutorSessionId)
+        guard artifact.payload.topicId == session.payload.topicId else {
+            throw TutorContractError.artifactMismatch
+        }
+        let allowed = Dictionary(uniqueKeysWithValues: artifact.payload.sources.map { ($0.excerptId, $0) })
+        guard artifact.payload.response.citedExcerptIds.allSatisfy({ allowed[$0] != nil }) else {
+            throw TutorContractError.citationOutsideScope
+        }
+        let existingTurns = try await store.tutorTurns(sessionId: session.id)
+        if let existing = existingTurns.first(where: { $0.payload.jobId == artifact.payload.jobId && $0.payload.role == .tutor }) {
+            return existing.id
+        }
+        let citations = try artifact.payload.response.citedExcerptIds.compactMap { excerptId -> TutorCitation? in
+            guard let source = allowed[excerptId] else { return nil }
+            try source.locator.validate()
+            return TutorCitation(
+                excerptId: excerptId,
+                sourceId: source.sourceId,
+                sourceVersionId: source.sourceVersionId,
+                locator: source.locator,
+                evidenceId: source.evidenceId,
+                excerpt: source.excerpt
+            )
+        }
+        let tutorTurnId = UUID()
+        let tutorTurn = TutorTurnPayload(
+            tutorSessionId: session.id,
+            sequence: artifact.payload.sequence + 1,
+            role: .tutor,
+            kind: artifact.payload.response.kind,
+            text: artifact.payload.response.message,
+            citations: citations,
+            providerTrace: artifact.payload.trace,
+            jobId: artifact.payload.jobId,
+            pending: false,
+            now: now
+        )
+        let topic = try await store.topic(id: session.payload.topicId)
+        let objective = session.payload.objective?.nilIfEmpty ?? topic.payload.name
+        guard artifact.payload.response.proposedSignals.allSatisfy({
+            $0.objective.localizedCaseInsensitiveCompare(objective) == .orderedSame
+        }) else { throw TutorContractError.signalOutsideScope }
+
+        var writes = [try tutorWrite(
+            id: tutorTurnId,
+            payload: tutorTurn,
+            parentId: session.id,
+            relationIds: [session.id, session.payload.topicId, artifact.id, artifact.payload.jobId]
+                + citations.flatMap { [$0.sourceId, $0.sourceVersionId, $0.evidenceId].compactMap { $0 } }
+        )]
+        for draft in artifact.payload.response.proposedSignals {
+            let cited = draft.citedExcerptIds.compactMap { allowed[$0] }
+            let signal = LearningSignalPayload(
+                tutorSessionId: session.id,
+                topicId: session.payload.topicId,
+                objective: draft.objective,
+                assessmentKind: draft.assessmentKind,
+                outcome: draft.outcome,
+                confidence: draft.confidence,
+                turnIds: [tutorTurnId],
+                evidenceIds: cited.compactMap(\.evidenceId),
+                rationale: draft.rationale,
+                provenance: .generatedAI,
+                reviewState: .proposed,
+                now: now
+            )
+            writes.append(try tutorWrite(
+                id: draft.id,
+                payload: signal,
+                parentId: session.id,
+                relationIds: [session.id, session.payload.topicId, tutorTurnId]
+                    + cited.compactMap(\.evidenceId)
+            ))
+        }
+        if let pending = existingTurns.first(where: {
+            $0.payload.jobId == artifact.payload.jobId && $0.payload.role == .learner
+        }) {
+            var resolved = pending.payload
+            resolved.pending = false
+            resolved.updatedAt = now
+            writes.append(try tutorWrite(
+                id: pending.id,
+                payload: resolved,
+                parentId: session.id,
+                relationIds: [session.id, session.payload.topicId, artifact.payload.jobId]
+            ))
+        }
+        if artifact.payload.response.sessionSummary != nil {
+            session.payload.state = .ended
+            session.payload.endedAt = now
+        }
+        let cost = Int(((artifact.payload.trace.estimatedCostUsd ?? 0) * 100).rounded(.up))
+        session.payload.estimatedSpentMinorUnits = min(
+            session.payload.budget.spendingLimitMinorUnits,
+            session.payload.estimatedSpentMinorUnits + max(cost, 0)
+        )
+        session.payload.updatedAt = now
+        writes.append(try tutorWrite(
+            id: session.id,
+            payload: session.payload,
+            parentId: session.payload.topicId,
+            relationIds: [session.payload.topicId, session.payload.studySessionId, session.payload.goalId]
+                .compactMap { $0 } + session.payload.sourceVersionIds
+        ))
+        try await database.saveLocalBatch(writes)
+        return tutorTurnId
+    }
+
+    private func tutorSources(
+        for session: TutorSessionPayload,
+        query: String,
+        preferredEvidenceIds: [UUID]
+    ) async throws -> [TutorSourceExcerpt] {
+        let scopedTopicIds = try await topicScopeIds(
+            topicId: session.topicId,
+            includeConnectedKnowledge: session.includeConnectedKnowledge
+        )
+        let allSources = try await store.list(SourcePayload.self)
+        let scopedSources = allSources.filter {
+            $0.payload.archivedAt == nil
+                && ($0.payload.primaryTopicId.map(scopedTopicIds.contains) == true
+                    || !$0.payload.relatedTopicIds.filter(scopedTopicIds.contains).isEmpty)
+        }
+        let sourceById = Dictionary(uniqueKeysWithValues: scopedSources.map { ($0.id, $0) })
+        let selectedVersions = Set(session.sourceVersionIds)
+        let allowedSourceIds = Set(scopedSources.compactMap { source -> UUID? in
+            guard selectedVersions.isEmpty
+                    || source.payload.currentVersionId.map(selectedVersions.contains) == true
+            else { return nil }
+            return source.id
+        })
+
+        var excerpts: [TutorSourceExcerpt] = []
+        var seen: Set<UUID> = []
+        let hits = (try? await database.search(
+            query,
+            entityTypes: [.evidence, .aiArtifact],
+            limit: 24
+        )) ?? []
+        let prioritizedIds = preferredEvidenceIds + hits.map(\.id)
+        let allEvidence = try await store.list(EvidencePayload.self)
+        let evidence = allEvidence.sorted { left, right in
+            let leftIndex = prioritizedIds.firstIndex(of: left.id) ?? Int.max
+            let rightIndex = prioritizedIds.firstIndex(of: right.id) ?? Int.max
+            return leftIndex == rightIndex
+                ? left.payload.updatedAt > right.payload.updatedAt
+                : leftIndex < rightIndex
+        }
+        for item in evidence {
+            guard allowedSourceIds.contains(item.payload.sourceId),
+                  selectedVersions.isEmpty || selectedVersions.contains(item.payload.sourceVersionId),
+                  !item.payload.excerpt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  seen.insert(item.id).inserted
+            else { continue }
+            try item.payload.locator.validate()
+            excerpts.append(TutorSourceExcerpt(
+                excerptId: item.id,
+                sourceId: item.payload.sourceId,
+                sourceVersionId: item.payload.sourceVersionId,
+                evidenceId: item.id,
+                title: sourceById[item.payload.sourceId]?.payload.title ?? "Source",
+                locator: item.payload.locator,
+                excerpt: String(item.payload.excerpt.prefix(4_000))
+            ))
+            if excerpts.count == 16 { break }
+        }
+
+        if excerpts.count < 16 {
+            for source in scopedSources where allowedSourceIds.contains(source.id) {
+                guard let versionId = source.payload.currentVersionId,
+                      selectedVersions.isEmpty || selectedVersions.contains(versionId)
+                else { continue }
+                let artifacts = try await database.entities(type: .aiArtifact, parentId: source.id)
+                guard let guide = artifacts.compactMap({ entity in
+                    try? CanonicalJSON.decode(SourceAnalysisArtifact.self, from: entity.content)
+                }).first(where: { $0.sourceVersionId == versionId }) else { continue }
+                for reference in guide.references where seen.insert(reference.sourceId).inserted {
+                    excerpts.append(TutorSourceExcerpt(
+                        excerptId: reference.sourceId,
+                        sourceId: source.id,
+                        sourceVersionId: versionId,
+                        title: source.payload.title,
+                        locator: reference.locator,
+                        excerpt: String(reference.excerpt.prefix(4_000))
+                    ))
+                    if excerpts.count == 16 { break }
+                }
+                if excerpts.count == 16 { break }
+            }
+        }
+        return excerpts
+    }
+
+    private func recommendedTutorKind(
+        action: TutorTurnAction,
+        projection: MasteryProjection
+    ) -> TutorTurnKind {
+        switch action {
+        case .begin: projection.nextTurnKind
+        case .answer: projection.nextTurnKind
+        case .hint: .hint
+        case .explainDirectly: .explanation
+        case .tryAnotherExample: projection.level == .needsWork ? .workedExample : .application
+        case .whyNext: .reflection
+        case .end: .reflection
+        }
+    }
+
+    private func tutorWrite<Payload: EntityPayload>(
+        id: UUID,
+        payload: Payload,
+        parentId: UUID?,
+        relationIds: [UUID]
+    ) throws -> LocalEntityWrite {
+        let content = try CanonicalJSON.encode(payload)
+        return LocalEntityWrite(
+            id: id,
+            entityType: Payload.entityType,
+            parentId: parentId,
+            relationIds: Array(Set(relationIds)),
+            content: content,
+            search: EntitySearchIndexer.document(for: Payload.entityType, content: content),
+            modifiedAt: payload.updatedAt
+        )
+    }
+}
+
+public extension TutorTurnAction {
+    var displayLabel: String {
+        switch self {
+        case .begin: "Start the learning guide"
+        case .answer: "Answer"
+        case .hint: "Give me a hint"
+        case .explainDirectly: "Explain directly"
+        case .tryAnotherExample: "Try another example"
+        case .whyNext: "Why this next?"
+        case .end: "End and review"
+        }
+    }
+}
+
+private extension String {
+    var nilIfEmpty: String? { isEmpty ? nil : self }
 }

@@ -258,6 +258,12 @@ struct ConflictResolutionView: View {
             value = (try? CanonicalJSON.decode(TestQuestionPayload.self, from: content).prompt) ?? "Test question"
         case .studyRecommendation:
             value = (try? CanonicalJSON.decode(StudyRecommendationPayload.self, from: content).title) ?? "Study recommendation"
+        case .tutorSession:
+            value = (try? CanonicalJSON.decode(TutorSessionPayload.self, from: content).objective) ?? "Tutor session"
+        case .tutorTurn:
+            value = (try? CanonicalJSON.decode(TutorTurnPayload.self, from: content).text) ?? "Tutor turn"
+        case .learningSignal:
+            value = (try? CanonicalJSON.decode(LearningSignalPayload.self, from: content).objective) ?? "Learning signal"
         case .sourceVersion, .sessionActivity, .flashcardDeck, .flashcard, .flashcardReview,
              .topicScopeSnapshot, .testBlueprint, .testAttempt, .testResponse,
              .recommendationResponse, .automationGrant:

@@ -589,6 +589,205 @@ LearningJobType = Literal[
     "WEEKLY_REVIEW",
 ]
 
+TutorGuidanceStyle = Literal["ADAPTIVE", "SOCRATIC", "DIRECT"]
+TutorTurnRole = Literal["LEARNER", "TUTOR", "SYSTEM"]
+TutorTurnKind = Literal[
+    "DIAGNOSTIC",
+    "HINT",
+    "EXPLANATION",
+    "WORKED_EXAMPLE",
+    "RETRIEVAL",
+    "APPLICATION",
+    "ERROR_ANALYSIS",
+    "REFLECTION",
+    "SOURCE_GAP",
+]
+TutorTurnAction = Literal[
+    "BEGIN",
+    "ANSWER",
+    "HINT",
+    "EXPLAIN_DIRECTLY",
+    "TRY_ANOTHER_EXAMPLE",
+    "WHY_NEXT",
+    "END",
+]
+LearningAssessmentKind = Literal[
+    "DIAGNOSTIC", "RETRIEVAL", "APPLICATION", "SELF_EXPLANATION", "CORRECTION"
+]
+LearningSignalOutcome = Literal["CORRECT", "PARTIAL", "INCORRECT", "SKIPPED"]
+
+
+class TutorSourceLocatorV1(ContractModel):
+    schema_version: Literal["source-locator/v1"] = "source-locator/v1"
+    kind: Literal[
+        "PDF", "EPUB", "WEB", "MEDIA", "DOCUMENT", "IMAGE", "PLAIN_TEXT", "SLIDE", "SHEET"
+    ]
+    page: int | None = Field(default=None, ge=1)
+    rectangles: list[SourceRectangleV1] = Field(default_factory=list, max_length=8)
+    chapter: str | None = Field(default=None, max_length=500)
+    cfi: str | None = Field(default=None, max_length=2_000)
+    heading: str | None = Field(default=None, max_length=500)
+    selector: str | None = Field(default=None, max_length=2_000)
+    start_offset: int | None = Field(default=None, ge=0)
+    end_offset: int | None = Field(default=None, ge=0)
+    start_seconds: float | None = Field(default=None, ge=0)
+    end_seconds: float | None = Field(default=None, ge=0)
+    slide: int | None = Field(default=None, ge=1)
+    sheet: str | None = Field(default=None, max_length=500)
+    cell_range: str | None = Field(default=None, max_length=500)
+
+
+class TutorSourceExcerptV1(ContractModel):
+    excerpt_id: UUID
+    source_id: UUID
+    source_version_id: UUID
+    evidence_id: UUID | None = None
+    title: ShortText
+    locator: TutorSourceLocatorV1
+    excerpt: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=4_000)
+    ]
+
+
+class TutorTranscriptExcerptV1(ContractModel):
+    turn_id: UUID
+    sequence: int = Field(ge=0)
+    role: TutorTurnRole
+    kind: TutorTurnKind
+    text: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=4_000)]
+    confidence: int | None = Field(default=None, ge=1, le=5)
+
+
+class TutorLearningHistoryExcerptV1(ContractModel):
+    objective: ShortText
+    assessment_kind: LearningAssessmentKind
+    outcome: LearningSignalOutcome
+    confidence: int | None = Field(default=None, ge=1, le=5)
+    observed_at: AwareDatetime
+
+
+class TutorSessionAuthorizationV1(ContractModel):
+    schema_version: Literal["tutor-session-authorization/v1"] = "tutor-session-authorization/v1"
+    tutor_session_id: UUID
+    topic_id: UUID
+    source_version_ids: list[UUID] = Field(min_length=1, max_length=200)
+    include_connected_knowledge: bool = False
+    maximum_turns: int = Field(ge=1, le=100)
+    approved_turn_count: int = Field(ge=0, le=100)
+    spending_limit_minor_units: int = Field(ge=0, le=100_000)
+    estimated_spent_minor_units: int = Field(ge=0, le=100_000)
+    currency_code: Literal["USD"]
+    expires_at: AwareDatetime
+    approved_at: AwareDatetime
+
+
+class TutorTurnRequestV1(ContractModel):
+    schema_version: Literal["tutor-turn-request/v1"] = "tutor-turn-request/v1"
+    account_id: UUID
+    job_id: UUID
+    tutor_session_id: UUID
+    topic_id: UUID
+    sequence: int = Field(ge=0)
+    action: TutorTurnAction
+    objective: ShortText
+    guidance_style: TutorGuidanceStyle
+    learner_message: Annotated[
+        str | None, StringConstraints(strip_whitespace=True, max_length=8_000)
+    ] = None
+    learner_confidence: int | None = Field(default=None, ge=1, le=5)
+    recommended_turn_kind: TutorTurnKind
+    recommendation_reason: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2_000)
+    ]
+    conversation_summary: Annotated[
+        str | None, StringConstraints(strip_whitespace=True, max_length=4_000)
+    ] = None
+    recent_transcript: list[TutorTranscriptExcerptV1] = Field(default_factory=list, max_length=12)
+    learning_history: list[TutorLearningHistoryExcerptV1] = Field(
+        default_factory=list, max_length=50
+    )
+    sources: list[TutorSourceExcerptV1] = Field(min_length=1, max_length=16)
+    authorization: TutorSessionAuthorizationV1
+    disclosure_acknowledged: Literal[True]
+    provider_route: ProviderRouteSnapshotV1 | None = None
+
+    @model_validator(mode="after")
+    def validate_tutor_scope(self) -> TutorTurnRequestV1:
+        if self.authorization.tutor_session_id != self.tutor_session_id:
+            raise ValueError("authorization Tutor session mismatch")
+        if self.authorization.topic_id != self.topic_id:
+            raise ValueError("authorization Topic mismatch")
+        if self.authorization.expires_at <= self.authorization.approved_at:
+            raise ValueError("authorization expiration must follow approval")
+        if self.authorization.approved_turn_count >= self.authorization.maximum_turns:
+            raise ValueError("Tutor turn limit reached")
+        if (
+            self.authorization.estimated_spent_minor_units
+            >= self.authorization.spending_limit_minor_units
+        ):
+            raise ValueError("Tutor spending limit reached")
+        allowed_versions = set(self.authorization.source_version_ids)
+        if any(source.source_version_id not in allowed_versions for source in self.sources):
+            raise ValueError("Tutor Source Version outside authorization")
+        excerpt_ids = [source.excerpt_id for source in self.sources]
+        if len(excerpt_ids) != len(set(excerpt_ids)):
+            raise ValueError("Tutor excerpt IDs must be unique")
+        if self.action == "ANSWER" and not self.learner_message:
+            raise ValueError("Tutor answer requires learnerMessage")
+        return self
+
+
+class TutorSignalDraftV1(ContractModel):
+    id: UUID
+    objective: ShortText
+    assessment_kind: LearningAssessmentKind
+    outcome: LearningSignalOutcome
+    confidence: int | None = Field(default=None, ge=1, le=5)
+    rationale: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2_000)
+    ]
+    cited_excerpt_ids: list[UUID] = Field(default_factory=list, max_length=16)
+
+
+class TutorTurnResponseV1(ContractModel):
+    schema_version: Literal["tutor-turn-response/v1"] = "tutor-turn-response/v1"
+    message: BodyText
+    kind: TutorTurnKind
+    cited_excerpt_ids: list[UUID] = Field(default_factory=list, max_length=16)
+    proposed_signals: list[TutorSignalDraftV1] = Field(default_factory=list, max_length=8)
+    follow_up_actions: list[TutorTurnAction] = Field(default_factory=list, max_length=6)
+    unresolved_questions: list[ShortText] = Field(default_factory=list, max_length=10)
+    suggested_topics: list[ShortText] = Field(default_factory=list, max_length=10)
+    session_summary: Annotated[
+        str | None, StringConstraints(strip_whitespace=True, max_length=8_000)
+    ] = None
+    source_gap: bool = False
+
+    @model_validator(mode="after")
+    def validate_grounding(self) -> TutorTurnResponseV1:
+        if self.source_gap:
+            if self.kind != "SOURCE_GAP":
+                raise ValueError("source gap must use SOURCE_GAP kind")
+        elif not self.cited_excerpt_ids:
+            raise ValueError("grounded Tutor response requires citations")
+        return self
+
+
+class TutorTurnArtifactV1(ContractModel):
+    schema_version: Literal["ai-artifact/tutor-turn/v1"] = "ai-artifact/tutor-turn/v1"
+    job_id: UUID
+    tutor_session_id: UUID
+    topic_id: UUID
+    sequence: int = Field(ge=0)
+    generated_at: AwareDatetime
+    sources: list[TutorSourceExcerptV1] = Field(min_length=1, max_length=16)
+    source_excerpt_ids: list[UUID] = Field(min_length=1, max_length=16)
+    source_ids: list[UUID] = Field(min_length=1, max_length=16)
+    source_version_ids: list[UUID] = Field(min_length=1, max_length=16)
+    trace: ProviderTraceV1
+    response: TutorTurnResponseV1
+
+
 TestMode = Literal["COMPREHENSIVE", "QUICK_CHECK", "CUSTOM"]
 TestCoverageDimension = Literal[
     "PREREQUISITE",
@@ -809,6 +1008,7 @@ class AIJobLease(ContractModel):
         "SESSION_REVIEW",
         "WEEKLY_REVIEW",
         "PROVIDER_CONFIGURATION",
+        "TUTOR_TURN",
     ]
     crypto_version: int = Field(ge=1, le=255)
     content_version: int = Field(ge=1, le=65_535)

@@ -56,6 +56,7 @@ enum StudyRecommendationDestination: Hashable, Identifiable {
 
 struct StudyView: View {
     private enum StudySection: String, CaseIterable, Identifiable {
+        case guide = "Tutor"
         case next = "Study Next"
         case week = "Week"
         case sessions = "Sessions"
@@ -94,6 +95,7 @@ struct StudyView: View {
 
                 List {
                     switch section {
+                    case .guide: tutorContent
                     case .next: studyNextContent
                     case .week: weeklyReviewContent
                     case .sessions: sessionsContent
@@ -124,6 +126,32 @@ struct StudyView: View {
                 Button("Try again") { Task { await load() } }
                 Button("Dismiss", role: .cancel) { errorMessage = nil }
             } message: { Text(errorMessage ?? "") }
+        }
+    }
+
+    @ViewBuilder private var tutorContent: some View {
+        Section {
+            VStack(alignment: .leading, spacing: 12) {
+                Label("Adaptive Learning Guide", systemImage: "graduationcap")
+                    .font(.title2.weight(.semibold))
+                Text("Work through cited explanations, examples, retrieval questions, and transfer problems. Tutor sessions and your answers are saved locally.")
+                    .foregroundStyle(.secondary)
+                NavigationLink {
+                    AdaptiveTutorView(model: model)
+                } label: {
+                    Label("Start or resume Tutor", systemImage: "arrow.right.circle.fill")
+                        .font(.headline)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(EpistoriaDesign.ink)
+            }
+            .padding(.vertical, 8)
+        }
+
+        Section("How it works") {
+            StudyRow(title: "Grounded", detail: "Answers cite the exact frozen Source Version used.", symbol: "link")
+            StudyRow(title: "Adaptive", detail: "Accepted results change the next activity. Draft assessments do not.", symbol: "arrow.triangle.branch")
+            StudyRow(title: "Bounded", detail: "Each session has a reviewed Topic scope, provider route, turn limit, expiration, and spending limit.", symbol: "hand.raised")
         }
     }
 

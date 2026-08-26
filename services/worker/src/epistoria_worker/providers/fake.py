@@ -25,6 +25,9 @@ from ..models import (
     SourceQueryResponseV1,
     SuggestedSourceQuestionV1,
     TranscriptSegmentV1,
+    TutorSignalDraftV1,
+    TutorTurnRequestV1,
+    TutorTurnResponseV1,
 )
 
 
@@ -186,6 +189,46 @@ class DeterministicDigestProvider:
             provider="deterministic-test",
             model="fixture-v1",
             prompt_version="learning-generation/v1",
+            input_tokens=None,
+            output_tokens=None,
+            estimated_cost_usd=0,
+        )
+
+    def generate_tutor_turn(
+        self, request: TutorTurnRequestV1
+    ) -> tuple[TutorTurnResponseV1, ProviderTraceV1]:
+        source = request.sources[0]
+        signals = []
+        if request.action == "ANSWER":
+            signals = [TutorSignalDraftV1(
+                id=uuid5(request.job_id, "signal:0"),
+                objective=request.objective,
+                assessment_kind="RETRIEVAL",
+                outcome="PARTIAL",
+                confidence=request.learner_confidence,
+                rationale="The learner attempted the requested retrieval step.",
+                cited_excerpt_ids=[source.excerpt_id],
+            )]
+        ending = request.action == "END"
+        response = TutorTurnResponseV1(
+            message=(
+                f"Review this cited idea, then explain it in your own words: {source.excerpt[:500]}"
+                if not ending
+                else "This session reviewed the objective using the selected source."
+            ),
+            kind="REFLECTION" if ending else request.recommended_turn_kind,
+            cited_excerpt_ids=[source.excerpt_id],
+            proposed_signals=signals,
+            follow_up_actions=[] if ending else ["HINT", "EXPLAIN_DIRECTLY", "WHY_NEXT"],
+            unresolved_questions=[],
+            suggested_topics=[],
+            session_summary=("The learner reviewed the selected objective." if ending else None),
+            source_gap=False,
+        )
+        return response, ProviderTraceV1(
+            provider="deterministic-test",
+            model="fixture-v1",
+            prompt_version="adaptive-tutor/v1",
             input_tokens=None,
             output_tokens=None,
             estimated_cost_usd=0,
