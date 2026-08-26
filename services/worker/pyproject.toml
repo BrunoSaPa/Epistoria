@@ -31,7 +31,7 @@ ocr-formula = [
   "paddlepaddle==3.3.0; platform_system == 'Darwin' and platform_machine == 'arm64'",
 ]
 dev = [
-  "mypy>=1.17,<2",
+  "mypy>=1.17,<3",
   "pip-audit>=2.9,<3",
   "pytest>=8.4,<10",
   "pytest-cov>=6.2,<8",
