@@ -148,6 +148,29 @@ class PDFExtractionRequestV1(ContractModel):
     title: ShortText
 
 
+class PDFExtractionRequestV2(ContractModel):
+    schema_version: Literal["pdf-extraction-request/v2"] = "pdf-extraction-request/v2"
+    account_id: UUID
+    job_id: UUID
+    resource_id: UUID
+    asset_id: UUID
+    asset_key: str = Field(min_length=43, max_length=43, pattern=r"^[A-Za-z0-9_-]+$")
+    expected_dedupe_tag: str = Field(min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$")
+    title: ShortText
+    source_version_id: UUID
+    automatic_ocr: bool
+    automatic_formula_ocr: bool = False
+    preferred_ocr_languages: list[
+        Annotated[str, StringConstraints(strip_whitespace=True, min_length=2, max_length=32)]
+    ] = Field(default_factory=list, max_length=12)
+
+    @model_validator(mode="after")
+    def validate_languages(self) -> PDFExtractionRequestV2:
+        if len(self.preferred_ocr_languages) != len(set(self.preferred_ocr_languages)):
+            raise ValueError("preferred OCR languages must be unique")
+        return self
+
+
 class PDFPageV1(ContractModel):
     page_number: int = Field(ge=1)
     text: str = Field(max_length=1_500_000)
@@ -1106,6 +1129,119 @@ class ProviderConfigurationArtifactV1(ContractModel):
     configured_at: AwareDatetime
 
 
+LocalOCRMode = Literal["TEXT", "FORMULA", "MIXED"]
+LocalOCRTargetKind = Literal["NOTEBOOK_REGION", "IMAGE", "SOURCE_PAGE"]
+LocalOCRContentKind = Literal["TEXT", "FORMULA"]
+LocalOCREngineKind = Literal["APPLE_VISION", "PP_FORMULANET_PLUS_S", "DETERMINISTIC"]
+
+
+class LocalOCRRequestV1(ContractModel):
+    schema_version: Literal["local-ocr-request/v1"] = "local-ocr-request/v1"
+    account_id: UUID
+    job_id: UUID
+    target_kind: LocalOCRTargetKind
+    target_id: UUID
+    parent_id: UUID
+    note_id: UUID | None = None
+    source_version_id: UUID | None = None
+    input_revision: int = Field(ge=0)
+    page_number: int | None = Field(default=None, ge=1)
+    locator: dict[str, object] | None = None
+    image_content: Annotated[
+        str,
+        StringConstraints(strip_whitespace=True, min_length=4, max_length=1_100_000),
+    ]
+    preferred_languages: list[Annotated[str, StringConstraints(max_length=32)]] = Field(
+        default_factory=list, max_length=12
+    )
+    mode: LocalOCRMode
+    disclosure_acknowledged: Literal[True]
+
+    @model_validator(mode="after")
+    def validate_target(self) -> LocalOCRRequestV1:
+        if self.target_kind == "NOTEBOOK_REGION" and self.note_id is None:
+            raise ValueError("notebook OCR requires noteId")
+        if self.target_kind == "SOURCE_PAGE":
+            if self.source_version_id is None or self.page_number is None:
+                raise ValueError("Source OCR requires sourceVersionId and pageNumber")
+        if len(self.preferred_languages) != len(set(self.preferred_languages)):
+            raise ValueError("preferred OCR languages must be unique")
+        return self
+
+
+class LocalOCRRegionV1(ContractModel):
+    id: UUID
+    kind: LocalOCRContentKind
+    text: Annotated[str, StringConstraints(max_length=20_000)]
+    latex: Annotated[str | None, StringConstraints(max_length=20_000)] = None
+    normalized_expression: Annotated[str | None, StringConstraints(max_length=8_000)] = None
+    confidence: float | None = Field(default=None, ge=0, le=1)
+    alternatives: list[Annotated[str, StringConstraints(max_length=8_000)]] = Field(
+        default_factory=list, max_length=5
+    )
+    rectangles: list[SourceRectangleV1] = Field(default_factory=list, max_length=64)
+
+
+class LocalOCRResponseV1(ContractModel):
+    schema_version: Literal["local-ocr-response/v1"] = "local-ocr-response/v1"
+    engine: LocalOCREngineKind
+    engine_version: Annotated[str, StringConstraints(min_length=1, max_length=128)]
+    model_version: Annotated[str | None, StringConstraints(max_length=128)] = None
+    recognition_version: int | None = Field(default=None, ge=0)
+    regions: list[LocalOCRRegionV1] = Field(max_length=256)
+    warnings: list[Annotated[str, StringConstraints(max_length=500)]] = Field(
+        default_factory=list, max_length=20
+    )
+
+
+class OCRArtifactV1(ContractModel):
+    schema_version: Literal["ocr-artifact/v1"] = "ocr-artifact/v1"
+    job_id: UUID
+    target_kind: LocalOCRTargetKind
+    target_id: UUID
+    parent_id: UUID
+    note_id: UUID | None = None
+    source_version_id: UUID | None = None
+    input_revision: int = Field(ge=0)
+    page_number: int | None = Field(default=None, ge=1)
+    locator: dict[str, object] | None = None
+    input_preview: Annotated[str | None, StringConstraints(max_length=900_000)] = None
+    generated_at: AwareDatetime
+    state: Literal["CURRENT", "STALE"] = "CURRENT"
+    response: LocalOCRResponseV1
+    review_state: Literal["ACCEPTED", "EDITED", "REJECTED"] | None = None
+    reviewed_at: AwareDatetime | None = None
+
+
+LocalModelControlOperation = Literal["STATUS", "INSTALL", "REMOVE"]
+
+
+class LocalModelControlRequestV1(ContractModel):
+    schema_version: Literal["local-model-control-request/v1"] = (
+        "local-model-control-request/v1"
+    )
+    account_id: UUID
+    job_id: UUID
+    operation: LocalModelControlOperation
+    model_id: Literal["PP-FormulaNet_plus-S"]
+    disclosure_acknowledged: Literal[True]
+
+
+class LocalModelStatusArtifactV1(ContractModel):
+    schema_version: Literal["ai-artifact/local-model-status/v1"] = (
+        "ai-artifact/local-model-status/v1"
+    )
+    job_id: UUID
+    model_id: Literal["PP-FormulaNet_plus-S"]
+    model_version: Annotated[str, StringConstraints(min_length=1, max_length=128)]
+    operation: LocalModelControlOperation
+    state: Literal["NOT_INSTALLED", "INSTALLED", "INVALID"]
+    expected_bytes: int = Field(ge=0)
+    verified_bytes: int = Field(ge=0)
+    license: Literal["Apache-2.0"]
+    checked_at: AwareDatetime
+
+
 class AIJobLease(ContractModel):
     id: UUID
     job_type: Literal[
@@ -1128,6 +1264,8 @@ class AIJobLease(ContractModel):
         "WEEKLY_REVIEW",
         "PROVIDER_CONFIGURATION",
         "TUTOR_TURN",
+        "LOCAL_OCR",
+        "LOCAL_MODEL_CONTROL",
     ]
     crypto_version: int = Field(ge=1, le=255)
     content_version: int = Field(ge=1, le=65_535)

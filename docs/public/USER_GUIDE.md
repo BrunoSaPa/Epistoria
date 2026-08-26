@@ -93,25 +93,45 @@ location.
 
 Fixed-paper notes keep their A4 or US Letter page size and orientation. Each notebook sheet
 becomes one PDF page. An infinite note becomes one custom-size PDF page that contains the used
-area. The PDF includes paper appearance, typed text, math symbols, vector shapes, images, and
-Pencil ink. It is for reading, printing, or sharing. It is not an Epistoria backup and cannot be
-imported into the app.
+area. The PDF includes paper appearance, typed text, math symbols, vector shapes, images, Pencil
+ink, and a searchable text layer for accepted handwriting recognition. It is for reading,
+printing, or sharing. It is not an Epistoria backup and cannot be imported into the app.
+
+## Use local recognition
+
+1. Open **Settings → Local Processing**.
+2. Keep automatic notebook or Source recognition on as needed.
+3. Add optional language tags such as `en-US` and `es-MX`, or leave the field empty to use device
+   language detection.
+4. To recognize formulas, enable **Local Math OCR** and approve the verified model download to the
+   trusted Mac. You can pause and resume the download.
+5. Write normally. Notebook recognition starts after drawing has been idle for three seconds. It
+   also checks saved ink when a page closes or the app backgrounds.
+6. Open the note or Source recognition status, then compare the original crop and result.
+7. Edit, accept, reject, copy, or create an equation from the result.
+
+Unreviewed recognition appears only in local search and is labeled by its source. Selecting a
+match opens the saved page and region. Recognition does not replace Pencil strokes, images, or
+Source files. A result without engine confidence is labeled **Unverified**.
 
 ## Work with handwritten mathematics
 
 1. Open a note and select **Math** in the left tool rail.
 2. Draw around the handwritten equation, calculation, graph, or attempted solution.
 3. Select **Analyze**.
-4. Choose **Recognize equation**, **Worked steps**, **Graph**, or **Diagnose error**.
-5. Add an optional instruction when the intended task or notation is unclear.
-6. Select **Preview what leaves your Mac**. Check the number of selected items, nearby text items,
+4. Choose **Recognize equation**. This uses Local Math OCR on the trusted Mac and does not call an
+   AI provider.
+5. Open the OCR review and confirm or correct the expression.
+6. Select the Math region again and choose **Worked steps**, **Graph**, or **Diagnose error**.
+7. Add an optional instruction when the intended task or notation is unclear.
+8. Select **Preview what leaves your Mac**. Check the number of selected items, nearby text items,
    visual crops, and approximate tokens.
-7. Select **Approve and queue**. Continue writing while the trusted Mac processes the request.
-8. Open the notebook actions menu and select **Math results**.
-9. Check the recognized expression, confidence, uncertainties, every worked step, and every
+9. Select **Approve and queue**. Continue writing while the trusted Mac processes the request.
+10. Open the notebook actions menu and select **Math results**.
+11. Check the recognized expression, confidence, uncertainties, every worked step, and every
    correction. For a graph, confirm the function and domain.
-10. Accept, edit, or reject the result. Only accepted or edited results can be inserted.
-11. Select **Insert expression** or **Insert worked explanation** to create a new note object.
+12. Accept, edit, or reject the result. Only accepted or edited results can be inserted.
+13. Select **Insert expression** or **Insert worked explanation** to create a new note object.
 
 The selected Pencil strokes remain unchanged. Epistoria plots supported graph expressions on the
 iPad and does not execute provider-supplied code. Recognition is not a proof of correctness.

@@ -176,6 +176,23 @@ public struct PreparedMathAssistanceRequest: Equatable, Sendable {
     public var contextCount: Int
     public var imageCount: Int
     public var approximateTokens: Int
+    public var selectionLocatorsByBlockId: [UUID: SourceLocator]
+
+    public init(
+        request: MathAssistanceRequest,
+        selectionCount: Int,
+        contextCount: Int,
+        imageCount: Int,
+        approximateTokens: Int,
+        selectionLocatorsByBlockId: [UUID: SourceLocator] = [:]
+    ) {
+        self.request = request
+        self.selectionCount = selectionCount
+        self.contextCount = contextCount
+        self.imageCount = imageCount
+        self.approximateTokens = approximateTokens
+        self.selectionLocatorsByBlockId = selectionLocatorsByBlockId
+    }
 }
 
 public enum MathExpressionError: Error, Equatable, LocalizedError {

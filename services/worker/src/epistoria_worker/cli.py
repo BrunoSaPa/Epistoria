@@ -7,12 +7,15 @@ import os
 import signal
 import sys
 import threading
+from pathlib import Path
 from uuid import UUID
 
 from .api import APIError, EpistoriaAPI
 from .config import ConfigurationError, WorkerSettings
 from .cost_ledger import CostLedger, CostLedgerError
 from .keychain import MacOSKeychain, MacOSProviderProfileStore, SecretStoreError
+from .local_models import PP_FORMULANET_PLUS_S, LocalModelManager
+from .local_ocr import AppleVisionTextOCREngine, CompositeLocalOCREngine, PaddleFormulaOCREngine
 from .outbox import EncryptedOutbox
 from .processor import WorkerProcessor
 from .providers import DeterministicDigestProvider, OpenAIDigestProvider, ProviderManager
@@ -119,6 +122,12 @@ def _runtime(command: str) -> int:
         store=MacOSProviderProfileStore(settings.provider_keychain_service),
         fallback=provider,
     )
+    model_manager = LocalModelManager(
+        Path.home() / "Library" / "Application Support" / "Epistoria" / "Models"
+    )
+    local_ocr_engine = CompositeLocalOCREngine(
+        AppleVisionTextOCREngine(), PaddleFormulaOCREngine(model_manager)
+    )
     with EpistoriaAPI(
         base_url=settings.api_url,
         device_token=settings.device_token,
@@ -131,6 +140,12 @@ def _runtime(command: str) -> int:
             print("Account key: available in macOS Keychain")
             print(f"AI provider: {'ready' if provider_manager.is_ready else 'disabled'}")
             print(f"Encrypted retry outbox: {settings.outbox_directory}")
+            model_status = model_manager.status(PP_FORMULANET_PLUS_S)
+            print(
+                "Local Math OCR: "
+                f"{model_status.state.lower().replace('_', ' ')} "
+                f"({model_status.verified_bytes}/{model_status.expected_bytes} verified bytes)"
+            )
             print(
                 f"Estimated OpenAI spend ({cost.month}): ${cost.estimated_usd:.4f} / "
                 f"${cost.soft_budget_usd:.2f} soft budget"
@@ -145,6 +160,8 @@ def _runtime(command: str) -> int:
             provider_configuration_manager=provider_manager,
             maximum_asset_bytes=settings.maximum_asset_bytes,
             cost_ledger=ledger,
+            local_ocr_engine=local_ocr_engine,
+            local_model_manager=model_manager,
         )
         if command == "once":
             return 0 if processor.process_once() else 3

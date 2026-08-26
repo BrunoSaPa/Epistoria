@@ -13,13 +13,23 @@ dependencies = [
   "httpx>=0.28,<1",
   "mnemonic>=0.21,<1",
   "openai>=2,<3",
+  "Pillow>=11.3,<13",
   "pdfplumber>=0.11.10,<0.12",
   "pydantic>=2.11,<3",
   "PyNaCl>=1.5,<2",
   "pypdf>=6,<7",
+  "pypdfium2>=5.13,<6",
 ]
 
 [project.optional-dependencies]
+ocr-macos = [
+  "pyobjc-framework-Vision>=11.1,<13",
+]
+ocr-formula = [
+  "numpy>=2.2,<3",
+  "paddleocr>=3.4,<4",
+  "paddlepaddle==3.3.0; platform_system == 'Darwin' and platform_machine == 'arm64'",
+]
 dev = [
   "mypy>=1.17,<2",
   "pip-audit>=2.9,<3",
@@ -53,9 +63,13 @@ strict = true
 packages = ["epistoria_worker"]
 
 [[tool.mypy.overrides]]
-module = ["reportlab.*"]
+module = ["PIL.*", "reportlab.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = ["pdfplumber.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["pypdfium2.*"]
 ignore_missing_imports = true

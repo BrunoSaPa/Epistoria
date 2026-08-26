@@ -80,6 +80,7 @@ final class AppModel {
     private(set) var isCreatingNotePDF = false
     var configuration: AccountConfiguration?
     let pendingSaves = PendingSaveRegistry()
+    let localProcessingSettings: LocalProcessingSettings
 
     private(set) var database: SQLCipherDatabase?
     private(set) var store: EpistoriaStore?
@@ -121,6 +122,7 @@ final class AppModel {
         tokenStore: DeviceTokenStore = DeviceTokenStore(),
         aiProviderProfileStore: AIProviderProfileStore = AIProviderProfileStore(),
         aiProviderSecretStore: AIProviderSecretStore = AIProviderSecretStore(),
+        localProcessingSettings: LocalProcessingSettings = LocalProcessingSettings(),
         crypto: EntityCrypto = EntityCrypto(),
         applicationSupportURL: URL? = nil
     ) {
@@ -129,6 +131,7 @@ final class AppModel {
         self.tokenStore = tokenStore
         self.aiProviderProfileStore = aiProviderProfileStore
         self.aiProviderSecretStore = aiProviderSecretStore
+        self.localProcessingSettings = localProcessingSettings
         self.crypto = crypto
         applicationSupportOverride = applicationSupportURL
     }

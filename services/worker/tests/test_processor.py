@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import io
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -22,6 +23,7 @@ from epistoria_worker.crypto import (
     job_aad,
 )
 from epistoria_worker.keychain import MemoryProviderProfileStore
+from epistoria_worker.local_ocr import DeterministicLocalOCREngine
 from epistoria_worker.models import (
     AIJobLease,
     AutomationAuthorizationV1,
@@ -31,13 +33,16 @@ from epistoria_worker.models import (
     KnownConceptReferenceV1,
     LearningGenerationArtifactV1,
     LearningGenerationRequestV1,
+    LocalOCRRequestV1,
     MathAssistanceArtifactV1,
     MathAssistanceRequestV1,
     MediaTranscriptionChunkV1,
     MediaTranscriptionManifestV1,
     MediaTranscriptionRequestV1,
+    OCRArtifactV1,
     PDFExtractionManifestV1,
     PDFExtractionRequestV1,
+    PDFExtractionRequestV2,
     ProviderConfigurationArtifactV1,
     ProviderConfigurationRequestV1,
     SessionDigestArtifactV1,
@@ -78,6 +83,8 @@ def lease_for(
         "PROVIDER_CONFIGURATION",
         "TUTOR_TURN",
         "MATH_ASSISTANCE",
+        "LOCAL_OCR",
+        "LOCAL_MODEL_CONTROL",
     ],
     payload: bytes,
     job_id: UUID | None = None,
@@ -236,6 +243,48 @@ def processor(api: FakeAPI, outbox_path: Path, provider=None) -> WorkerProcessor
         digest_provider=provider,
         maximum_asset_bytes=10_000_000,
     )
+
+
+def test_local_ocr_produces_an_encrypted_unreviewed_artifact(tmp_path: Path) -> None:
+    job_id = uuid4()
+    note_id = uuid4()
+    block_id = uuid4()
+    png = base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+    )
+    request = LocalOCRRequestV1(
+        account_id=ACCOUNT_ID,
+        job_id=job_id,
+        target_kind="NOTEBOOK_REGION",
+        target_id=block_id,
+        parent_id=note_id,
+        note_id=note_id,
+        input_revision=7,
+        image_content=base64.b64encode(png).decode("ascii"),
+        preferred_languages=["en-US", "es-MX"],
+        mode="MIXED",
+        disclosure_acknowledged=True,
+    )
+    api = FakeAPI([lease_for("LOCAL_OCR", json_bytes(request), job_id)])
+    worker = WorkerProcessor(
+        account_id=ACCOUNT_ID,
+        account_key=ACCOUNT_KEY,
+        api=api,  # type: ignore[arg-type]
+        outbox=EncryptedOutbox(tmp_path / "local-ocr-outbox"),
+        digest_provider=None,
+        maximum_asset_bytes=10_000_000,
+        local_ocr_engine=DeterministicLocalOCREngine(),
+    )
+
+    assert worker.process_once() is True
+    assert not api.failed
+    assert len(api.pushed) == 1
+    artifact = OCRArtifactV1.model_validate_json(decrypt_artifact(api.pushed[0]))
+    assert artifact.target_id == block_id
+    assert artifact.input_revision == 7
+    assert artifact.review_state is None
+    assert artifact.response.regions[0].confidence is None
+    assert artifact.response.regions[0].latex == "x^2 - 4 = 0"
 
 
 def tutor_request(job_id: UUID, *, expires_at: datetime | None = None) -> TutorTurnRequestV1:
@@ -820,6 +869,14 @@ def make_pdf() -> bytes:
     return output.getvalue()
 
 
+def make_scanned_pdf() -> bytes:
+    output = io.BytesIO()
+    canvas = Canvas(output)
+    canvas.showPage()
+    canvas.save()
+    return output.getvalue()
+
+
 def test_pdf_job_decrypts_in_memory_and_syncs_manifest(tmp_path) -> None:
     job_id = uuid4()
     asset_key = bytes(reversed(range(32)))
@@ -849,6 +906,50 @@ def test_pdf_job_decrypts_in_memory_and_syncs_manifest(tmp_path) -> None:
     assert manifest.character_count > 0
     assert manifest.chunk_entity_ids == [artifact_id(api.pushed[0])]
     assert api.completed == [(job_id, artifact_id(api.pushed[-1]))]
+
+
+def test_pdf_v2_runs_local_ocr_only_for_pages_without_text(tmp_path: Path) -> None:
+    job_id = uuid4()
+    resource_id = uuid4()
+    source_version_id = uuid4()
+    asset_key = bytes(reversed(range(32)))
+    pdf = make_scanned_pdf()
+    request = PDFExtractionRequestV2(
+        account_id=ACCOUNT_ID,
+        job_id=job_id,
+        resource_id=resource_id,
+        asset_id=uuid4(),
+        asset_key=base64url.encode(asset_key),
+        expected_dedupe_tag=plaintext_dedupe_tag(
+            pdf, account_key=ACCOUNT_KEY, account_id=ACCOUNT_ID
+        ),
+        title="Scanned PDF",
+        source_version_id=source_version_id,
+        automatic_ocr=True,
+        automatic_formula_ocr=False,
+        preferred_ocr_languages=["en-US"],
+    )
+    api = FakeAPI(
+        [lease_for("PDF_EXTRACTION", json_bytes(request), job_id)],
+        encrypted_asset=encrypt_bytes(pdf, key=asset_key),
+    )
+    worker = WorkerProcessor(
+        account_id=ACCOUNT_ID,
+        account_key=ACCOUNT_KEY,
+        api=api,  # type: ignore[arg-type]
+        outbox=EncryptedOutbox(tmp_path / "source-ocr-outbox"),
+        digest_provider=None,
+        maximum_asset_bytes=10_000_000,
+        local_ocr_engine=DeterministicLocalOCREngine(),
+    )
+
+    assert worker.process_once()
+    assert len(api.pushed) == 3
+    ocr = OCRArtifactV1.model_validate_json(decrypt_artifact(api.pushed[1]))
+    assert ocr.target_kind == "SOURCE_PAGE"
+    assert ocr.source_version_id == source_version_id
+    assert ocr.page_number == 1
+    assert ocr.review_state is None
 
 
 def source_analysis_request(

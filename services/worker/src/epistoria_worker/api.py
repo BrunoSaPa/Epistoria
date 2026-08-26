@@ -72,10 +72,17 @@ class EpistoriaAPI:
             raise APIError("Epistoria API health response is invalid", retryable=False)
         return payload
 
-    def claim_job(self, *, lease_seconds: int = 300) -> AIJobLease | None:
+    def claim_job(self, *, lease_seconds: int = 900) -> AIJobLease | None:
         body = self._request("POST", "ai-jobs/claim", json={"leaseSeconds": lease_seconds}).json()
         raw_job = body.get("job")
         return None if raw_job is None else AIJobLease.model_validate(raw_job)
+
+    def job_status(self, job_id: UUID) -> str:
+        payload = self._request("GET", f"ai-jobs/{job_id}").json()
+        status = payload.get("status")
+        if not isinstance(status, str):
+            raise APIError("AI job status response is invalid", retryable=False)
+        return status
 
     def fail_job(self, job_id: UUID, *, error_code: str, retryable: bool) -> None:
         self._request(

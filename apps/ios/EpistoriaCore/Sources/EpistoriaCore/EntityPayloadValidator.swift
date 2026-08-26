@@ -103,6 +103,10 @@ public enum EntityPayloadValidator {
             "ai-artifact/source-analysis/v1",
             "ai-artifact/source-query/v1",
             "ai-artifact/tutor-turn/v1",
+            "ai-artifact/math-assistance/v1",
+            "ocr-artifact/v1",
+            "ocr-correction/v1",
+            "ai-artifact/local-model-status/v1",
         ]
         case .transcriptCorrection: ["transcript-correction/v1"]
         case .sourceVersion: ["source-version/v1"]

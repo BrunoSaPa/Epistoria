@@ -1,4 +1,5 @@
 import EpistoriaCore
+import CoreText
 import ImageIO
 import PencilKit
 import UIKit
@@ -43,6 +44,12 @@ final class NotePDFExportService {
         var worldScale: CGFloat
     }
 
+    private struct OCRTextLayer {
+        var pageIndex: Int
+        var rectangle: CGRect
+        var content: String
+    }
+
     private let store: EpistoriaStore
     private let assetManager: AssetManager
     private let outputDirectory: URL
@@ -68,8 +75,9 @@ final class NotePDFExportService {
         async let loadedEvidence = store.list(EvidencePayload.self)
         async let loadedSources = store.list(SourcePayload.self)
         async let loadedVersions = store.list(SourceVersionPayload.self)
-        let (note, allBlocks, evidence, sources, versions) = try await (
-            loadedNote, loadedBlocks, loadedEvidence, loadedSources, loadedVersions
+        async let loadedOCR = store.ocrArtifacts(parentId: noteId)
+        let (note, allBlocks, evidence, sources, versions, ocrArtifacts) = try await (
+            loadedNote, loadedBlocks, loadedEvidence, loadedSources, loadedVersions, loadedOCR
         )
         try Task.checkCancellation()
         let blocks = allBlocks
@@ -84,6 +92,7 @@ final class NotePDFExportService {
             sources: sources,
             versions: versions
         )
+        let ocrTextLayers = await acceptedOCRTextLayers(from: ocrArtifacts)
         try Task.checkCancellation()
 
         try fileManager.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
@@ -126,6 +135,7 @@ final class NotePDFExportService {
                         blocks: blocks,
                         images: images,
                         evidenceCards: evidenceCards,
+                        ocrTextLayers: ocrTextLayers,
                         context: rendererContext.cgContext
                     )
                 }
@@ -260,6 +270,7 @@ final class NotePDFExportService {
         blocks: [IdentifiedPayload<NoteBlockPayload>],
         images: [UUID: UIImage],
         evidenceCards: [UUID: NSAttributedString],
+        ocrTextLayers: [OCRTextLayer],
         context: CGContext
     ) {
         let outputBounds = CGRect(origin: .zero, size: plan.outputSize)
@@ -302,7 +313,67 @@ final class NotePDFExportService {
             let rasterScale = max(0.25, min(2, 4_096 / max(plan.worldRect.width, plan.worldRect.height)))
             drawing.image(from: plan.worldRect, scale: rasterScale).draw(in: plan.worldRect)
         }
+        drawSearchableOCRText(
+            ocrTextLayers.filter { $0.pageIndex == plan.pageIndex },
+            pageSize: plan.worldRect.size,
+            context: context
+        )
         context.restoreGState()
+    }
+
+    private func acceptedOCRTextLayers(
+        from artifacts: [IdentifiedPayload<OCRArtifactPayload>]
+    ) async -> [OCRTextLayer] {
+        var layers: [OCRTextLayer] = []
+        for artifact in artifacts where artifact.payload.state == .current {
+            guard let reviewState = artifact.payload.reviewState,
+                  [.accepted, .edited].contains(reviewState)
+            else { continue }
+            // Concurrent correction leaves are excluded until the owner resolves the conflict.
+            guard let regions = try? await store.resolvedOCRRegions(artifactId: artifact.id) else {
+                continue
+            }
+            for resolved in regions where !resolved.content.isEmpty {
+                for rectangle in resolved.region.rectangles {
+                    layers.append(OCRTextLayer(
+                        pageIndex: max((artifact.payload.pageNumber ?? 1) - 1, 0),
+                        rectangle: CGRect(
+                            x: CGFloat(rectangle.x),
+                            y: CGFloat(rectangle.y),
+                            width: CGFloat(rectangle.width),
+                            height: CGFloat(rectangle.height)
+                        ),
+                        content: resolved.content
+                    ))
+                }
+            }
+        }
+        return layers
+    }
+
+    private func drawSearchableOCRText(
+        _ layers: [OCRTextLayer],
+        pageSize: CGSize,
+        context: CGContext
+    ) {
+        for layer in layers {
+            let rect = CGRect(
+                x: layer.rectangle.minX * pageSize.width,
+                y: layer.rectangle.minY * pageSize.height,
+                width: max(layer.rectangle.width * pageSize.width, 1),
+                height: max(layer.rectangle.height * pageSize.height, 1)
+            )
+            let fontSize = max(5, min(rect.height * 0.75, 28))
+            let line = CTLineCreateWithAttributedString(NSAttributedString(
+                string: layer.content,
+                attributes: [.font: UIFont.systemFont(ofSize: fontSize)]
+            ))
+            context.saveGState()
+            context.setTextDrawingMode(.invisible)
+            context.textPosition = CGPoint(x: rect.minX, y: rect.maxY - fontSize)
+            CTLineDraw(line, context)
+            context.restoreGState()
+        }
     }
 
     private func draw(

@@ -15,7 +15,13 @@
     { "$ref": "#/$defs/sourceGuideResponse" },
     { "$ref": "#/$defs/sourceQueryResponse" },
     { "$ref": "#/$defs/providerConfigurationRequest" },
-    { "$ref": "#/$defs/providerConfigurationArtifact" }
+    { "$ref": "#/$defs/providerConfigurationArtifact" },
+    { "$ref": "#/$defs/localOCRRequest" },
+    { "$ref": "#/$defs/localOCRResponse" },
+    { "$ref": "#/$defs/ocrArtifact" },
+    { "$ref": "#/$defs/ocrCorrection" },
+    { "$ref": "#/$defs/localModelControlRequest" },
+    { "$ref": "#/$defs/localModelStatusArtifact" }
   ],
   "$defs": {
     "uuid": { "type": "string", "format": "uuid" },
@@ -380,14 +386,145 @@
       "additionalProperties": false,
       "required": ["schemaVersion", "accountId", "jobId", "resourceId", "assetId", "assetKey", "expectedDedupeTag", "title"],
       "properties": {
-        "schemaVersion": { "const": "pdf-extraction-request/v1" },
+        "schemaVersion": { "enum": ["pdf-extraction-request/v1", "pdf-extraction-request/v2"] },
         "accountId": { "$ref": "#/$defs/uuid" },
         "jobId": { "$ref": "#/$defs/uuid" },
         "resourceId": { "$ref": "#/$defs/uuid" },
         "assetId": { "$ref": "#/$defs/uuid" },
         "assetKey": { "type": "string", "pattern": "^[A-Za-z0-9_-]{43}$" },
         "expectedDedupeTag": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
-        "title": { "type": "string", "minLength": 1, "maxLength": 500 }
+        "title": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "sourceVersionId": { "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }] },
+        "automaticOCR": { "type": "boolean" },
+        "automaticFormulaOCR": { "type": "boolean" },
+        "preferredOCRLanguages": { "type": "array", "maxItems": 12, "uniqueItems": true, "items": { "type": "string", "maxLength": 32 } }
+      }
+    },
+    "ocrRectangle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["x", "y", "width", "height"],
+      "properties": {
+        "x": { "type": "number", "minimum": 0, "maximum": 1 },
+        "y": { "type": "number", "minimum": 0, "maximum": 1 },
+        "width": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 },
+        "height": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 }
+      }
+    },
+    "localOCRRegion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "text", "alternatives", "rectangles"],
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "kind": { "enum": ["TEXT", "FORMULA"] },
+        "text": { "type": "string", "maxLength": 20000 },
+        "latex": { "type": ["string", "null"], "maxLength": 20000 },
+        "normalizedExpression": { "type": ["string", "null"], "maxLength": 8000 },
+        "confidence": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+        "alternatives": { "type": "array", "maxItems": 5, "items": { "type": "string", "maxLength": 8000 } },
+        "rectangles": { "type": "array", "maxItems": 64, "items": { "$ref": "#/$defs/ocrRectangle" } }
+      }
+    },
+    "localOCRRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "accountId", "jobId", "targetKind", "targetId", "parentId", "inputRevision", "imageContent", "preferredLanguages", "mode", "disclosureAcknowledged"],
+      "properties": {
+        "schemaVersion": { "const": "local-ocr-request/v1" },
+        "accountId": { "$ref": "#/$defs/uuid" },
+        "jobId": { "$ref": "#/$defs/uuid" },
+        "targetKind": { "enum": ["NOTEBOOK_REGION", "IMAGE", "SOURCE_PAGE"] },
+        "targetId": { "$ref": "#/$defs/uuid" },
+        "parentId": { "$ref": "#/$defs/uuid" },
+        "noteId": { "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }] },
+        "sourceVersionId": { "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }] },
+        "inputRevision": { "type": "integer", "minimum": 0 },
+        "pageNumber": { "type": ["integer", "null"], "minimum": 1 },
+        "locator": { "type": ["object", "null"] },
+        "imageContent": { "type": "string", "minLength": 4, "maxLength": 1100000 },
+        "preferredLanguages": { "type": "array", "maxItems": 12, "uniqueItems": true, "items": { "type": "string", "maxLength": 32 } },
+        "mode": { "enum": ["TEXT", "FORMULA", "MIXED"] },
+        "disclosureAcknowledged": { "const": true }
+      }
+    },
+    "localOCRResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "engine", "engineVersion", "regions", "warnings"],
+      "properties": {
+        "schemaVersion": { "const": "local-ocr-response/v1" },
+        "engine": { "enum": ["APPLE_VISION", "PP_FORMULANET_PLUS_S", "DETERMINISTIC"] },
+        "engineVersion": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "modelVersion": { "type": ["string", "null"], "maxLength": 128 },
+        "recognitionVersion": { "type": ["integer", "null"], "minimum": 0 },
+        "regions": { "type": "array", "maxItems": 256, "items": { "$ref": "#/$defs/localOCRRegion" } },
+        "warnings": { "type": "array", "maxItems": 20, "items": { "type": "string", "maxLength": 500 } }
+      }
+    },
+    "ocrArtifact": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["schemaVersion", "jobId", "targetKind", "targetId", "parentId", "inputRevision", "generatedAt", "state", "response"],
+      "properties": {
+        "schemaVersion": { "const": "ocr-artifact/v1" },
+        "jobId": { "$ref": "#/$defs/uuid" },
+        "targetKind": { "enum": ["NOTEBOOK_REGION", "IMAGE", "SOURCE_PAGE"] },
+        "targetId": { "$ref": "#/$defs/uuid" },
+        "parentId": { "$ref": "#/$defs/uuid" },
+        "inputRevision": { "type": "integer", "minimum": 0 },
+        "generatedAt": { "type": "string", "format": "date-time" },
+        "state": { "enum": ["CURRENT", "STALE"] },
+        "response": { "$ref": "#/$defs/localOCRResponse" }
+      }
+    },
+    "ocrCorrection": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["schemaVersion", "artifactId", "regionId", "targetId", "originalText", "correctedText", "createdAt", "updatedAt"],
+      "properties": {
+        "schemaVersion": { "const": "ocr-correction/v1" },
+        "artifactId": { "$ref": "#/$defs/uuid" },
+        "regionId": { "$ref": "#/$defs/uuid" },
+        "targetId": { "$ref": "#/$defs/uuid" },
+        "originalText": { "type": "string", "maxLength": 20000 },
+        "correctedText": { "type": "string", "minLength": 1, "maxLength": 20000 },
+        "state": { "enum": ["ACTIVE", "CONFLICTED", "RETRACTED"] },
+        "supersedesCorrectionId": { "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }] },
+        "supersedesCorrectionIds": { "type": ["array", "null"], "maxItems": 32, "uniqueItems": true, "items": { "$ref": "#/$defs/uuid" } },
+        "conflictsWithCorrectionId": { "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "localModelControlRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "accountId", "jobId", "operation", "modelId", "disclosureAcknowledged"],
+      "properties": {
+        "schemaVersion": { "const": "local-model-control-request/v1" },
+        "accountId": { "$ref": "#/$defs/uuid" },
+        "jobId": { "$ref": "#/$defs/uuid" },
+        "operation": { "enum": ["STATUS", "INSTALL", "REMOVE"] },
+        "modelId": { "const": "PP-FormulaNet_plus-S" },
+        "disclosureAcknowledged": { "const": true }
+      }
+    },
+    "localModelStatusArtifact": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["schemaVersion", "jobId", "modelId", "modelVersion", "operation", "state", "expectedBytes", "verifiedBytes", "license", "checkedAt"],
+      "properties": {
+        "schemaVersion": { "const": "ai-artifact/local-model-status/v1" },
+        "jobId": { "$ref": "#/$defs/uuid" },
+        "modelId": { "const": "PP-FormulaNet_plus-S" },
+        "modelVersion": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "operation": { "enum": ["STATUS", "INSTALL", "REMOVE"] },
+        "state": { "enum": ["NOT_INSTALLED", "INSTALLED", "INVALID"] },
+        "expectedBytes": { "type": "integer", "minimum": 0 },
+        "verifiedBytes": { "type": "integer", "minimum": 0 },
+        "license": { "const": "Apache-2.0" },
+        "checkedAt": { "type": "string", "format": "date-time" }
       }
     }
   }

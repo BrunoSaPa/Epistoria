@@ -25,7 +25,7 @@ struct KnowledgeSearchView: View {
                     ContentUnavailableView(
                         "Search your knowledge",
                         systemImage: "text.magnifyingglass",
-                        description: Text("Titles, typed notes, transcriptions, annotations, resources, and reviewed AI artifacts are indexed only inside the encrypted database.")
+                        description: Text("Titles, notes, transcriptions, annotations, Sources, and labeled local OCR are indexed only inside the encrypted database.")
                     )
                 } else if isSearching {
                     ProgressView("Searching locally…")
@@ -127,10 +127,10 @@ struct KnowledgeSearchView: View {
         } label: {
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
-                    Label(title(for: hit), systemImage: symbol(for: hit.entity.entityType))
+                    Label(title(for: hit), systemImage: symbol(for: hit))
                         .font(.headline)
                     Spacer()
-                    Text(typeLabel(hit.entity.entityType))
+                    Text(typeLabel(hit))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 8)
@@ -169,8 +169,12 @@ struct KnowledgeSearchView: View {
         case .transcriptCorrection: return "Transcript correction"
         case .asset:
             return (try? CanonicalJSON.decode(AssetPayload.self, from: content).originalFilename) ?? "Asset"
-        case .aiArtifact: return "AI artifact"
-        default: return typeLabel(hit.entity.entityType)
+        case .aiArtifact:
+            if let artifact = try? CanonicalJSON.decode(OCRArtifactPayload.self, from: content) {
+                return ocrSourceLabel(artifact)
+            }
+            return "AI artifact"
+        default: return typeLabel(hit)
         }
     }
 
@@ -178,8 +182,11 @@ struct KnowledgeSearchView: View {
         value.replacingOccurrences(of: "[", with: "").replacingOccurrences(of: "]", with: "")
     }
 
-    private func symbol(for type: EntityType) -> String {
-        switch type {
+    private func symbol(for hit: SearchHit) -> String {
+        if hit.entity.entityType == .aiArtifact,
+            (try? CanonicalJSON.decode(OCRArtifactPayload.self, from: hit.entity.content)) != nil
+        { return "text.viewfinder" }
+        return switch hit.entity.entityType {
         case .note, .noteBlock: "doc.text"
         case .studySession: "timer"
         case .resource, .asset: "books.vertical"
@@ -190,8 +197,19 @@ struct KnowledgeSearchView: View {
         }
     }
 
-    private func typeLabel(_ type: EntityType) -> String {
-        type.rawValue.replacingOccurrences(of: "_", with: " ").capitalized
+    private func typeLabel(_ hit: SearchHit) -> String {
+        if hit.entity.entityType == .aiArtifact,
+            (try? CanonicalJSON.decode(OCRArtifactPayload.self, from: hit.entity.content)) != nil
+        { return "Local OCR" }
+        return hit.entity.entityType.rawValue.replacingOccurrences(of: "_", with: " ").capitalized
+    }
+
+    private func ocrSourceLabel(_ artifact: OCRArtifactPayload) -> String {
+        switch artifact.targetKind {
+        case .notebookRegion: "Recognized from handwriting"
+        case .image: "Recognized from image"
+        case .sourcePage: "Recognized from scanned Source"
+        }
     }
 }
 
@@ -265,7 +283,30 @@ private struct SearchDestination: View {
                 SearchRecordView(hit: hit)
             }
         case .aiArtifact:
-            if let artifact = try? CanonicalJSON.decode(SessionDigestArtifact.self, from: hit.entity.content) {
+            if let ocr = try? CanonicalJSON.decode(
+                OCRArtifactPayload.self,
+                from: hit.entity.content
+            ) {
+                if let noteId = ocr.noteId {
+                    NoteEditorView(
+                        model: model,
+                        noteId: noteId,
+                        focusedBlockId: ocr.targetId,
+                        highlightText: navigationSearchText(for: hit) ?? ocr.recognizedText,
+                        focusRectangles: ocr.locator?.rectangles ?? ocr.response.regions.flatMap(\.rectangles)
+                    )
+                } else {
+                    ResourceDetailView(
+                        model: model,
+                        resourceId: ocr.parentId,
+                        initialSourceVersionId: ocr.sourceVersionId,
+                        initialPageNumber: ocr.pageNumber,
+                        highlightText: navigationSearchText(for: hit) ?? ocr.recognizedText,
+                        initialHighlightRectangles: ocr.locator?.rectangles
+                            ?? ocr.response.regions.flatMap(\.rectangles)
+                    )
+                }
+            } else if let artifact = try? CanonicalJSON.decode(SessionDigestArtifact.self, from: hit.entity.content) {
                 SessionDetailView(model: model, sessionId: artifact.sessionId)
             } else if let chunk = try? CanonicalJSON.decode(PDFExtractionChunk.self, from: hit.entity.content) {
                 let term = navigationSearchText(for: hit)

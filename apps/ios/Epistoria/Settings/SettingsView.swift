@@ -35,6 +35,18 @@ struct SettingsView: View {
                     )
                 }
 
+                Section("Local processing") {
+                    NavigationLink {
+                        LocalProcessingSettingsView(model: model)
+                    } label: {
+                        SettingsRow(
+                            title: "OCR and formula recognition",
+                            detail: "Offline recognition, languages, and verified Mac models",
+                            symbol: "text.viewfinder"
+                        )
+                    }
+                }
+
                 Section("About") {
                     LabeledContent("Product", value: "Epistoria")
                     LabeledContent("Storage", value: "One encrypted notebook")

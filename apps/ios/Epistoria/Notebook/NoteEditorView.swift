@@ -41,6 +41,12 @@ private enum CanvasSaveState: Equatable {
     }
 }
 
+private enum OCRRecognitionState: Equatable {
+    case idle
+    case recognizing
+    case formulaQueued
+}
+
 private enum NotebookLassoPurpose {
     case question
     case mathematics
@@ -70,9 +76,11 @@ struct NoteEditorView: View {
     @Environment(\.epistoriaWorkspacePresentation) private var workspacePresentation
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.scenePhase) private var scenePhase
     let noteId: UUID
     var focusedBlockId: UUID?
     var highlightText: String?
+    var focusRectangles: [AnnotationRectangle]
     var onLifecycleChanged: (() -> Void)?
 
     @State private var note: IdentifiedPayload<NotePayload>?
@@ -131,6 +139,10 @@ struct NoteEditorView: View {
     @State private var showNoteQueryArtifacts = false
     @State private var showMathAssistanceSheet = false
     @State private var showMathAssistanceArtifacts = false
+    @State private var showOCRReview = false
+    @State private var ocrArtifacts: [IdentifiedPayload<OCRArtifactPayload>] = []
+    @State private var ocrRecognitionState = OCRRecognitionState.idle
+    @State private var pencilStrokeActivePages: Set<Int> = []
     @State private var showOrganization = false
     @State private var showEvidenceShelf = false
     @State private var showTutor = false
@@ -144,12 +156,14 @@ struct NoteEditorView: View {
         noteId: UUID,
         focusedBlockId: UUID? = nil,
         highlightText: String? = nil,
+        focusRectangles: [AnnotationRectangle] = [],
         onLifecycleChanged: (() -> Void)? = nil
     ) {
         self.model = model
         self.noteId = noteId
         self.focusedBlockId = focusedBlockId
         self.highlightText = highlightText
+        self.focusRectangles = focusRectangles
         self.onLifecycleChanged = onLifecycleChanged
     }
 
@@ -179,8 +193,18 @@ struct NoteEditorView: View {
             }
             .safeAreaInset(edge: .bottom, spacing: 0) { transientBottomMessage }
             .sensoryFeedback(.selection, trigger: currentPageIndex)
-            .onChange(of: currentPageIndex) { _, _ in
-                Task { await currentPageDidChange() }
+            .onChange(of: currentPageIndex) { oldPage, _ in
+                Task {
+                    await recognizePageAfterExit(oldPage)
+                    await currentPageDidChange()
+                }
+            }
+            .onChange(of: scenePhase) { _, phase in
+                guard phase != .active else { return }
+                Task {
+                    await saveAll()
+                    await recognizePageAfterExit(currentPageIndex)
+                }
             }
             .task {
                 workspacePresentation?.beginImmersiveEditing(id: immersiveEditorID)
@@ -194,7 +218,10 @@ struct NoteEditorView: View {
                     try? NotePDFExportService.removeTemporaryPDF(pdfExportResult.fileURL)
                     self.pdfExportResult = nil
                 }
-                Task { await saveAll() }
+                Task {
+                    await saveAll()
+                    await recognizePageAfterExit(currentPageIndex)
+                }
             }
     }
 
@@ -241,6 +268,16 @@ struct NoteEditorView: View {
                     },
                     onInsertExplanation: { explanation in
                         Task { await addText(content: explanation) }
+                    }
+                )
+            }
+            .sheet(isPresented: $showOCRReview) {
+                OCRReviewView(
+                    model: model,
+                    parentId: noteId,
+                    artifacts: $ocrArtifacts,
+                    onCreateEquation: { expression in
+                        Task { await addEquation(content: expression) }
                     }
                 )
             }
@@ -435,6 +472,16 @@ struct NoteEditorView: View {
             onInkChanged: { data in
                 saveInk(data, on: pageIndex)
             },
+            onPencilActivityChanged: { isActive in
+                if isActive {
+                    pencilStrokeActivePages.insert(pageIndex)
+                    if let block = inkBlock(on: pageIndex) {
+                        inkSaveBuffer.pendingTaskByBlock[block.id]?.cancel()
+                    }
+                } else {
+                    pencilStrokeActivePages.remove(pageIndex)
+                }
+            },
             onLassoSelection: { selection in
                 currentPageIndex = pageIndex
                 lassoSelection = selection
@@ -474,7 +521,11 @@ struct NoteEditorView: View {
             let block = blocks.first(where: { $0.id == focusedBlockId }),
             blockPageIndex(block.payload) == pageIndex
         else { return nil }
-        return SpatialNotebookFocus(blockId: focusedBlockId, highlightedText: highlightText)
+        return SpatialNotebookFocus(
+            blockId: focusedBlockId,
+            highlightedText: highlightText,
+            normalizedRectangles: focusRectangles
+        )
     }
 
     @ToolbarContentBuilder
@@ -534,6 +585,10 @@ struct NoteEditorView: View {
                         showMathAssistanceArtifacts = true
                     }
                 }
+                Button("Recognized text", systemImage: "text.viewfinder") {
+                    showOCRReview = true
+                }
+                .disabled(ocrArtifacts.isEmpty)
                 Divider()
                 Button("Organize note…", systemImage: "folder.badge.plus") {
                     showOrganization = true
@@ -799,6 +854,17 @@ struct NoteEditorView: View {
             }
             .accessibilityHint("Shows reusable excerpts anchored to their original Source Version")
             .accessibilityIdentifier("note.tool.evidence")
+
+            railToolButton(
+                "OCR",
+                systemImage: "text.viewfinder",
+                selected: showOCRReview
+            ) {
+                showOCRReview = true
+            }
+            .disabled(ocrArtifacts.isEmpty)
+            .accessibilityHint("Review locally recognized handwriting before using it")
+            .accessibilityIdentifier("note.tool.ocr-review")
 
             railToolButton(
                 "Tutor",
@@ -1611,6 +1677,8 @@ struct NoteEditorView: View {
     private var statusLabel: String {
         if case .tooLarge = inkSaveState { return inkSaveState.label }
         if inkSaveState == .saving || model.pendingSaves.count > 0 { return "Saving locally…" }
+        if ocrRecognitionState == .recognizing { return "Recognizing handwriting…" }
+        if ocrRecognitionState == .formulaQueued { return "Formula recognition queued" }
         let hasQueuedWork = model.pendingRecordCount + model.pendingFileCount > 0
         return note?.syncState == .synced && !hasQueuedWork
             ? "Saved · synced"
@@ -1622,6 +1690,8 @@ struct NoteEditorView: View {
         if inkSaveState == .saving || model.pendingSaves.count > 0 {
             return "arrow.triangle.2.circlepath"
         }
+        if ocrRecognitionState == .recognizing { return "text.viewfinder" }
+        if ocrRecognitionState == .formulaQueued { return "macbook.and.ipad" }
         let hasQueuedWork = model.pendingRecordCount + model.pendingFileCount > 0
         return note?.syncState == .synced && !hasQueuedWork ? "checkmark.circle" : "ipad"
     }
@@ -1635,8 +1705,9 @@ struct NoteEditorView: View {
             async let loadedEvidence = store.list(EvidencePayload.self)
             async let loadedSources = store.list(SourcePayload.self)
             async let loadedVersions = store.list(SourceVersionPayload.self)
+            async let loadedOCR = store.ocrArtifacts(parentId: noteId)
             let result = try await (
-                loadedNote, loadedBlocks, loadedEvidence, loadedSources, loadedVersions
+                loadedNote, loadedBlocks, loadedEvidence, loadedSources, loadedVersions, loadedOCR
             )
             note = result.0
             configuration = result.0.payload.canvas ?? NoteCanvasConfiguration()
@@ -1645,6 +1716,19 @@ struct NoteEditorView: View {
                 title = result.0.payload.title
             }
             blocks = result.1.sorted { $0.payload.orderKey < $1.payload.orderKey }
+            var reconciledOCR = false
+            for block in blocks where result.5.contains(where: {
+                $0.payload.targetKind == .notebookRegion
+                    && $0.payload.targetId == block.id
+                    && $0.payload.state == .current
+                    && $0.payload.inputRevision != block.payload.ocrInputRevision
+            }) {
+                try await store.markOCRArtifactsStale(
+                    targetId: block.id,
+                    exceptInputRevision: block.payload.ocrInputRevision
+                )
+                reconciledOCR = true
+            }
             let availableSources = result.3.filter { source in
                 guard let topicId = result.0.payload.courseId else { return true }
                 return source.payload.primaryTopicId == topicId
@@ -1652,6 +1736,9 @@ struct NoteEditorView: View {
             }
             sourcesById = Dictionary(uniqueKeysWithValues: availableSources.map { ($0.id, $0) })
             sourceVersionsById = Dictionary(uniqueKeysWithValues: result.4.map { ($0.id, $0) })
+            ocrArtifacts = reconciledOCR
+                ? try await store.ocrArtifacts(parentId: noteId)
+                : result.5
             evidence = result.2.filter { sourcesById[$0.payload.sourceId] != nil }
                 .sorted { $0.payload.updatedAt > $1.payload.updatedAt }
             if configuration.pageFormat == .infinite {
@@ -2041,10 +2128,14 @@ struct NoteEditorView: View {
         }
         inkDataByPage[pageIndex] = value
         if pageIndex == currentPageIndex { inkSaveState = .saving }
+        let previousDrawingData = inkBlock.payload.drawingData
         var snapshot = inkBlock.payload
         snapshot.schemaVersion = "note-block/v5"
         snapshot.drawingData = value
         snapshot.updatedAt = .now
+        var localBlock = inkBlock
+        localBlock.payload = snapshot
+        replaceLocalBlock(localBlock)
         model.pendingSaves.stage(id: inkBlock.id) {
             guard let store = model.store else {
                 throw NoteEditorSaveError.encryptedStoreUnavailable
@@ -2067,6 +2158,19 @@ struct NoteEditorView: View {
             guard !Task.isCancelled else { return }
             do {
                 try await model.pendingSaves.flush(id: inkBlock.id)
+                guard !Task.isCancelled,
+                    inkSaveBuffer.isCurrent(generation, for: inkBlock.id)
+                else { return }
+                try? await Task.sleep(for: .milliseconds(2_350))
+                guard !Task.isCancelled,
+                    inkSaveBuffer.isCurrent(generation, for: inkBlock.id)
+                else { return }
+                await recognizeSavedInk(
+                    blockId: inkBlock.id,
+                    pageIndex: pageIndex,
+                    drawingData: value,
+                    previousDrawingData: previousDrawingData
+                )
             } catch {
                 if inkSaveBuffer.isCurrent(generation, for: inkBlock.id),
                     pageIndex == currentPageIndex
@@ -2076,6 +2180,101 @@ struct NoteEditorView: View {
                 report(error)
             }
         }
+    }
+
+    private func recognizeSavedInk(
+        blockId: UUID,
+        pageIndex: Int,
+        drawingData: Data,
+        previousDrawingData: Data?
+    ) async {
+        guard !pencilStrokeActivePages.contains(pageIndex),
+            model.localProcessingSettings.automaticNotebookOCR,
+            !drawingData.isEmpty,
+            let accountId = model.configuration?.accountId,
+            let store = model.store
+        else { return }
+        do {
+            let savedBlock = try await store.payload(NoteBlockPayload.self, id: blockId)
+            guard savedBlock.payload.drawingData == drawingData else { return }
+            try await store.markOCRArtifactsStale(
+                targetId: blockId,
+                exceptInputRevision: savedBlock.payload.ocrInputRevision
+            )
+            if ocrArtifacts.contains(where: {
+                $0.payload.targetId == blockId
+                    && $0.payload.inputRevision == savedBlock.payload.ocrInputRevision
+                    && $0.payload.response.engine == .appleVision
+                    && $0.payload.state == .current
+            }) { return }
+            ocrRecognitionState = .recognizing
+            let captures = try await LocalTextOCRService.recognizeChangedInk(
+                accountId: accountId,
+                noteId: noteId,
+                blockId: blockId,
+                inputRevision: savedBlock.payload.ocrInputRevision,
+                pageIndex: pageIndex,
+                pageSize: CGSize(
+                    width: configuration.pageWidth ?? 2_200,
+                    height: configuration.pageHeight ?? 2_200
+                ),
+                drawingData: drawingData,
+                previousDrawingData: previousDrawingData,
+                preferredLanguages: model.localProcessingSettings.normalizedLanguages
+            )
+            var queuedFormula = false
+            for capture in captures {
+                _ = try await store.saveOCRArtifact(
+                    request: capture.request,
+                    response: capture.response
+                )
+                if model.localProcessingSettings.localMathOCR,
+                    capture.suggestsFormula || looksMathematical(capture.response),
+                    let aiJobs = model.aiJobs
+                {
+                    var formulaRequest = capture.request
+                    formulaRequest.jobId = UUID()
+                    formulaRequest.mode = .formula
+                    _ = try await aiJobs.submitLocalOCR(formulaRequest)
+                    queuedFormula = true
+                }
+            }
+            model.noteLocalMutation()
+            ocrArtifacts = try await store.ocrArtifacts(parentId: noteId)
+            ocrRecognitionState = queuedFormula ? .formulaQueued : .idle
+            if queuedFormula {
+                try? await Task.sleep(for: .seconds(4))
+                if ocrRecognitionState == .formulaQueued { ocrRecognitionState = .idle }
+            }
+        } catch LocalTextOCRError.emptyDrawing {
+            ocrRecognitionState = .idle
+        } catch {
+            ocrRecognitionState = .idle
+            report(error)
+        }
+    }
+
+    private func recognizePageAfterExit(_ pageIndex: Int) async {
+        guard model.localProcessingSettings.automaticNotebookOCR,
+              let block = inkBlock(on: pageIndex),
+              let drawingData = inkDataByPage[pageIndex] ?? block.payload.drawingData,
+              !drawingData.isEmpty
+        else { return }
+        try? await model.pendingSaves.flush(id: block.id)
+        await recognizeSavedInk(
+            blockId: block.id,
+            pageIndex: pageIndex,
+            drawingData: drawingData,
+            previousDrawingData: nil
+        )
+    }
+
+    private func looksMathematical(_ response: LocalOCRResponse) -> Bool {
+        let text = response.regions.map(\.text).joined(separator: " ")
+        let markers = CharacterSet(charactersIn: "=+−-×÷/√∫∑^<>≤≥()[]{}")
+        if text.rangeOfCharacter(from: markers) != nil { return true }
+        return text.range(of: #"\b\d*[a-zA-Z]\s*[²³0-9]?\s*[=+\-/]"#, options: .regularExpression)
+            != nil
     }
 
     private func clearInk() {

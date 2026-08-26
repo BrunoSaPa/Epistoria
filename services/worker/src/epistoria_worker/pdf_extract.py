@@ -11,6 +11,7 @@ from typing import Any
 from uuid import UUID, uuid5
 
 import pdfplumber
+import pypdfium2
 from pypdf import PdfReader
 
 from .models import PDFPageV1, SourceMaterialV1, SourceRectangleV1
@@ -72,6 +73,42 @@ def extract_pdf_pages(pdf_bytes: bytes) -> list[PDFPageV1]:
             )
         )
     return pages
+
+
+def render_pdf_page_png(
+    pdf_bytes: bytes,
+    page_number: int,
+    *,
+    maximum_bytes: int = 825_000,
+) -> bytes:
+    """Render one page in memory for local OCR without creating a decrypted file."""
+
+    if page_number < 1:
+        raise PDFExtractionError("PDF page numbers start at one")
+    try:
+        document = pypdfium2.PdfDocument(pdf_bytes)
+        if page_number > len(document):
+            raise PDFExtractionError("PDF OCR page is outside the document")
+        page = document[page_number - 1]
+        scale = 2.0
+        while scale >= 0.6:
+            bitmap = page.render(scale=scale)
+            image = bitmap.to_pil().convert("RGB")
+            output = io.BytesIO()
+            image.save(output, format="PNG", optimize=True)
+            value = output.getvalue()
+            if len(value) <= maximum_bytes:
+                page.close()
+                document.close()
+                return value
+            scale *= 0.72
+        page.close()
+        document.close()
+    except PDFExtractionError:
+        raise
+    except Exception as error:
+        raise PDFExtractionError("PDF page rendering failed") from error
+    raise PDFExtractionError("PDF page image exceeds the local OCR limit")
 
 
 def chunk_pages(

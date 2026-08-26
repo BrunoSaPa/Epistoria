@@ -624,7 +624,7 @@ public struct PreparedDigestRequest: Equatable, Sendable {
 }
 
 public struct PDFExtractionRequest: Codable, Equatable, Sendable {
-    public var schemaVersion = "pdf-extraction-request/v1"
+    public var schemaVersion = "pdf-extraction-request/v2"
     public var accountId: UUID
     public var jobId: UUID
     public var resourceId: UUID
@@ -632,6 +632,10 @@ public struct PDFExtractionRequest: Codable, Equatable, Sendable {
     public var assetKey: String
     public var expectedDedupeTag: String
     public var title: String
+    public var sourceVersionId: UUID
+    public var automaticOCR: Bool
+    public var automaticFormulaOCR: Bool
+    public var preferredOCRLanguages: [String]
 }
 
 public struct ExtractedPDFPage: Codable, Equatable, Sendable {
@@ -970,6 +974,7 @@ public enum AIJobCoordinatorError: Error, Equatable {
     case providerRouteUnavailable
     case mathSelectionTooLarge
     case mathVisionUnavailable
+    case mathRecognitionReviewRequired
 }
 
 extension AIJobCoordinatorError: LocalizedError {
@@ -1004,6 +1009,8 @@ extension AIJobCoordinatorError: LocalizedError {
             "The selected handwriting image is too large to process safely. Select a smaller region."
         case .mathVisionUnavailable:
             "The selected AI provider does not support image input. Choose a vision-capable provider or select typed mathematics."
+        case .mathRecognitionReviewRequired:
+            "Recognize and confirm the selected expression before requesting worked steps, graphing, or error diagnosis."
         }
     }
 }
@@ -1168,12 +1175,22 @@ public actor AIJobCoordinator {
         return nil
     }
 
-    public func submitPDFExtraction(resourceId: UUID) async throws -> AIJobSummary {
+    public func submitPDFExtraction(
+        resourceId: UUID,
+        automaticOCR: Bool = true,
+        automaticFormulaOCR: Bool = false,
+        preferredOCRLanguages: [String] = []
+    ) async throws -> AIJobSummary {
         let resource = try await store.payload(ResourcePayload.self, id: resourceId).payload
         guard resource.resourceType == .pdf, let assetId = resource.originalAssetId else {
             throw AIJobCoordinatorError.resourceHasNoPDF
         }
         let asset = try await store.payload(AssetPayload.self, id: assetId).payload
+        let source = try await store.payload(SourcePayload.self, id: resourceId).payload
+        let versions = try await store.list(SourceVersionPayload.self, parentId: resourceId)
+        guard let sourceVersionId = source.currentVersionId
+            ?? versions.max(by: { $0.payload.versionNumber < $1.payload.versionNumber })?.id
+        else { throw AIJobCoordinatorError.resourceHasNoPDF }
         let jobId = UUID()
         let request = PDFExtractionRequest(
             accountId: accountId,
@@ -1182,7 +1199,11 @@ public actor AIJobCoordinator {
             assetId: assetId,
             assetKey: asset.assetKey,
             expectedDedupeTag: asset.dedupeTag,
-            title: resource.title
+            title: resource.title,
+            sourceVersionId: sourceVersionId,
+            automaticOCR: automaticOCR,
+            automaticFormulaOCR: automaticFormulaOCR,
+            preferredOCRLanguages: Array(Set(preferredOCRLanguages)).sorted()
         )
         let envelope = try crypto.encryptJob(
             CanonicalJSON.encode(request),
@@ -1603,6 +1624,7 @@ public actor AIJobCoordinator {
         noteId: UUID,
         selectedBlockIds: [UUID],
         selectionImagesByBlockId: [UUID: Data],
+        selectionLocatorsByBlockId: [UUID: SourceLocator] = [:],
         mode: MathAssistanceMode,
         learnerInstructions: String? = nil,
         outputLanguage: String = "English"
@@ -1611,11 +1633,33 @@ public actor AIJobCoordinator {
         let note = try await store.payload(NotePayload.self, id: noteId).payload
         let allBlocks = try await store.list(NoteBlockPayload.self, parentId: noteId)
             .sorted { $0.payload.orderKey < $1.payload.orderKey }
+        let blocksById = Dictionary(uniqueKeysWithValues: allBlocks.map { ($0.id, $0) })
         let selectedSet = Set(selectedBlockIds)
         let boundedImages = selectionImagesByBlockId.filter { selectedSet.contains($0.key) }
         guard boundedImages.values.allSatisfy({ $0.count <= 700_000 }),
             boundedImages.values.reduce(0, { $0 + $1.count }) <= 800_000
         else { throw AIJobCoordinatorError.mathSelectionTooLarge }
+
+        var reviewedMathByBlock: [UUID: String] = [:]
+        if mode != .recognize {
+            let artifacts = try await store.ocrArtifacts(parentId: noteId)
+            for artifact in artifacts where selectedSet.contains(artifact.payload.targetId) {
+                guard artifact.payload.state == .current,
+                    blocksById[artifact.payload.targetId]?.payload.ocrInputRevision
+                        == artifact.payload.inputRevision,
+                    artifact.payload.reviewState == .accepted
+                        || artifact.payload.reviewState == .edited,
+                    artifact.payload.response.regions.contains(where: { $0.kind == .formula })
+                else { continue }
+                let text = try await store.resolvedOCRText(artifactId: artifact.id)
+                if !text.isEmpty, reviewedMathByBlock[artifact.payload.targetId] == nil {
+                    reviewedMathByBlock[artifact.payload.targetId] = text
+                }
+            }
+            guard !reviewedMathByBlock.isEmpty else {
+                throw AIJobCoordinatorError.mathRecognitionReviewRequired
+            }
+        }
 
         var selectionSources: [NoteQuerySourceExcerpt] = []
         var contextSources: [NoteQuerySourceExcerpt] = []
@@ -1625,7 +1669,16 @@ public actor AIJobCoordinator {
                 .joined(separator: "\n")
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             if selectedSet.contains(block.id) {
-                if let image = boundedImages[block.id] {
+                if let reviewed = reviewedMathByBlock[block.id] {
+                    selectionSources.append(
+                        NoteQuerySourceExcerpt(
+                            sourceId: block.id,
+                            sourceKind: .noteBlock,
+                            title: note.title,
+                            locator: "owner-confirmed mathematics on canvas item \(block.payload.orderKey)",
+                            excerpt: String(reviewed.prefix(8_000))
+                        ))
+                } else if mode == .recognize, let image = boundedImages[block.id] {
                     selectionSources.append(
                         NoteQuerySourceExcerpt(
                             sourceId: block.id,
@@ -1684,7 +1737,10 @@ public actor AIJobCoordinator {
             selectionCount: selectionSources.count,
             contextCount: contextSources.count,
             imageCount: imageCount,
-            approximateTokens: max(1, characters / 4 + imageCount * 700)
+            approximateTokens: max(1, characters / 4 + imageCount * 700),
+            selectionLocatorsByBlockId: selectionLocatorsByBlockId.filter {
+                selectedSet.contains($0.key)
+            }
         )
     }
 
@@ -1714,6 +1770,41 @@ public actor AIJobCoordinator {
             type: "MATH_ASSISTANCE",
             envelope: envelope
         )
+    }
+
+    public func submitLocalMathRecognition(
+        _ prepared: PreparedMathAssistanceRequest,
+        preferredLanguages: [String]
+    ) async throws -> [AIJobSummary] {
+        guard prepared.request.mode == .recognize else {
+            throw AIJobCoordinatorError.mathRecognitionReviewRequired
+        }
+        var summaries: [AIJobSummary] = []
+        for source in prepared.request.selectionSources.prefix(8) {
+            guard let encoded = source.imageContent,
+                let image = Data(base64Encoded: encoded),
+                image.count <= 825_000
+            else { continue }
+            let block = try await store.payload(NoteBlockPayload.self, id: source.sourceId)
+            let request = LocalOCRRequest(
+                accountId: accountId,
+                targetKind: .notebookRegion,
+                targetId: source.sourceId,
+                parentId: prepared.request.noteId,
+                noteId: prepared.request.noteId,
+                inputRevision: block.revision,
+                locator: prepared.selectionLocatorsByBlockId[source.sourceId] ?? SourceLocator(
+                    kind: .image,
+                    rectangles: [AnnotationRectangle(x: 0, y: 0, width: 1, height: 1)]
+                ),
+                imageData: image,
+                preferredLanguages: preferredLanguages,
+                mode: .formula
+            )
+            summaries.append(try await submitLocalOCR(request))
+        }
+        guard !summaries.isEmpty else { throw AIJobCoordinatorError.noReadableSources }
+        return summaries
     }
 
     public func latestMathAssistanceArtifacts(

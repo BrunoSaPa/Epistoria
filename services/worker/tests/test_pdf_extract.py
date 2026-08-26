@@ -12,6 +12,7 @@ from epistoria_worker.pdf_extract import (
     chunk_pages,
     extract_pdf_materials,
     extract_pdf_pages,
+    render_pdf_page_png,
 )
 
 
@@ -46,6 +47,13 @@ def test_extracts_text_with_page_provenance_and_marks_ocr_pages() -> None:
     assert not pages[0].needs_ocr
     assert pages[1].needs_ocr
     assert sum(len(chunk) for chunk in chunk_pages(pages)) == 2
+
+
+def test_renders_an_ocr_page_to_a_bounded_in_memory_png() -> None:
+    value = render_pdf_page_png(synthetic_pdf(), 2)
+
+    assert value.startswith(b"\x89PNG")
+    assert len(value) <= 825_000
 
 
 def test_extracts_stable_normalized_regions_for_grounded_citations() -> None:

@@ -133,12 +133,29 @@ the current personal beta.
 
 ## Search
 
-- Search notes, resources, PDF text, annotations, and sessions on the iPad.
+- Search notes, resources, PDF text, annotations, sessions, and labeled local OCR on the iPad.
 - Filter results by content type.
 - See exact text matches first and related results in a separate section.
 - Find related material when the query uses different wording from the note or Source.
 - Open the matching note item or PDF page when a precise location is available.
 - Use related search without a network connection, paired Mac, or configured AI provider.
+- Open a recognized match at its notebook region or frozen Source Version, page, and region.
+
+## Local OCR
+
+- Recognize changed notebook handwriting and imported images on the iPad with Apple Vision.
+- Recognize scanned PDF pages on the trusted Mac when the page does not contain enough embedded
+  text.
+- Keep unreviewed results available in local search with a handwriting, image, or scanned-Source
+  label.
+- Compare the original crop with recognized text or LaTeX. Edit, accept, reject, or copy it.
+- Keep the original Pencil strokes, images, and Source files unchanged.
+- Use an optional local formula model for printed or handwritten formula-to-LaTeX recognition.
+- Download, verify, pause, retry, update, or remove the formula model from Local Processing
+  settings. Model files stay on the Mac and outside notebook sync and export.
+- Include accepted handwriting in the searchable text layer of a note PDF.
+- Require accepted or owner-corrected OCR before Evidence, AI grounding, cards, tests, Concepts,
+  mastery, Study Next, worked steps, graphing, or error diagnosis can use it.
 
 ## Selected-region questions
 

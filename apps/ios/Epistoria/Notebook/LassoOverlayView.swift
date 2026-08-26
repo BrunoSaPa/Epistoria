@@ -1,3 +1,4 @@
+import EpistoriaCore
 import PencilKit
 import SwiftUI
 import UIKit
@@ -9,6 +10,7 @@ struct LassoSelection {
     var selectedBlockIds: [UUID] = []
     /// PNG data for selected Pencil content or canvas-image previews.
     var drawingImagesByBlockId: [UUID: Data] = [:]
+    var locatorsByBlockId: [UUID: SourceLocator] = [:]
 
     var isEmpty: Bool { selectedBlockIds.isEmpty }
 }

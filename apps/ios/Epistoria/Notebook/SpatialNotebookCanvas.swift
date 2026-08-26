@@ -79,6 +79,7 @@ struct SpatialNotebookItem: Identifiable {
 struct SpatialNotebookFocus: Equatable {
     var blockId: UUID
     var highlightedText: String?
+    var normalizedRectangles: [AnnotationRectangle] = []
 }
 
 struct SpatialNotebookCanvas: UIViewRepresentable {
@@ -105,6 +106,7 @@ struct SpatialNotebookCanvas: UIViewRepresentable {
     let onTextChanged: (UUID, NSAttributedString, NoteCanvasPlacement) -> Void
     let onTextEditingEnded: (UUID) -> Void
     let onInkChanged: (Data) -> Void
+    let onPencilActivityChanged: (Bool) -> Void
     let onLassoSelection: (LassoSelection) -> Void
     let onCanvasTap: (CGPoint) -> Void
     let isReadOnly: Bool
@@ -126,6 +128,7 @@ struct SpatialNotebookCanvas: UIViewRepresentable {
         view.onTextChanged = onTextChanged
         view.onTextEditingEnded = onTextEditingEnded
         view.onInkChanged = onInkChanged
+        view.onPencilActivityChanged = onPencilActivityChanged
         view.onLassoSelection = onLassoSelection
         view.onCanvasTap = onCanvasTap
         view.apply(
@@ -159,6 +162,7 @@ final class SpatialNotebookHostView: UIView, UIScrollViewDelegate, PKCanvasViewD
     var onTextChanged: ((UUID, NSAttributedString, NoteCanvasPlacement) -> Void)?
     var onTextEditingEnded: ((UUID) -> Void)?
     var onInkChanged: ((Data) -> Void)?
+    var onPencilActivityChanged: ((Bool) -> Void)?
     var onLassoSelection: ((LassoSelection) -> Void)?
     var onCanvasTap: ((CGPoint) -> Void)?
 
@@ -166,6 +170,7 @@ final class SpatialNotebookHostView: UIView, UIScrollViewDelegate, PKCanvasViewD
     private let contentView = UIView()
     private let paperView = NotebookPaperView()
     private let pencilCanvas = PKCanvasView()
+    private let focusHighlightView = UIView()
     private let lassoView = LassoGestureView()
     private lazy var placementTap = UITapGestureRecognizer(
         target: self,
@@ -253,6 +258,15 @@ final class SpatialNotebookHostView: UIView, UIScrollViewDelegate, PKCanvasViewD
         pencilCanvas.alwaysBounceHorizontal = false
         pencilCanvas.accessibilityLabel = "Apple Pencil drawing layer"
         contentView.addSubview(pencilCanvas)
+
+        focusHighlightView.isUserInteractionEnabled = false
+        focusHighlightView.isAccessibilityElement = false
+        focusHighlightView.backgroundColor = UIColor.label.withAlphaComponent(0.08)
+        focusHighlightView.layer.borderColor = UIColor.label.withAlphaComponent(0.55).cgColor
+        focusHighlightView.layer.borderWidth = 1.5
+        focusHighlightView.layer.cornerRadius = 5
+        focusHighlightView.isHidden = true
+        contentView.addSubview(focusHighlightView)
 
         lassoView.isHidden = true
         lassoView.onSelectionRect = { [weak self] rect in
@@ -363,6 +377,7 @@ final class SpatialNotebookHostView: UIView, UIScrollViewDelegate, PKCanvasViewD
         if focus != lastFocus {
             lastFocus = focus
             pendingFocus = focus
+            if focus == nil { focusHighlightView.isHidden = true }
         }
         applyPendingFocusIfPossible()
         if editingItemId != lastEditingItemId {
@@ -632,18 +647,43 @@ final class SpatialNotebookHostView: UIView, UIScrollViewDelegate, PKCanvasViewD
     }
 
     private func applyPendingFocusIfPossible() {
-        guard hasUsableViewportGeometry,
-              let focus = pendingFocus,
-              let item = itemsByID[focus.blockId]
-        else { return }
+        guard hasUsableViewportGeometry, let focus = pendingFocus else { return }
         pendingFocus = nil
-        let point = CGPoint(
-            x: item.placement.x + item.placement.width / 2,
-            y: item.placement.y + item.placement.height / 2
-        )
+        let point: CGPoint
+        var highlightWorldRect: CGRect?
+        if let rectangle = focus.normalizedRectangles.first {
+            let pageSize = CGSize(
+                width: configuration.pageWidth ?? 2_200,
+                height: configuration.pageHeight ?? 2_200
+            )
+            let worldRect = CGRect(
+                x: CGFloat(rectangle.x) * pageSize.width,
+                y: CGFloat(rectangle.y) * pageSize.height,
+                width: CGFloat(rectangle.width) * pageSize.width,
+                height: CGFloat(rectangle.height) * pageSize.height
+            )
+            highlightWorldRect = worldRect
+            point = CGPoint(x: worldRect.midX, y: worldRect.midY)
+        } else if let item = itemsByID[focus.blockId] {
+            focusHighlightView.isHidden = true
+            point = CGPoint(
+                x: item.placement.x + item.placement.width / 2,
+                y: item.placement.y + item.placement.height / 2
+            )
+        } else {
+            focusHighlightView.isHidden = true
+            return
+        }
         centerViewport(on: point, animated: UIAccessibility.isReduceMotionEnabled == false)
-        select(focus.blockId)
-        if let value = focus.highlightedText {
+        if let highlightWorldRect {
+            focusHighlightView.frame = highlightWorldRect.offsetBy(
+                dx: documentOrigin.x,
+                dy: documentOrigin.y
+            ).insetBy(dx: -5, dy: -5)
+            focusHighlightView.isHidden = false
+        }
+        if itemsByID[focus.blockId] != nil { select(focus.blockId) }
+        if let value = focus.highlightedText, itemsByID[focus.blockId] != nil {
             itemViews[focus.blockId]?.highlight(value)
         }
     }
@@ -687,10 +727,24 @@ final class SpatialNotebookHostView: UIView, UIScrollViewDelegate, PKCanvasViewD
             drawingImages[inkBlockId] = image
         }
         lassoView.reset()
+        let pageSize = CGSize(
+            width: configuration.pageWidth ?? 2_200,
+            height: configuration.pageHeight ?? 2_200
+        )
+        let normalizedSelection = AnnotationRectangle(
+            x: Double(min(max(worldRect.minX / max(pageSize.width, 1), 0), 1)),
+            y: Double(min(max(worldRect.minY / max(pageSize.height, 1), 0), 1)),
+            width: Double(min(max(worldRect.width / max(pageSize.width, 1), 0.000_001), 1)),
+            height: Double(min(max(worldRect.height / max(pageSize.height, 1), 0.000_001), 1))
+        )
+        let locators = Dictionary(uniqueKeysWithValues: Set(selected).map {
+            ($0, SourceLocator(kind: .image, rectangles: [normalizedSelection]))
+        })
         onLassoSelection?(
             LassoSelection(
                 selectedBlockIds: Array(Set(selected)),
-                drawingImagesByBlockId: drawingImages
+                drawingImagesByBlockId: drawingImages,
+                locatorsByBlockId: locators
             )
         )
     }
@@ -719,6 +773,14 @@ final class SpatialNotebookHostView: UIView, UIScrollViewDelegate, PKCanvasViewD
         )
         worldDrawing = canvasView.drawing.transformed(using: inverse)
         onInkChanged?(worldDrawing.dataRepresentation())
+    }
+
+    func canvasViewDidBeginUsingTool(_ canvasView: PKCanvasView) {
+        onPencilActivityChanged?(true)
+    }
+
+    func canvasViewDidEndUsingTool(_ canvasView: PKCanvasView) {
+        onPencilActivityChanged?(false)
     }
 
     private func currentWorldCenter() -> CGPoint {

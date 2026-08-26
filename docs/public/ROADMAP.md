@@ -28,8 +28,10 @@ change after personal use and beta testing.
 - Add editing for an existing shape's style, connectors, snapping, and alignment guides.
 - Evaluate square, angled, and custom eraser footprints after physical Apple Pencil testing.
 - Validate handwritten-math recognition, result review, graph interaction, and original-stroke
-  preservation on physical Pencil-capable iPads. Evaluate general handwriting recognition, a full
-  equation-layout editor, and direct LaTeX input separately.
+  preservation on physical Pencil-capable iPads. Validate local handwriting and formula OCR for
+  English, Spanish, representative notation, ruled and grid paper, memory, energy, rotation,
+  multitasking, and VoiceOver before enabling automatic formula recognition by default. Evaluate
+  a full equation-layout editor and direct LaTeX input separately.
 
 ## Review and learning
 
@@ -116,8 +118,11 @@ Completed:
     durable. Evidence can open its exact Source, appear in a note, show its typed Concept
     relationships, or start a grounded Tutor session.
 25. A notebook Math tool can recognize selected handwriting, propose worked steps, plot a bounded
-    function locally, and diagnose errors. Results require review and never replace original
-    Pencil strokes.
+   function locally, and diagnose errors. Results require review and never replace original
+   Pencil strokes.
+26. Local OCR recognizes changed notebook ink and imported images with Apple Vision. Scanned PDF
+   pages use Apple Vision on the trusted Mac. Optional PP-FormulaNet_plus-S recognition produces
+   reviewable LaTeX without an external OCR API. Accepted handwriting enters searchable note PDFs.
 
 Next stages:
 

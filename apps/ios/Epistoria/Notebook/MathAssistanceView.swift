@@ -72,7 +72,13 @@ struct MathAssistanceSheetView: View {
                         } label: {
                             HStack {
                                 if isPreparing { ProgressView().padding(.trailing, 6) }
-                                Text(isPreparing ? "Preparing…" : "Preview what leaves your Mac")
+                                Text(
+                                    isPreparing
+                                        ? "Preparing…"
+                                        : mode == .recognize
+                                            ? "Prepare local recognition"
+                                            : "Preview what leaves your Mac"
+                                )
                             }
                             .frame(maxWidth: .infinity)
                         }
@@ -82,7 +88,7 @@ struct MathAssistanceSheetView: View {
                 }
 
                 if let prepared, !submitted {
-                    Section("What leaves your Mac") {
+                    Section(mode == .recognize ? "Local recognition" : "What leaves your Mac") {
                         LabeledContent("Selected items", value: prepared.selectionCount.formatted())
                         LabeledContent(
                             "Nearby text items", value: prepared.contextCount.formatted())
@@ -97,7 +103,13 @@ struct MathAssistanceSheetView: View {
                         } label: {
                             HStack {
                                 if isSubmitting { ProgressView().padding(.trailing, 6) }
-                                Text(isSubmitting ? "Queuing…" : "Approve and queue")
+                                Text(
+                                    isSubmitting
+                                        ? "Queuing…"
+                                        : mode == .recognize
+                                            ? "Queue on trusted Mac"
+                                            : "Approve and queue"
+                                )
                                     .fontWeight(.semibold)
                             }
                             .frame(maxWidth: .infinity)
@@ -107,9 +119,7 @@ struct MathAssistanceSheetView: View {
                         .disabled(isSubmitting)
                         .accessibilityIdentifier("math-assistance.submit")
                     } footer: {
-                        Text(
-                            "The selected crop and bounded nearby text go through your trusted Mac using the reviewed provider route. Your original Pencil strokes are not changed."
-                        )
+                        Text(mode == .recognize ? localRecognitionDisclosure : providerDisclosure)
                     }
                 }
 
@@ -170,6 +180,7 @@ struct MathAssistanceSheetView: View {
                 noteId: noteId,
                 selectedBlockIds: selection.selectedBlockIds,
                 selectionImagesByBlockId: selection.drawingImagesByBlockId,
+                selectionLocatorsByBlockId: selection.locatorsByBlockId,
                 mode: mode,
                 learnerInstructions: instructions
             )
@@ -184,12 +195,32 @@ struct MathAssistanceSheetView: View {
         isSubmitting = true
         errorMessage = nil
         do {
-            _ = try await aiJobs.submitMathAssistance(request)
+            if request.request.mode == .recognize {
+                guard model.localProcessingSettings.localMathOCR else {
+                    errorMessage = "Enable and download Local Math OCR in Settings → Local Processing first."
+                    isSubmitting = false
+                    return
+                }
+                _ = try await aiJobs.submitLocalMathRecognition(
+                    request,
+                    preferredLanguages: model.localProcessingSettings.normalizedLanguages
+                )
+            } else {
+                _ = try await aiJobs.submitMathAssistance(request)
+            }
             submitted = true
         } catch {
             errorMessage = error.localizedDescription
         }
         isSubmitting = false
+    }
+
+    private var localRecognitionDisclosure: String {
+        "The encrypted crop is sent only to your trusted Mac and processed by the verified local formula model. No AI provider or API is used. Your original Pencil strokes are not changed."
+    }
+
+    private var providerDisclosure: String {
+        "Only the confirmed expression and bounded nearby text go through your trusted Mac using the reviewed provider route. Your original Pencil strokes are not changed."
     }
 }
 

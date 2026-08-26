@@ -35,6 +35,15 @@ material needed for an approved task while it is processing that task.
 
 PDF extraction runs locally on the Mac and does not require an AI provider.
 
+Notebook handwriting and imported-image OCR use Apple Vision on the iPad. Scanned PDF OCR uses
+Apple Vision on the paired Mac. Optional formula recognition uses a verified local model on the
+Mac. These OCR paths do not call an external API. OCR images, text, LaTeX, corrections, and review
+state synchronize only as encrypted records. Model files do not synchronize or enter notebook
+backups and exports.
+
+Unreviewed OCR is available only in the local encrypted search index. Epistoria requires review
+before OCR can be used for learning records or included in a searchable PDF text layer.
+
 ## Optional AI processing
 
 AI features are disabled when no provider key is configured. Before a note question is queued,

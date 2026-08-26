@@ -1,5 +1,16 @@
 # Release notes
 
+## Local OCR and formula recognition
+
+- Added automatic local handwriting recognition after drawing becomes idle, when a page closes,
+  and when the app backgrounds.
+- Added local OCR for imported images and scanned PDF pages without enough embedded text.
+- Added exact-region local search labels and an original-crop review screen.
+- Added append-only corrections and review requirements before OCR can affect learning features.
+- Added optional PP-FormulaNet_plus-S formula-to-LaTeX recognition on the trusted Mac.
+- Added pinned, verified, pausable model installation under Local Processing settings.
+- Added accepted handwriting to searchable note PDF text layers without changing Pencil strokes.
+
 ## Handwritten mathematics beta
 
 - Added a Math selection tool for handwritten equations and attempted solutions.

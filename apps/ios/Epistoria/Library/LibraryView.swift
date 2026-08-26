@@ -495,6 +495,7 @@ struct ResourceDetailView: View {
     var focusedAnnotationId: UUID?
     var highlightText: String?
     var initialMediaTimeSeconds: Double?
+    var initialHighlightRectangles: [AnnotationRectangle]
 
     @State private var resource: IdentifiedPayload<ResourcePayload>?
     @State private var source: IdentifiedPayload<SourcePayload>?
@@ -519,6 +520,8 @@ struct ResourceDetailView: View {
     @State private var annotations: [IdentifiedPayload<AnnotationPayload>] = []
     @State private var extraction: IdentifiedPayload<PDFExtractionManifest>?
     @State private var extractionJob: AIJobSummary?
+    @State private var ocrArtifacts: [IdentifiedPayload<OCRArtifactPayload>] = []
+    @State private var isShowingOCRReview = false
     @State private var sourceAnalysis: IdentifiedPayload<SourceAnalysisArtifact>?
     @State private var sourceAnalysisJob: AIJobSummary?
     @State private var sourceQueries: [IdentifiedPayload<SourceQueryArtifact>] = []
@@ -557,7 +560,8 @@ struct ResourceDetailView: View {
         initialPageNumber: Int? = nil,
         focusedAnnotationId: UUID? = nil,
         highlightText: String? = nil,
-        initialMediaTimeSeconds: Double? = nil
+        initialMediaTimeSeconds: Double? = nil,
+        initialHighlightRectangles: [AnnotationRectangle] = []
     ) {
         self.model = model
         self.resourceId = resourceId
@@ -566,9 +570,11 @@ struct ResourceDetailView: View {
         self.focusedAnnotationId = focusedAnnotationId
         self.highlightText = highlightText
         self.initialMediaTimeSeconds = initialMediaTimeSeconds
+        self.initialHighlightRectangles = initialHighlightRectangles
         _selectedSourceVersionId = State(initialValue: initialSourceVersionId)
         _pageNumber = State(initialValue: max(initialPageNumber ?? 1, 1))
         _mediaPlaybackStartTime = State(initialValue: initialMediaTimeSeconds)
+        _citationRectangles = State(initialValue: initialHighlightRectangles)
     }
 
     var body: some View {
@@ -786,6 +792,14 @@ struct ResourceDetailView: View {
                 changed: { Task { await load() } }
             )
         }
+        .sheet(isPresented: $isShowingOCRReview) {
+            OCRReviewView(
+                model: model,
+                parentId: resourceId,
+                artifacts: $ocrArtifacts,
+                onCreateEquation: nil
+            )
+        }
         .sheet(
             isPresented: Binding(
                 get: { webSnapshotDifference != nil },
@@ -997,9 +1011,14 @@ struct ResourceDetailView: View {
                             value: extraction.payload.characterCount.formatted()
                         )
                         if !extraction.payload.pagesNeedingOcr.isEmpty {
-                            Text("OCR still needed on pages: \(extraction.payload.pagesNeedingOcr.map(String.init).joined(separator: ", "))")
+                            Text("Pages without embedded text: \(extraction.payload.pagesNeedingOcr.map(String.init).joined(separator: ", "))")
                                 .font(.caption)
                                 .foregroundStyle(EpistoriaDesign.attention)
+                        }
+                        if !ocrArtifacts.isEmpty {
+                            Button("Review recognized pages (\(ocrArtifacts.count))") {
+                                isShowingOCRReview = true
+                            }
                         }
                     } else if let extractionJob {
                         Label("Mac job \(extractionJob.status.lowercased())", systemImage: "desktopcomputer")
@@ -1016,6 +1035,17 @@ struct ResourceDetailView: View {
                             .foregroundStyle(.secondary)
                     }
                 } }
+
+                if resource?.payload.resourceType == .image, !ocrArtifacts.isEmpty {
+                    Section("Recognized text") {
+                        Button("Review recognized image (\(ocrArtifacts.count))") {
+                            isShowingOCRReview = true
+                        }
+                        Text("Unreviewed text is labeled in local search and is not used for learning features.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
 
                 if resource?.payload.resourceType == .website {
                     Section("Captured webpage") {
@@ -1344,8 +1374,9 @@ struct ResourceDetailView: View {
             } else if let initialPageNumber {
                 pageNumber = max(initialPageNumber, 1)
             }
-            if loaded.payload.resourceType == .pdf {
+            if loaded.payload.resourceType == .pdf || loaded.payload.resourceType == .image {
                 extraction = try await model.aiJobs?.latestPDFExtraction(resourceId: resourceId)
+                ocrArtifacts = try await store.ocrArtifacts(parentId: resourceId)
                 if let currentVersionId = resolvedSource.payload.currentVersionId,
                    let coordinator = model.aiJobs {
                     sourceAnalysis = try await coordinator.latestSourceAnalysis(
@@ -1359,6 +1390,7 @@ struct ResourceDetailView: View {
                 }
             } else {
                 extraction = nil
+                ocrArtifacts = []
                 sourceAnalysis = nil
                 sourceQueries = []
             }
@@ -1384,6 +1416,16 @@ struct ResourceDetailView: View {
                 )
                 csvDocument = prepared.csv
                 readableText = prepared.text
+                if loaded.payload.resourceType == .image,
+                   let selectedVersion,
+                   model.localProcessingSettings.automaticSourceOCR
+                {
+                    await recognizeSourceImageIfNeeded(
+                        data: data,
+                        version: selectedVersion,
+                        store: store
+                    )
+                }
             }
             if (loaded.payload.resourceType == .audio || loaded.payload.resourceType == .video),
                let currentVersionId = resolvedSource.payload.currentVersionId,
@@ -1399,6 +1441,7 @@ struct ResourceDetailView: View {
                 }
             }
             let supportsInspector = loaded.payload.resourceType == .pdf
+                || loaded.payload.resourceType == .image
                 || loaded.payload.resourceType == .website
                 || loaded.payload.resourceType.isGoogleWorkspaceSource
                 || loaded.payload.resourceType == .youtube
@@ -1448,6 +1491,50 @@ struct ResourceDetailView: View {
                 return PreparedSourceContent()
             }
         }.value
+    }
+
+    private func recognizeSourceImageIfNeeded(
+        data: Data,
+        version: IdentifiedPayload<SourceVersionPayload>,
+        store: EpistoriaStore
+    ) async {
+        guard let accountId = model.configuration?.accountId,
+              !ocrArtifacts.contains(where: {
+                  $0.payload.sourceVersionId == version.id
+                      && $0.payload.inputRevision == version.revision
+                      && $0.payload.response.engine == .appleVision
+                      && $0.payload.state == .current
+              })
+        else { return }
+        do {
+            let capture = try await LocalTextOCRService.recognizeImage(
+                accountId: accountId,
+                sourceId: resourceId,
+                sourceVersionId: version.id,
+                inputRevision: version.revision,
+                imageData: data,
+                preferredLanguages: model.localProcessingSettings.normalizedLanguages
+            )
+            _ = try await store.saveOCRArtifact(
+                request: capture.request,
+                response: capture.response
+            )
+            let recognized = capture.response.regions.map(\.text).joined(separator: " ")
+            let mathCharacters = CharacterSet(charactersIn: "=+−-×÷/^√∫∑()[]{}<>²³")
+            if model.localProcessingSettings.localMathOCR,
+               recognized.rangeOfCharacter(from: mathCharacters) != nil,
+               let aiJobs = model.aiJobs
+            {
+                var formulaRequest = capture.request
+                formulaRequest.jobId = UUID()
+                formulaRequest.mode = .formula
+                _ = try await aiJobs.submitLocalOCR(formulaRequest)
+            }
+            ocrArtifacts = try await store.ocrArtifacts(parentId: resourceId)
+            model.noteLocalMutation()
+        } catch {
+            // The original image remains readable. Recognition can be retried by reopening it.
+        }
     }
 
     private func refreshSource(_ result: Result<URL, Error>) async {
@@ -1531,7 +1618,14 @@ struct ResourceDetailView: View {
             errorMessage = syncError
             return
         }
-        do { extractionJob = try await coordinator.submitPDFExtraction(resourceId: resourceId) }
+        do {
+            extractionJob = try await coordinator.submitPDFExtraction(
+                resourceId: resourceId,
+                automaticOCR: model.localProcessingSettings.automaticSourceOCR,
+                automaticFormulaOCR: model.localProcessingSettings.localMathOCR,
+                preferredOCRLanguages: model.localProcessingSettings.normalizedLanguages
+            )
+        }
         catch { errorMessage = error.localizedDescription }
     }
 

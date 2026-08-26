@@ -538,10 +538,12 @@ actor EpistoriaExportService {
     ) async throws {
         let entities = try await database.allEntities()
         let allowedAI = exportableAIEntityIds(in: entities)
+        let acceptedLocalOCR = exportableLocalOCRIds(in: entities)
         var records: [[String: Any]] = []
         for entity in entities {
             try Task.checkCancellation()
             if entity.entityType == .aiArtifact,
+               !acceptedLocalOCR.contains(entity.id),
                (!includingDerivedAI || !allowedAI.contains(entity.id)) {
                 continue
             }
@@ -586,6 +588,12 @@ actor EpistoriaExportService {
 
     private func exportableAIEntityIds(in entities: [StoredEntity]) -> Set<UUID> {
         let ai = entities.filter { $0.entityType == .aiArtifact }
+        let acceptedOCRArtifactIds = Set(ai.compactMap { entity -> UUID? in
+            guard let artifact = try? CanonicalJSON.decode(OCRArtifactPayload.self, from: entity.content),
+                  artifact.reviewState == .accepted || artifact.reviewState == .edited
+            else { return nil }
+            return entity.id
+        })
         let acceptedTranscriptChunkIds = Set(
             ai.compactMap { entity -> MediaTranscriptionManifest? in
                 guard let manifest = try? CanonicalJSON.decode(
@@ -599,8 +607,30 @@ actor EpistoriaExportService {
         return Set(ai.compactMap { entity in
             let accepted = reviewedAIArtifact(entity.content)
                 ?? acceptedTranscriptChunkIds.contains(entity.id)
+                || ((try? CanonicalJSON.decode(OCRCorrectionPayload.self, from: entity.content))
+                    .map { acceptedOCRArtifactIds.contains($0.artifactId) } ?? false)
             return accepted ? entity.id : nil
         })
+    }
+
+    private func exportableLocalOCRIds(in entities: [StoredEntity]) -> Set<UUID> {
+        let ai = entities.filter { $0.entityType == .aiArtifact }
+        let acceptedArtifacts = Set(ai.compactMap { entity -> UUID? in
+            guard let artifact = try? CanonicalJSON.decode(OCRArtifactPayload.self, from: entity.content),
+                  artifact.state == .current,
+                  artifact.reviewState == .accepted || artifact.reviewState == .edited
+            else { return nil }
+            return entity.id
+        })
+        let corrections = ai.compactMap { entity -> UUID? in
+            guard let correction = try? CanonicalJSON.decode(
+                OCRCorrectionPayload.self,
+                from: entity.content
+            ), acceptedArtifacts.contains(correction.artifactId)
+            else { return nil }
+            return entity.id
+        }
+        return acceptedArtifacts.union(corrections)
     }
 
     private func exportAnnotations(to root: URL) async throws {
@@ -730,6 +760,12 @@ actor EpistoriaExportService {
             return
         }
         let entities = try await database.entities(type: .aiArtifact)
+        let acceptedOCRArtifactIds = Set(entities.compactMap { entity -> UUID? in
+            guard let artifact = try? CanonicalJSON.decode(OCRArtifactPayload.self, from: entity.content),
+                  artifact.reviewState == .accepted || artifact.reviewState == .edited
+            else { return nil }
+            return entity.id
+        })
         let acceptedTranscriptChunkIds = Set(
             entities.compactMap { entity -> MediaTranscriptionManifest? in
                 guard let manifest = try? CanonicalJSON.decode(
@@ -743,6 +779,8 @@ actor EpistoriaExportService {
         let records: [[String: Any]] = try entities.compactMap { entity in
             let accepted = reviewedAIArtifact(entity.content)
                 ?? acceptedTranscriptChunkIds.contains(entity.id)
+                || ((try? CanonicalJSON.decode(OCRCorrectionPayload.self, from: entity.content))
+                    .map { acceptedOCRArtifactIds.contains($0.artifactId) } ?? false)
             guard accepted else { return nil }
             guard let content = try JSONSerialization.jsonObject(with: entity.content) as? [String: Any]
             else { throw EpistoriaExportError.invalidJSON("ai-artifacts.json") }
@@ -772,6 +810,10 @@ actor EpistoriaExportService {
         }
         if let artifact = try? CanonicalJSON.decode(MathAssistanceArtifact.self, from: content) {
             return artifact.reviewState == .accepted || artifact.reviewState == .edited
+        }
+        if let artifact = try? CanonicalJSON.decode(OCRArtifactPayload.self, from: content) {
+            return artifact.state == .current
+                && (artifact.reviewState == .accepted || artifact.reviewState == .edited)
         }
         if let artifact = try? CanonicalJSON.decode(MediaTranscriptionManifest.self, from: content) {
             return artifact.reviewState == .accepted || artifact.reviewState == .edited

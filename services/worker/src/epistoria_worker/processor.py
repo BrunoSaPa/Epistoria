@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import hmac
 import json
 import logging
@@ -16,6 +17,13 @@ from .asset_crypto import AssetCryptoError, decrypt_bytes, plaintext_dedupe_tag
 from .canonical import json_bytes
 from .cost_ledger import CostLedger
 from .crypto import EncryptedEnvelope, EnvelopeError, decrypt_job, encrypt_entity
+from .local_models import (
+    PP_FORMULANET_PLUS_S,
+    LocalModelError,
+    LocalModelManager,
+    LocalModelPaused,
+)
+from .local_ocr import LocalOCRError, OCREngine
 from .models import (
     AIJobLease,
     AutomationAuthorizationV1,
@@ -23,6 +31,9 @@ from .models import (
     FreeResponseFeedbackRequestV1,
     LearningGenerationArtifactV1,
     LearningGenerationRequestV1,
+    LocalModelControlRequestV1,
+    LocalModelStatusArtifactV1,
+    LocalOCRRequestV1,
     MathAssistanceArtifactV1,
     MathAssistanceRequestV1,
     MediaTranscriptionChunkV1,
@@ -30,9 +41,11 @@ from .models import (
     MediaTranscriptionRequestV1,
     NoteQueryArtifactV1,
     NoteQueryRequestV1,
+    OCRArtifactV1,
     PDFExtractionChunkV1,
     PDFExtractionManifestV1,
     PDFExtractionRequestV1,
+    PDFExtractionRequestV2,
     ProviderConfigurationRequestV1,
     SessionDigestArtifactV1,
     SessionDigestRequestV1,
@@ -57,6 +70,7 @@ from .pdf_extract import (
     chunk_pages,
     extract_pdf_materials,
     extract_pdf_pages,
+    render_pdf_page_png,
 )
 from .providers.base import DigestProvider, ProviderError
 from .providers.manager import ProviderConfigurationError, ProviderManager
@@ -85,6 +99,8 @@ class WorkerProcessor:
         maximum_asset_bytes: int,
         provider_configuration_manager: ProviderManager | None = None,
         cost_ledger: CostLedger | None = None,
+        local_ocr_engine: OCREngine | None = None,
+        local_model_manager: LocalModelManager | None = None,
     ) -> None:
         if len(account_key) != 32:
             raise ValueError("account key must be 32 bytes")
@@ -96,6 +112,8 @@ class WorkerProcessor:
         self._provider_configuration_manager = provider_configuration_manager
         self._maximum_asset_bytes = maximum_asset_bytes
         self._cost_ledger = cost_ledger
+        self._local_ocr_engine = local_ocr_engine
+        self._local_model_manager = local_model_manager
 
     def process_once(self) -> bool:
         lease = self._api.claim_job()
@@ -111,6 +129,8 @@ class WorkerProcessor:
                 self._outbox.save(completion)
             self._deliver(completion)
             LOGGER.info("completed job id=%s artifact=%s", lease.id, completion.artifact_entity_id)
+        except LocalModelPaused:
+            LOGGER.info("local model download paused job=%s", lease.id)
         except ProcessingFailure as error:
             LOGGER.warning("job rejected id=%s code=%s", lease.id, error.code)
             self._api.fail_job(lease.id, error_code=error.code, retryable=error.retryable)
@@ -158,6 +178,10 @@ class WorkerProcessor:
             return self._provider_configuration(lease, plaintext)
         if lease.job_type == "TUTOR_TURN":
             return self._tutor_turn(lease, plaintext)
+        if lease.job_type == "LOCAL_OCR":
+            return self._local_ocr(lease, plaintext)
+        if lease.job_type == "LOCAL_MODEL_CONTROL":
+            return self._local_model_control(lease, plaintext)
         if lease.job_type in {
             "SOURCE_EXTRACTION",
             "TOPIC_SYNTHESIS",
@@ -171,6 +195,99 @@ class WorkerProcessor:
         }:
             return self._learning_generation(lease, plaintext)
         raise ProcessingFailure(code="UNSUPPORTED_JOB_TYPE", retryable=False)
+
+    def _local_ocr(self, lease: AIJobLease, plaintext: bytes) -> CachedCompletion:
+        if self._local_ocr_engine is None:
+            raise ProcessingFailure(code="LOCAL_OCR_UNAVAILABLE", retryable=False)
+        try:
+            request = LocalOCRRequestV1.model_validate_json(plaintext)
+        except ValidationError as error:
+            raise ProcessingFailure(code="INVALID_JOB_PAYLOAD", retryable=False) from error
+        if request.account_id != self._account_id or request.job_id != lease.id:
+            raise ProcessingFailure(code="JOB_IDENTITY_MISMATCH", retryable=False)
+        try:
+            response = self._local_ocr_engine.recognize(request)
+        except LocalOCRError as error:
+            raise ProcessingFailure(code=error.code, retryable=error.retryable) from error
+
+        artifact_id = uuid5(lease.id, "ocr-artifact/v1")
+        artifact = OCRArtifactV1(
+            job_id=lease.id,
+            target_kind=request.target_kind,
+            target_id=request.target_id,
+            parent_id=request.parent_id,
+            note_id=request.note_id,
+            source_version_id=request.source_version_id,
+            input_revision=request.input_revision,
+            page_number=request.page_number,
+            locator=request.locator,
+            input_preview=(
+                request.image_content if len(request.image_content) <= 900_000 else None
+            ),
+            generated_at=datetime.now(UTC),
+            response=response,
+        )
+        relation_ids = [
+            request.target_id,
+            *(value for value in (request.note_id, request.source_version_id) if value is not None),
+        ]
+        mutation = self._encrypted_mutation(
+            entity_id=artifact_id,
+            parent_id=request.parent_id,
+            relation_ids=list(dict.fromkeys(relation_ids)),
+            plaintext=json_bytes(artifact),
+        )
+        return CachedCompletion(
+            job_id=lease.id,
+            artifact_entity_id=artifact_id,
+            mutations=[mutation],
+        )
+
+    def _local_model_control(self, lease: AIJobLease, plaintext: bytes) -> CachedCompletion:
+        if self._local_model_manager is None:
+            raise ProcessingFailure(code="LOCAL_MODEL_MANAGER_UNAVAILABLE", retryable=False)
+        try:
+            request = LocalModelControlRequestV1.model_validate_json(plaintext)
+        except ValidationError as error:
+            raise ProcessingFailure(code="INVALID_JOB_PAYLOAD", retryable=False) from error
+        if request.account_id != self._account_id or request.job_id != lease.id:
+            raise ProcessingFailure(code="JOB_IDENTITY_MISMATCH", retryable=False)
+        try:
+            if request.operation == "INSTALL":
+                status = self._local_model_manager.install(
+                    PP_FORMULANET_PLUS_S,
+                    should_pause=lambda: self._api.job_status(lease.id) == "CANCELLED",
+                )
+            elif request.operation == "REMOVE":
+                status = self._local_model_manager.remove(PP_FORMULANET_PLUS_S)
+            else:
+                status = self._local_model_manager.status(PP_FORMULANET_PLUS_S)
+        except LocalModelError as error:
+            raise ProcessingFailure(code=error.code, retryable=error.retryable) from error
+
+        artifact_id = uuid5(lease.id, "local-model-status/v1")
+        artifact = LocalModelStatusArtifactV1(
+            job_id=lease.id,
+            model_id="PP-FormulaNet_plus-S",
+            model_version=PP_FORMULANET_PLUS_S.revision,
+            operation=request.operation,
+            state=status.state,
+            expected_bytes=status.expected_bytes,
+            verified_bytes=status.verified_bytes,
+            license="Apache-2.0",
+            checked_at=datetime.now(UTC),
+        )
+        mutation = self._encrypted_mutation(
+            entity_id=artifact_id,
+            parent_id=None,
+            relation_ids=[],
+            plaintext=json_bytes(artifact),
+        )
+        return CachedCompletion(
+            job_id=lease.id,
+            artifact_entity_id=artifact_id,
+            mutations=[mutation],
+        )
 
     def _tutor_turn(self, lease: AIJobLease, plaintext: bytes) -> CachedCompletion:
         if self._digest_provider is None:
@@ -844,7 +961,12 @@ class WorkerProcessor:
 
     def _pdf_extraction(self, lease: AIJobLease, plaintext: bytes) -> CachedCompletion:
         try:
-            request = PDFExtractionRequestV1.model_validate_json(plaintext)
+            raw = json.loads(plaintext)
+            request: PDFExtractionRequestV1 | PDFExtractionRequestV2
+            if raw.get("schemaVersion") == "pdf-extraction-request/v2":
+                request = PDFExtractionRequestV2.model_validate(raw)
+            else:
+                request = PDFExtractionRequestV1.model_validate(raw)
             asset_key = base64url.decode(request.asset_key, field="assetKey")
             if len(asset_key) != 32:
                 raise ValueError("asset key has the wrong length")
@@ -868,6 +990,12 @@ class WorkerProcessor:
         try:
             pages = extract_pdf_pages(pdf_bytes)
             page_chunks = chunk_pages(pages)
+            ocr_mutations = self._source_ocr_mutations(
+                lease=lease,
+                request=request,
+                pages=pages,
+                pdf_bytes=pdf_bytes,
+            )
         except PDFExtractionError as error:
             raise ProcessingFailure(code="PDF_EXTRACTION_FAILED", retryable=False) from error
         finally:
@@ -888,6 +1016,7 @@ class WorkerProcessor:
                 chunk_index=index,
                 pages=selected_pages,
             )
+
             mutations.append(
                 self._encrypted_mutation(
                     entity_id=entity_id,
@@ -896,6 +1025,8 @@ class WorkerProcessor:
                     plaintext=json_bytes(chunk),
                 )
             )
+
+        mutations.extend(ocr_mutations)
 
         artifact_id = uuid5(lease.id, "ai-artifact/v1")
         manifest = PDFExtractionManifestV1(
@@ -919,6 +1050,127 @@ class WorkerProcessor:
             job_id=lease.id,
             artifact_entity_id=artifact_id,
             mutations=mutations,
+        )
+
+    def _source_ocr_mutations(
+        self,
+        *,
+        lease: AIJobLease,
+        request: PDFExtractionRequestV1 | PDFExtractionRequestV2,
+        pages: list[Any],
+        pdf_bytes: bytes,
+    ) -> list[dict[str, Any]]:
+        if (
+            not isinstance(request, PDFExtractionRequestV2)
+            or not request.automatic_ocr
+            or self._local_ocr_engine is None
+        ):
+            return []
+        mutations: list[dict[str, Any]] = []
+        for page in pages:
+            if not page.needs_ocr:
+                continue
+            png = render_pdf_page_png(pdf_bytes, page.page_number)
+            encoded = base64.b64encode(png).decode("ascii")
+            locator = {
+                "schemaVersion": "source-locator/v1",
+                "kind": "PDF",
+                "page": page.page_number,
+                "rectangles": [{"x": 0, "y": 0, "width": 1, "height": 1}],
+            }
+            text_request = LocalOCRRequestV1(
+                account_id=request.account_id,
+                job_id=lease.id,
+                target_kind="SOURCE_PAGE",
+                target_id=request.source_version_id,
+                parent_id=request.resource_id,
+                source_version_id=request.source_version_id,
+                input_revision=0,
+                page_number=page.page_number,
+                locator=locator,
+                image_content=encoded,
+                preferred_languages=request.preferred_ocr_languages,
+                mode="TEXT",
+                disclosure_acknowledged=True,
+            )
+            try:
+                response = self._local_ocr_engine.recognize(text_request)
+            except LocalOCRError as error:
+                LOGGER.warning(
+                    "local Source OCR unavailable job=%s page=%d code=%s",
+                    lease.id,
+                    page.page_number,
+                    error.code,
+                )
+                continue
+            mutations.append(
+                self._ocr_artifact_mutation(
+                    lease=lease,
+                    request=text_request,
+                    response=response,
+                    suffix=f"source-page/{page.page_number}/text",
+                )
+            )
+            if request.automatic_formula_ocr and self._response_looks_mathematical(response):
+                formula_request = text_request.model_copy(update={"mode": "FORMULA"})
+                try:
+                    formula_response = self._local_ocr_engine.recognize(formula_request)
+                except LocalOCRError as error:
+                    LOGGER.warning(
+                        "local Source formula OCR unavailable job=%s page=%d code=%s",
+                        lease.id,
+                        page.page_number,
+                        error.code,
+                    )
+                else:
+                    mutations.append(
+                        self._ocr_artifact_mutation(
+                            lease=lease,
+                            request=formula_request,
+                            response=formula_response,
+                            suffix=f"source-page/{page.page_number}/formula",
+                        )
+                    )
+        return mutations
+
+    @staticmethod
+    def _response_looks_mathematical(response: Any) -> bool:
+        text = " ".join(region.text for region in response.regions)
+        return bool(re.search(r"[=+\-*/^√∫∑]|\b\d*[A-Za-z]\s*\d*\b", text))
+
+    def _ocr_artifact_mutation(
+        self,
+        *,
+        lease: AIJobLease,
+        request: LocalOCRRequestV1,
+        response: Any,
+        suffix: str,
+    ) -> dict[str, Any]:
+        artifact = OCRArtifactV1(
+            job_id=lease.id,
+            target_kind=request.target_kind,
+            target_id=request.target_id,
+            parent_id=request.parent_id,
+            note_id=request.note_id,
+            source_version_id=request.source_version_id,
+            input_revision=request.input_revision,
+            page_number=request.page_number,
+            locator=request.locator,
+            input_preview=(
+                request.image_content if len(request.image_content) <= 900_000 else None
+            ),
+            generated_at=datetime.now(UTC),
+            response=response,
+        )
+        return self._encrypted_mutation(
+            entity_id=uuid5(lease.id, f"ocr-artifact/{suffix}"),
+            parent_id=request.parent_id,
+            relation_ids=[
+                value
+                for value in (request.target_id, request.source_version_id)
+                if value is not None
+            ],
+            plaintext=json_bytes(artifact),
         )
 
     def _media_transcription(self, lease: AIJobLease, plaintext: bytes) -> CachedCompletion:

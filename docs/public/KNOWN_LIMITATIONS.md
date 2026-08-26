@@ -87,8 +87,13 @@ Epistoria remains in personal beta. The following limits apply to the current pr
 - A live paid AI evaluation is not part of the current release evidence.
 - Source guides and exact question citations currently apply to PDFs. Other Source types do not
   yet use this source-analysis screen.
-- Scanned pages can require OCR. Vector-only diagrams and PDFs with incomplete image metadata can
-  produce incomplete figure notes. The app shows reported coverage limits.
+- Scanned pages can use local OCR. Recognition quality varies with handwriting, rotation,
+  contrast, paper patterns, notation, and scan quality. Vector-only diagrams and PDFs with
+  incomplete image metadata can still produce incomplete figure notes. The app shows reported
+  coverage limits.
+- Automatic formula recognition remains opt-in until representative physical-iPad Pencil and
+  real-model testing is complete. A paired Apple Silicon Mac and an approximately 264 MB verified
+  local model are required. OCR results must be reviewed before learning features use them.
 - Large PDFs use a bounded analysis pass. A result can cover selected passages instead of every
   passage and must state that limit.
 - Manual cards, tests, and typed Concept connections are available. Generated card, test, Concept,
