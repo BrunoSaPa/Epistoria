@@ -86,9 +86,10 @@ struct DataHealthView: View {
             .sheet(item: $pairing) { PairMacView(material: $0, apiURL: model.configuration?.apiURL) }
             #if DEBUG
             .sheet(isPresented: $showDevelopmentReset) {
-                DeveloperNotebookResetView {
-                    try await model.deleteLocalDevelopmentNotebook()
-                }
+                DeveloperNotebookResetView(
+                    onExport: { try await model.createEncryptedDevelopmentBackup() },
+                    onDelete: { try await model.deleteLocalDevelopmentNotebook() }
+                )
             }
             #endif
             .sheet(item: $exportResult) { result in
@@ -289,9 +290,9 @@ struct DataHealthView: View {
             }
             .disabled(isWorking || model.api == nil)
         } header: {
-            Text("Trusted Mac worker")
+            Text("Optional Compute Node")
         } footer: {
-            Text("The Mac worker is required only for PDF text extraction and optional AI jobs. It stores the account key in macOS Keychain; the server never receives it.")
+            Text("A Compute Node can accelerate long transcription, office conversion, larger local models, and selected local providers. Notebook storage, search, text recognition, and direct hosted-provider access do not require it. Its account key remains in macOS Keychain; the server never receives it.")
         }
     }
 

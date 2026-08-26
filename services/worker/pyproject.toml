@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "epistoria-worker"
 version = "0.1.0"
-description = "Trusted Mac processing worker for Epistoria"
+description = "Optional Epistoria Compute Node for accelerated local processing"
 readme = "README.md"
 requires-python = ">=3.13"
 license = { text = "Proprietary — personal project" }
@@ -41,6 +41,7 @@ dev = [
 
 [project.scripts]
 epistoria-worker = "epistoria_worker.cli:main"
+epistoria-compute-node = "epistoria_worker.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/epistoria_worker"]

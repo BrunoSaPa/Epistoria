@@ -53,6 +53,7 @@ public struct LocalEntityWrite: Equatable, Sendable {
     public var relationIds: [UUID]
     public var content: Data
     public var search: SearchDocument?
+    public var searchProjection: SearchProjectionWrite?
     public var modifiedAt: Date
 
     public init(
@@ -62,6 +63,7 @@ public struct LocalEntityWrite: Equatable, Sendable {
         relationIds: [UUID] = [],
         content: Data,
         search: SearchDocument? = nil,
+        searchProjection: SearchProjectionWrite? = nil,
         modifiedAt: Date = .now
     ) {
         self.id = id
@@ -70,7 +72,101 @@ public struct LocalEntityWrite: Equatable, Sendable {
         self.relationIds = relationIds
         self.content = content
         self.search = search
+        self.searchProjection = searchProjection
         self.modifiedAt = modifiedAt
+    }
+}
+
+public enum SearchSegmentOrigin: String, Codable, CaseIterable, Sendable {
+    case writtenText = "WRITTEN_TEXT"
+    case handwritingOCR = "HANDWRITING_OCR"
+    case imageOCR = "IMAGE_OCR"
+    case sourceExtraction = "SOURCE_EXTRACTION"
+    case sourceOCR = "SOURCE_OCR"
+    case transcript = "TRANSCRIPT"
+    case evidence = "EVIDENCE"
+    case correctedRecognition = "CORRECTED_RECOGNITION"
+}
+
+public enum SearchSegmentReviewState: String, Codable, CaseIterable, Sendable {
+    case authored = "AUTHORED"
+    case unreviewed = "UNREVIEWED"
+    case accepted = "ACCEPTED"
+    case corrected = "CORRECTED"
+}
+
+public struct SearchSegmentLocator: Codable, Equatable, Sendable {
+    public var targetId: UUID?
+    public var sourceVersionId: UUID?
+    public var pageNumber: Int?
+    public var rectangles: [AnnotationRectangle]
+    public var startSeconds: Double?
+
+    public init(
+        targetId: UUID? = nil,
+        sourceVersionId: UUID? = nil,
+        pageNumber: Int? = nil,
+        rectangles: [AnnotationRectangle] = [],
+        startSeconds: Double? = nil
+    ) {
+        self.targetId = targetId
+        self.sourceVersionId = sourceVersionId
+        self.pageNumber = pageNumber
+        self.rectangles = Array(rectangles.prefix(64))
+        self.startSeconds = startSeconds
+    }
+}
+
+public struct SearchSegmentWrite: Equatable, Sendable, Identifiable {
+    public var id: UUID
+    public var ownerEntityId: UUID
+    public var sourceEntityId: UUID
+    public var origin: SearchSegmentOrigin
+    public var reviewState: SearchSegmentReviewState
+    public var authority: Int
+    public var language: String?
+    public var title: String
+    public var body: String
+    public var locator: SearchSegmentLocator?
+    public var contentRevision: Int
+    public var updatedAt: Date
+
+    public init(
+        id: UUID,
+        ownerEntityId: UUID,
+        sourceEntityId: UUID,
+        origin: SearchSegmentOrigin,
+        reviewState: SearchSegmentReviewState,
+        authority: Int,
+        language: String? = nil,
+        title: String,
+        body: String,
+        locator: SearchSegmentLocator? = nil,
+        contentRevision: Int = 0,
+        updatedAt: Date = .now
+    ) {
+        self.id = id
+        self.ownerEntityId = ownerEntityId
+        self.sourceEntityId = sourceEntityId
+        self.origin = origin
+        self.reviewState = reviewState
+        self.authority = min(max(authority, 0), 100)
+        self.language = language.map { String($0.prefix(32)) }
+        self.title = String(title.prefix(1_000))
+        self.body = String(body.prefix(500_000))
+        self.locator = locator
+        self.contentRevision = max(contentRevision, 0)
+        self.updatedAt = updatedAt
+    }
+}
+
+public struct SearchProjectionWrite: Equatable, Sendable {
+    public var sourceEntityId: UUID
+    public var segments: [SearchSegmentWrite]
+
+    public init(sourceEntityId: UUID, segments: [SearchSegmentWrite]) {
+        self.sourceEntityId = sourceEntityId
+        self.segments = segments
     }
 }
 
@@ -128,6 +224,33 @@ public struct SearchHit: Equatable, Sendable, Identifiable {
     public var snippet: String
     public var matchKind: SearchMatchKind
     public var relevance: Double?
+    public var origin: SearchSegmentOrigin?
+    public var reviewState: SearchSegmentReviewState?
+    public var sourceEntityId: UUID?
+    public var locator: SearchSegmentLocator?
+    public var additionalSnippets: [String]
+
+    public init(
+        entity: StoredEntity,
+        snippet: String,
+        matchKind: SearchMatchKind,
+        relevance: Double?,
+        origin: SearchSegmentOrigin? = nil,
+        reviewState: SearchSegmentReviewState? = nil,
+        sourceEntityId: UUID? = nil,
+        locator: SearchSegmentLocator? = nil,
+        additionalSnippets: [String] = []
+    ) {
+        self.entity = entity
+        self.snippet = snippet
+        self.matchKind = matchKind
+        self.relevance = relevance
+        self.origin = origin
+        self.reviewState = reviewState
+        self.sourceEntityId = sourceEntityId
+        self.locator = locator
+        self.additionalSnippets = Array(additionalSnippets.prefix(2))
+    }
 }
 
 public struct LocalConflict: Equatable, Sendable, Identifiable {
@@ -369,6 +492,7 @@ public actor SQLCipherDatabase {
         relationIds: [UUID] = [],
         content: Data,
         search: SearchDocument? = nil,
+        searchProjection: SearchProjectionWrite? = nil,
         modifiedAt: Date = .now
     ) throws -> StoredEntity {
         guard content.count <= 2_097_152 else { throw LocalDatabaseError.payloadTooLarge }
@@ -422,7 +546,13 @@ public actor SQLCipherDatabase {
                     .real(Date.now.timeIntervalSince1970),
                 ]
             )
-            try updateSearch(id: id, document: search)
+            try updateSearch(
+                id: id,
+                entityType: entityType,
+                document: search,
+                projection: searchProjection,
+                modifiedAt: modifiedAt
+            )
         }
         return StoredEntity(
             id: id,
@@ -548,7 +678,13 @@ public actor SQLCipherDatabase {
                             .real(Date.now.timeIntervalSince1970),
                         ]
                     )
-                    try updateSearch(id: write.id, document: write.search)
+                    try updateSearch(
+                        id: write.id,
+                        entityType: write.entityType,
+                        document: write.search,
+                        projection: write.searchProjection,
+                        modifiedAt: write.modifiedAt
+                    )
                 }
                 for current in preparedDeletions {
                     try run(
@@ -575,7 +711,12 @@ public actor SQLCipherDatabase {
                             .real(Date.now.timeIntervalSince1970),
                         ]
                     )
-                    try updateSearch(id: current.id, document: nil)
+                    try updateSearch(
+                        id: current.id,
+                        entityType: current.entityType,
+                        document: nil,
+                        modifiedAt: deletedAt
+                    )
                 }
                 for asset in assets {
                     try registerLocalAsset(asset)
@@ -781,6 +922,173 @@ public actor SQLCipherDatabase {
             && scalarInteger("SELECT count(*) FROM local_conflicts") == 0
     }
 
+    @discardableResult
+    public func saveProcessingJob(_ job: ProcessingJob) throws -> ProcessingJob {
+        guard !job.kind.isEmpty, !job.inputFingerprint.isEmpty,
+              job.requiredCapabilities.count <= ProcessingCapability.allCases.count,
+              job.attemptCount >= 0
+        else { throw LocalDatabaseError.invalidRow }
+        let capabilities = try JSONEncoder().encode(job.requiredCapabilities)
+        guard let capabilitiesText = String(data: capabilities, encoding: .utf8) else {
+            throw LocalDatabaseError.invalidRow
+        }
+        let approval = try job.approval.map(CanonicalJSON.encode)
+        try run(
+            """
+            INSERT INTO processing_jobs(
+                id, kind, state, input_entity_id, input_revision, input_fingerprint,
+                required_capabilities, selected_route, compute_node_id, approval,
+                attempt_count, progress, error_code, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                kind=excluded.kind,
+                state=excluded.state,
+                input_entity_id=excluded.input_entity_id,
+                input_revision=excluded.input_revision,
+                input_fingerprint=excluded.input_fingerprint,
+                required_capabilities=excluded.required_capabilities,
+                selected_route=excluded.selected_route,
+                compute_node_id=excluded.compute_node_id,
+                approval=excluded.approval,
+                attempt_count=excluded.attempt_count,
+                progress=excluded.progress,
+                error_code=excluded.error_code,
+                updated_at=excluded.updated_at
+            """,
+            [
+                .text(canonical(job.id)), .text(job.kind), .text(job.state.rawValue),
+                job.inputEntityId.map { .text(canonical($0)) } ?? .null,
+                job.inputRevision.map { .integer(Int64($0)) } ?? .null,
+                .text(job.inputFingerprint), .text(capabilitiesText),
+                job.selectedRoute.map { .text($0.rawValue) } ?? .null,
+                job.computeNodeId.map { .text(canonical($0)) } ?? .null,
+                approval.map(SQLValue.blob) ?? .null,
+                .integer(Int64(job.attemptCount)),
+                job.progress.map(SQLValue.real) ?? .null,
+                job.errorCode.map(SQLValue.text) ?? .null,
+                .real(job.createdAt.timeIntervalSince1970),
+                .real(job.updatedAt.timeIntervalSince1970),
+            ]
+        )
+        return job
+    }
+
+    public func processingJob(id: UUID) throws -> ProcessingJob? {
+        try query(
+            "SELECT * FROM processing_jobs WHERE id=? LIMIT 1",
+            [.text(canonical(id))]
+        ).first.map(processingJobFromRow)
+    }
+
+    public func processingJobs(states: [ProcessingJobState]? = nil) throws -> [ProcessingJob] {
+        let uniqueStates = Array(Set(states ?? [])).sorted { $0.rawValue < $1.rawValue }
+        var sql = "SELECT * FROM processing_jobs"
+        var values: [SQLValue] = []
+        if states != nil {
+            if uniqueStates.isEmpty { return [] }
+            sql += " WHERE state IN (\(Array(repeating: "?", count: uniqueStates.count).joined(separator: ",")))"
+            values = uniqueStates.map { .text($0.rawValue) }
+        }
+        sql += " ORDER BY updated_at DESC, id ASC"
+        return try query(sql, values).map(processingJobFromRow)
+    }
+
+    public func transitionProcessingJob(
+        id: UUID,
+        to state: ProcessingJobState,
+        route: ProcessingRoute? = nil,
+        computeNodeId: UUID? = nil,
+        progress: Double? = nil,
+        errorCode: String? = nil,
+        at date: Date = .now
+    ) throws -> ProcessingJob {
+        guard var job = try processingJob(id: id),
+              Self.allowedProcessingTransitions[job.state]?.contains(state) == true
+        else { throw LocalDatabaseError.invalidRow }
+        job.state = state
+        if let route { job.selectedRoute = route }
+        job.computeNodeId = computeNodeId ?? job.computeNodeId
+        if state == .running { job.attemptCount += 1 }
+        job.progress = progress.map { min(max($0.isFinite ? $0 : 0, 0), 1) }
+        job.errorCode = errorCode.map { String($0.prefix(128)) }
+        job.updatedAt = date
+        return try saveProcessingJob(job)
+    }
+
+    public func rerouteJobs(fromComputeNode nodeId: UUID, at date: Date = .now) throws -> Int {
+        let jobs = try processingJobs().filter {
+            $0.computeNodeId == nodeId && !$0.state.isTerminal
+        }
+        for var job in jobs {
+            job.state = .waitingForCapability
+            job.selectedRoute = nil
+            job.computeNodeId = nil
+            job.progress = nil
+            job.errorCode = "COMPUTE_NODE_REMOVED"
+            job.updatedAt = date
+            _ = try saveProcessingJob(job)
+        }
+        return jobs.count
+    }
+
+    /// Replaces disposable local search state without mutating or synchronizing an entity.
+    public func replaceSearchProjection(_ projection: SearchProjectionWrite) throws {
+        try transaction {
+            let previousOwners = try query(
+                "SELECT DISTINCT owner_entity_id FROM search_segments WHERE source_entity_id=?",
+                [.text(canonical(projection.sourceEntityId))]
+            ).compactMap { row -> String? in
+                guard case let .text(value) = row["owner_entity_id"] else { return nil }
+                return value
+            }
+            try replaceSearchProjectionInsideTransaction(projection)
+            let currentOwners = projection.segments.map { canonical($0.ownerEntityId) }
+            for owner in Set(previousOwners + currentOwners) {
+                try rebuildOwnerSearchDocument(ownerEntityId: owner)
+            }
+        }
+    }
+
+    /// Deletes and rebuilds the disposable exact-search projection from authoritative entities.
+    /// Dedicated recognition projections are rebuilt separately by `EpistoriaStore` because
+    /// their owner, locator, and current review state are derived from multiple entities.
+    public func rebuildBaseSearchProjection() throws {
+        let rows = try query("SELECT * FROM entities WHERE tombstone=0 ORDER BY id ASC")
+        let entities = try rows.map(entityFromRow)
+        try transaction {
+            try run("DELETE FROM search_segments_fts")
+            try run("DELETE FROM search_segments")
+            try run("DELETE FROM search_index")
+            try run("DELETE FROM search_embeddings")
+            try run("DELETE FROM search_embedding_status")
+            for entity in entities {
+                guard entity.entityType != .recognitionArtifact,
+                      entity.entityType != .recognitionDecision
+                else { continue }
+                try updateSearch(
+                    id: entity.id,
+                    entityType: entity.entityType,
+                    document: EntitySearchIndexer.document(
+                        for: entity.entityType,
+                        content: entity.content
+                    ),
+                    modifiedAt: entity.clientModifiedAt
+                )
+            }
+        }
+    }
+
+    private static let allowedProcessingTransitions: [ProcessingJobState: Set<ProcessingJobState>] = [
+        .queued: [.running, .paused, .waitingForCapability, .waitingForNetwork, .cancelled],
+        .running: [.queued, .paused, .waitingForCapability, .waitingForNetwork, .completed, .failed, .cancelled],
+        .paused: [.queued, .cancelled],
+        .waitingForCapability: [.queued, .cancelled],
+        .waitingForNetwork: [.queued, .cancelled],
+        .completed: [],
+        .failed: [.queued],
+        .cancelled: [],
+    ]
+
     public func search(
         _ text: String,
         entityTypes: [EntityType]? = nil,
@@ -803,25 +1111,60 @@ public actor SQLCipherDatabase {
         }
         let rows = try query(
             """
-            SELECT e.*, snippet(search_index, -1, '[', ']', '…', 18) AS result_snippet
-            FROM search_index JOIN entities e ON e.id = search_index.entity_id
-            WHERE search_index MATCH ? AND e.tombstone=0\(scopeSQL)
-            ORDER BY bm25(search_index, 0.0, 8.0, 1.0), e.client_modified_at DESC
+            SELECT e.*, s.source_entity_id AS matched_source_entity_id,
+                   s.origin AS matched_origin, s.review_state AS matched_review_state,
+                   s.locator AS matched_locator,
+                   snippet(search_segments_fts, -1, '[', ']', '…', 18) AS result_snippet
+            FROM search_segments_fts
+            JOIN search_segments s ON s.id = search_segments_fts.segment_id
+            JOIN entities e ON e.id = s.owner_entity_id
+            WHERE search_segments_fts MATCH ? AND e.tombstone=0\(scopeSQL)
+            ORDER BY bm25(search_segments_fts, 0.0, 8.0, 1.0) - (s.authority * 0.002),
+                     s.updated_at DESC, e.client_modified_at DESC
             LIMIT ?
             """,
-            [.text(expression)] + scopeValues + [.integer(Int64(resultLimit))]
+            [.text(expression)] + scopeValues + [.integer(Int64(resultLimit * 6))]
         )
-        let exact = try rows.map { row in
-            guard case let .text(snippet) = row["result_snippet"] else {
-                throw LocalDatabaseError.invalidRow
+        var exactById: [UUID: SearchHit] = [:]
+        var exactOrder: [UUID] = []
+        for row in rows {
+            guard case let .text(snippet) = row["result_snippet"],
+                  case let .text(originRaw) = row["matched_origin"],
+                  case let .text(reviewRaw) = row["matched_review_state"],
+                  case let .text(sourceRaw) = row["matched_source_entity_id"],
+                  let origin = SearchSegmentOrigin(rawValue: originRaw),
+                  let reviewState = SearchSegmentReviewState(rawValue: reviewRaw),
+                  let sourceEntityId = UUID(uuidString: sourceRaw)
+            else { throw LocalDatabaseError.invalidRow }
+            let entity = try entityFromRow(row)
+            if var existing = exactById[entity.id] {
+                if existing.snippet != snippet,
+                   !existing.additionalSnippets.contains(snippet),
+                   existing.additionalSnippets.count < 2 {
+                    existing.additionalSnippets.append(snippet)
+                    exactById[entity.id] = existing
+                }
+                continue
             }
-            return SearchHit(
-                entity: try entityFromRow(row),
+            let locator: SearchSegmentLocator?
+            if case let .blob(data) = row["matched_locator"] {
+                locator = try? CanonicalJSON.decode(SearchSegmentLocator.self, from: data)
+            } else {
+                locator = nil
+            }
+            exactOrder.append(entity.id)
+            exactById[entity.id] = SearchHit(
+                entity: entity,
                 snippet: snippet,
                 matchKind: .exact,
-                relevance: nil
+                relevance: nil,
+                origin: origin,
+                reviewState: reviewState,
+                sourceEntityId: sourceEntityId,
+                locator: locator
             )
         }
+        let exact = exactOrder.prefix(resultLimit).compactMap { exactById[$0] }
         guard exact.count < resultLimit, semanticEmbeddingProvider.isAvailable else {
             return exact
         }
@@ -1252,8 +1595,52 @@ public actor SQLCipherDatabase {
             last_error_code TEXT
         );
 
+        CREATE TABLE IF NOT EXISTS processing_jobs (
+            id TEXT PRIMARY KEY,
+            kind TEXT NOT NULL,
+            state TEXT NOT NULL,
+            input_entity_id TEXT,
+            input_revision INTEGER,
+            input_fingerprint TEXT NOT NULL,
+            required_capabilities TEXT NOT NULL,
+            selected_route TEXT,
+            compute_node_id TEXT,
+            approval BLOB,
+            attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
+            progress REAL,
+            error_code TEXT,
+            created_at REAL NOT NULL,
+            updated_at REAL NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS processing_jobs_state_updated
+            ON processing_jobs(state, updated_at ASC);
+        CREATE INDEX IF NOT EXISTS processing_jobs_compute_node
+            ON processing_jobs(compute_node_id, state);
+
         CREATE VIRTUAL TABLE IF NOT EXISTS search_index USING fts5(
             entity_id UNINDEXED,
+            title,
+            body,
+            tokenize='unicode61 remove_diacritics 2'
+        );
+
+        CREATE TABLE IF NOT EXISTS search_segments (
+            id TEXT PRIMARY KEY,
+            owner_entity_id TEXT NOT NULL,
+            source_entity_id TEXT NOT NULL,
+            origin TEXT NOT NULL,
+            review_state TEXT NOT NULL,
+            authority INTEGER NOT NULL CHECK (authority >= 0 AND authority <= 100),
+            language TEXT,
+            locator BLOB,
+            content_revision INTEGER NOT NULL DEFAULT 0 CHECK (content_revision >= 0),
+            updated_at REAL NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS search_segments_owner
+            ON search_segments(owner_entity_id, authority DESC, updated_at DESC);
+        CREATE INDEX IF NOT EXISTS search_segments_source ON search_segments(source_entity_id);
+        CREATE VIRTUAL TABLE IF NOT EXISTS search_segments_fts USING fts5(
+            segment_id UNINDEXED,
             title,
             body,
             tokenize='unicode61 remove_diacritics 2'
@@ -1309,6 +1696,30 @@ public actor SQLCipherDatabase {
         }
         if version < 3 {
             try execute(database, "PRAGMA user_version = 3;")
+        }
+        if version < 4 {
+            try execute(
+                database,
+                """
+                INSERT OR IGNORE INTO search_segments(
+                    id, owner_entity_id, source_entity_id, origin, review_state, authority,
+                    content_revision, updated_at
+                )
+                SELECT e.id, e.id, e.id, 'WRITTEN_TEXT', 'AUTHORED', 100,
+                       e.revision, e.client_modified_at
+                FROM entities e JOIN search_index f ON f.entity_id=e.id
+                WHERE e.tombstone=0 AND e.entity_type NOT IN ('AI_ARTIFACT');
+                INSERT INTO search_segments_fts(segment_id, title, body)
+                SELECT f.entity_id, f.title, f.body
+                FROM search_index f JOIN entities e ON e.id=f.entity_id
+                WHERE e.tombstone=0 AND e.entity_type NOT IN ('AI_ARTIFACT')
+                  AND NOT EXISTS (
+                    SELECT 1 FROM search_segments_fts existing
+                    WHERE existing.segment_id=f.entity_id
+                  );
+                """
+            )
+            try execute(database, "PRAGMA user_version = 4;")
         }
     }
 
@@ -1438,16 +1849,133 @@ public actor SQLCipherDatabase {
         }
     }
 
-    private func updateSearch(id: UUID, document: SearchDocument?) throws {
+    private func updateSearch(
+        id: UUID,
+        entityType: EntityType,
+        document: SearchDocument?,
+        projection: SearchProjectionWrite? = nil,
+        modifiedAt: Date
+    ) throws {
         let entityId = canonical(id)
-        try run("DELETE FROM search_index WHERE entity_id=?", [.text(entityId)])
-        try run("DELETE FROM search_embeddings WHERE entity_id=?", [.text(entityId)])
-        try run("DELETE FROM search_embedding_status WHERE entity_id=?", [.text(entityId)])
-        if let document {
-            try run(
-                "INSERT INTO search_index(entity_id, title, body) VALUES (?, ?, ?)",
-                [.text(entityId), .text(document.title), .text(document.body)]
+        let previousOwners = try query(
+            "SELECT DISTINCT owner_entity_id FROM search_segments WHERE source_entity_id=?",
+            [.text(projection.map { canonical($0.sourceEntityId) } ?? entityId)]
+        ).compactMap { row -> String? in
+            guard case let .text(value) = row["owner_entity_id"] else { return nil }
+            return value
+        }
+        let resolvedProjection: SearchProjectionWrite
+        if let projection {
+            resolvedProjection = projection
+        } else {
+            let segment = document.map {
+                SearchSegmentWrite(
+                    id: id,
+                    ownerEntityId: id,
+                    sourceEntityId: id,
+                    origin: Self.defaultSearchOrigin(for: entityType),
+                    reviewState: .authored,
+                    authority: Self.defaultSearchAuthority(for: entityType),
+                    title: $0.title,
+                    body: $0.body,
+                    updatedAt: modifiedAt
+                )
+            }
+            resolvedProjection = SearchProjectionWrite(
+                sourceEntityId: id,
+                segments: segment.map { [$0] } ?? []
             )
+        }
+        try replaceSearchProjectionInsideTransaction(resolvedProjection)
+        let currentOwners = Set(resolvedProjection.segments.map { canonical($0.ownerEntityId) })
+        for owner in Set(previousOwners).union(currentOwners) {
+            try rebuildOwnerSearchDocument(ownerEntityId: owner)
+        }
+    }
+
+    private func replaceSearchProjectionInsideTransaction(_ projection: SearchProjectionWrite) throws {
+        let sourceId = canonical(projection.sourceEntityId)
+        let prior = try query(
+            "SELECT id FROM search_segments WHERE source_entity_id=?",
+            [.text(sourceId)]
+        ).compactMap { row -> String? in
+            guard case let .text(value) = row["id"] else { return nil }
+            return value
+        }
+        for segmentId in prior {
+            try run("DELETE FROM search_segments_fts WHERE segment_id=?", [.text(segmentId)])
+        }
+        try run("DELETE FROM search_segments WHERE source_entity_id=?", [.text(sourceId)])
+        for segment in projection.segments where !segment.title.isEmpty || !segment.body.isEmpty {
+            guard segment.sourceEntityId == projection.sourceEntityId else {
+                throw LocalDatabaseError.invalidRow
+            }
+            let locator = try segment.locator.map(CanonicalJSON.encode)
+            let segmentId = canonical(segment.id)
+            try run(
+                """
+                INSERT INTO search_segments(
+                    id, owner_entity_id, source_entity_id, origin, review_state, authority,
+                    language, locator, content_revision, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    .text(segmentId), .text(canonical(segment.ownerEntityId)), .text(sourceId),
+                    .text(segment.origin.rawValue), .text(segment.reviewState.rawValue),
+                    .integer(Int64(segment.authority)), segment.language.map(SQLValue.text) ?? .null,
+                    locator.map(SQLValue.blob) ?? .null,
+                    .integer(Int64(segment.contentRevision)),
+                    .real(segment.updatedAt.timeIntervalSince1970),
+                ]
+            )
+            try run(
+                "INSERT INTO search_segments_fts(segment_id, title, body) VALUES (?, ?, ?)",
+                [.text(segmentId), .text(segment.title), .text(segment.body)]
+            )
+        }
+    }
+
+    private func rebuildOwnerSearchDocument(ownerEntityId: String) throws {
+        try run("DELETE FROM search_index WHERE entity_id=?", [.text(ownerEntityId)])
+        try run("DELETE FROM search_embeddings WHERE entity_id=?", [.text(ownerEntityId)])
+        try run("DELETE FROM search_embedding_status WHERE entity_id=?", [.text(ownerEntityId)])
+        let rows = try query(
+            """
+            SELECT f.title AS segment_title, f.body AS segment_body
+            FROM search_segments s JOIN search_segments_fts f ON f.segment_id=s.id
+            WHERE s.owner_entity_id=?
+            ORDER BY s.authority DESC, s.updated_at DESC, s.id ASC
+            """,
+            [.text(ownerEntityId)]
+        )
+        let titles = rows.compactMap { row -> String? in
+            guard case let .text(value) = row["segment_title"], !value.isEmpty else { return nil }
+            return value
+        }
+        let bodies = rows.compactMap { row -> String? in
+            guard case let .text(value) = row["segment_body"], !value.isEmpty else { return nil }
+            return value
+        }
+        guard !titles.isEmpty || !bodies.isEmpty else { return }
+        try run(
+            "INSERT INTO search_index(entity_id, title, body) VALUES (?, ?, ?)",
+            [.text(ownerEntityId), .text(titles.joined(separator: "\n")), .text(bodies.joined(separator: "\n"))]
+        )
+    }
+
+    private static func defaultSearchOrigin(for entityType: EntityType) -> SearchSegmentOrigin {
+        switch entityType {
+        case .resource, .sourceVersion: .sourceExtraction
+        case .transcriptCorrection: .transcript
+        case .evidence: .evidence
+        default: .writtenText
+        }
+    }
+
+    private static func defaultSearchAuthority(for entityType: EntityType) -> Int {
+        switch entityType {
+        case .resource, .sourceVersion, .transcriptCorrection: 70
+        default: 100
         }
     }
 
@@ -1649,7 +2177,12 @@ public actor SQLCipherDatabase {
                 .text(hasUnresolvedConflict ? LocalSyncState.conflict.rawValue : LocalSyncState.synced.rawValue),
             ]
         )
-        try updateSearch(id: entity.id, document: entity.tombstone ? nil : search)
+        try updateSearch(
+            id: entity.id,
+            entityType: entity.entityType,
+            document: entity.tombstone ? nil : search,
+            modifiedAt: entity.clientModifiedAt
+        )
     }
 
     private func isValidSequence(_ value: String) -> Bool {
@@ -1666,6 +2199,66 @@ public actor SQLCipherDatabase {
         }
         if left == right { return .orderedSame }
         return left < right ? .orderedAscending : .orderedDescending
+    }
+
+    private func processingJobFromRow(_ row: [String: SQLValue]) throws -> ProcessingJob {
+        guard case let .text(idRaw) = row["id"], let id = UUID(uuidString: idRaw),
+              case let .text(kind) = row["kind"],
+              case let .text(stateRaw) = row["state"], let state = ProcessingJobState(rawValue: stateRaw),
+              case let .text(fingerprint) = row["input_fingerprint"],
+              case let .text(capabilitiesRaw) = row["required_capabilities"],
+              let capabilitiesData = capabilitiesRaw.data(using: .utf8),
+              let capabilities = try? JSONDecoder().decode([ProcessingCapability].self, from: capabilitiesData),
+              case let .integer(attemptRaw) = row["attempt_count"], attemptRaw >= 0,
+              case let .real(createdRaw) = row["created_at"], createdRaw.isFinite,
+              case let .real(updatedRaw) = row["updated_at"], updatedRaw.isFinite
+        else { throw LocalDatabaseError.invalidRow }
+        let inputEntityId: UUID?
+        if case let .text(raw) = row["input_entity_id"] {
+            guard let parsed = UUID(uuidString: raw) else { throw LocalDatabaseError.invalidRow }
+            inputEntityId = parsed
+        } else { inputEntityId = nil }
+        let inputRevision: Int?
+        if case let .integer(raw) = row["input_revision"], raw >= 0, raw <= Int64(Int.max) {
+            inputRevision = Int(raw)
+        } else { inputRevision = nil }
+        let selectedRoute: ProcessingRoute?
+        if case let .text(raw) = row["selected_route"] {
+            guard let parsed = ProcessingRoute(rawValue: raw) else { throw LocalDatabaseError.invalidRow }
+            selectedRoute = parsed
+        } else { selectedRoute = nil }
+        let computeNodeId: UUID?
+        if case let .text(raw) = row["compute_node_id"] {
+            guard let parsed = UUID(uuidString: raw) else { throw LocalDatabaseError.invalidRow }
+            computeNodeId = parsed
+        } else { computeNodeId = nil }
+        let approval: ProcessingApproval?
+        if case let .blob(data) = row["approval"] {
+            approval = try CanonicalJSON.decode(ProcessingApproval.self, from: data)
+        } else { approval = nil }
+        let progress: Double?
+        if case let .real(raw) = row["progress"], raw.isFinite, (0 ... 1).contains(raw) {
+            progress = raw
+        } else { progress = nil }
+        let errorCode: String?
+        if case let .text(raw) = row["error_code"] { errorCode = raw } else { errorCode = nil }
+        return ProcessingJob(
+            id: id,
+            kind: kind,
+            state: state,
+            inputEntityId: inputEntityId,
+            inputRevision: inputRevision,
+            inputFingerprint: fingerprint,
+            requiredCapabilities: capabilities,
+            selectedRoute: selectedRoute,
+            computeNodeId: computeNodeId,
+            approval: approval,
+            attemptCount: Int(attemptRaw),
+            progress: progress,
+            errorCode: errorCode,
+            createdAt: Date(timeIntervalSince1970: createdRaw),
+            updatedAt: Date(timeIntervalSince1970: updatedRaw)
+        )
     }
 
     private func entityFromRow(_ row: [String: SQLValue]) throws -> StoredEntity {

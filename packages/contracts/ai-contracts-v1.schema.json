@@ -465,14 +465,15 @@
     "ocrArtifact": {
       "type": "object",
       "additionalProperties": true,
-      "required": ["schemaVersion", "jobId", "targetKind", "targetId", "parentId", "inputRevision", "generatedAt", "state", "response"],
+      "required": ["schemaVersion", "jobId", "targetKind", "targetId", "parentId", "inputRevision", "inputFingerprint", "generatedAt", "state", "response"],
       "properties": {
-        "schemaVersion": { "const": "ocr-artifact/v1" },
+        "schemaVersion": { "const": "recognition-artifact/v1" },
         "jobId": { "$ref": "#/$defs/uuid" },
         "targetKind": { "enum": ["NOTEBOOK_REGION", "IMAGE", "SOURCE_PAGE"] },
         "targetId": { "$ref": "#/$defs/uuid" },
         "parentId": { "$ref": "#/$defs/uuid" },
         "inputRevision": { "type": "integer", "minimum": 0 },
+        "inputFingerprint": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
         "generatedAt": { "type": "string", "format": "date-time" },
         "state": { "enum": ["CURRENT", "STALE"] },
         "response": { "$ref": "#/$defs/localOCRResponse" }

@@ -6,7 +6,9 @@ struct DeveloperNotebookResetView: View {
     @State private var confirmation = ""
     @State private var errorMessage: String?
     @State private var isWorking = false
+    @State private var encryptedBackupURL: URL?
 
+    let onExport: () async throws -> URL
     let onDelete: () async throws -> Void
 
     var body: some View {
@@ -16,6 +18,24 @@ struct DeveloperNotebookResetView: View {
                     Text("This permanently deletes the local encrypted database, local files, account key, device token, and setup information for this development build.")
                     Text("A connected server copy is not deleted. You need the account ID and 24 recovery words to recover it later.")
                         .foregroundStyle(.secondary)
+                }
+
+                Section("Back up first") {
+                    Button {
+                        Task { await createBackup() }
+                    } label: {
+                        Label("Create encrypted notebook backup", systemImage: "lock.doc")
+                    }
+                    .disabled(isWorking)
+
+                    if let encryptedBackupURL {
+                        ShareLink(item: encryptedBackupURL) {
+                            Label("Save encrypted backup", systemImage: "square.and.arrow.up")
+                        }
+                        Text("This backup contains the SQLCipher database and encrypted assets. Keep the account ID and recovery words separately.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
 
                 Section {
@@ -53,6 +73,19 @@ struct DeveloperNotebookResetView: View {
             .interactiveDismissDisabled(isWorking)
         }
         .presentationDetents([.medium, .large])
+    }
+
+    @MainActor
+    private func createBackup() async {
+        guard !isWorking else { return }
+        isWorking = true
+        errorMessage = nil
+        defer { isWorking = false }
+        do {
+            encryptedBackupURL = try await onExport()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
     }
 
     @MainActor

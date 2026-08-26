@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import hmac
 import json
 import logging
@@ -219,6 +220,7 @@ class WorkerProcessor:
             note_id=request.note_id,
             source_version_id=request.source_version_id,
             input_revision=request.input_revision,
+            input_fingerprint=hashlib.sha256(request.image_content.encode("utf-8")).hexdigest(),
             page_number=request.page_number,
             locator=request.locator,
             input_preview=(
@@ -236,6 +238,7 @@ class WorkerProcessor:
             parent_id=request.parent_id,
             relation_ids=list(dict.fromkeys(relation_ids)),
             plaintext=json_bytes(artifact),
+            entity_type="RECOGNITION_ARTIFACT",
         )
         return CachedCompletion(
             job_id=lease.id,
@@ -1154,6 +1157,7 @@ class WorkerProcessor:
             note_id=request.note_id,
             source_version_id=request.source_version_id,
             input_revision=request.input_revision,
+            input_fingerprint=hashlib.sha256(request.image_content.encode("utf-8")).hexdigest(),
             page_number=request.page_number,
             locator=request.locator,
             input_preview=(
@@ -1171,6 +1175,7 @@ class WorkerProcessor:
                 if value is not None
             ],
             plaintext=json_bytes(artifact),
+            entity_type="RECOGNITION_ARTIFACT",
         )
 
     def _media_transcription(self, lease: AIJobLease, plaintext: bytes) -> CachedCompletion:
@@ -1321,6 +1326,7 @@ class WorkerProcessor:
         parent_id: UUID | None,
         relation_ids: list[UUID],
         plaintext: bytes,
+        entity_type: str = "AI_ARTIFACT",
     ) -> dict[str, Any]:
         if len(plaintext) > 2_097_152:
             raise ProcessingFailure(code="ARTIFACT_TOO_LARGE", retryable=False)
@@ -1328,7 +1334,7 @@ class WorkerProcessor:
             plaintext,
             account_key=self._account_key,
             account_id=self._account_id,
-            entity_type="AI_ARTIFACT",
+            entity_type=entity_type,
             entity_id=entity_id,
             content_version=1,
         )
@@ -1336,7 +1342,7 @@ class WorkerProcessor:
         return {
             "mutationId": str(uuid5(entity_id, "epistoria-sync-mutation/v1")),
             "entityId": str(entity_id),
-            "entityType": "AI_ARTIFACT",
+            "entityType": entity_type,
             "operation": "UPSERT",
             "baseRevision": 0,
             "parentId": str(parent_id) if parent_id is not None else None,

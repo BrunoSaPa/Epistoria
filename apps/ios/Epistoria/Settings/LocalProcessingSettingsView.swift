@@ -1,13 +1,10 @@
-import EpistoriaCore
 import SwiftUI
 
 struct LocalProcessingSettingsView: View {
     @Bindable var model: AppModel
     @Bindable private var settings: LocalProcessingSettings
 
-    @State private var latestStatus: LocalModelStatusArtifact?
-    @State private var pendingOperation: LocalModelControlOperation?
-    @State private var pendingJobId: UUID?
+    @State private var formulaState: OnDeviceFormulaModelState = .unavailable
     @State private var errorMessage: String?
     @State private var showInstallApproval = false
     @State private var showRemoveApproval = false
@@ -44,46 +41,37 @@ struct LocalProcessingSettingsView: View {
                 Toggle("Enable formula recognition", isOn: Binding(
                     get: { settings.localMathOCR },
                     set: { value in
-                        if value, latestStatus?.state != .installed {
-                            showInstallApproval = true
-                        } else {
-                            settings.localMathOCR = value
-                        }
+                        if value, !modelIsInstalled { showInstallApproval = true }
+                        else { settings.localMathOCR = value }
                     }
                 ))
-                LabeledContent("Model", value: "PP-FormulaNet_plus-S")
-                LabeledContent("Version", value: shortModelVersion)
-                LabeledContent("License", value: latestStatus?.license ?? "Apache-2.0")
-                LabeledContent("Download size", value: modelSize)
+                .disabled(modelIsUnavailable)
+                LabeledContent("Runtime", value: "Core ML on this iPad")
+                LabeledContent("Model", value: modelName)
                 LabeledContent("Verification", value: statusLabel)
 
-                if pendingOperation != nil {
+                switch formulaState {
+                case .installing:
                     HStack {
                         ProgressView()
-                        Text("Encrypted request queued for the trusted Mac")
-                        if pendingOperation == .install {
-                            Spacer()
-                            Button("Pause") { Task { await pauseDownload() } }
-                        }
+                        Text("Downloading and verifying on this iPad")
                     }
-                } else {
-                    HStack {
-                        Button("Check status") { Task { await submit(.status) } }
-                        if latestStatus?.state == .installed {
-                            if latestStatus?.modelVersion != pinnedModelVersion {
-                                Button("Update…") { showInstallApproval = true }
-                            }
-                            Button("Remove…", role: .destructive) { showRemoveApproval = true }
-                        } else {
-                            Button("Download and verify…") { showInstallApproval = true }
-                        }
-                    }
+                case .installed:
+                    Button("Remove model…", role: .destructive) { showRemoveApproval = true }
+                case .notInstalled, .invalid:
+                    Button("Download and verify…") { showInstallApproval = true }
+                case .unavailable:
+                    Label(
+                        "The converted model remains disabled until accuracy, latency, memory, thermal, and license validation passes.",
+                        systemImage: "hammer"
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 }
-                Text(
-                    "The model is stored only on the trusted Mac. Inference does not use the network, and model files are excluded from sync and exports."
-                )
-                .font(.caption)
-                .foregroundStyle(.secondary)
+
+                Text("The verified model is stored only on this iPad. Model files are excluded from synchronization, notebook backups, and readable exports.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Section("Review policy") {
@@ -99,55 +87,52 @@ struct LocalProcessingSettingsView: View {
             isPresented: $showInstallApproval,
             titleVisibility: .visible
         ) {
-            Button("Download and verify") {
-                Task { await submit(.install) }
-            }
+            Button("Download and verify") { Task { await install() } }
             Button("Cancel", role: .cancel) { settings.localMathOCR = false }
         } message: {
-            Text(
-                "The trusted Mac will download about 264 MB from the pinned official model repository, verify every file, and install it outside notebook sync and backups."
-            )
+            Text("Epistoria downloads the pinned model over HTTPS, verifies its size and SHA-256 digest, and compiles it locally with Core ML.")
         }
         .confirmationDialog(
             "Remove the Local Math OCR model?",
             isPresented: $showRemoveApproval,
             titleVisibility: .visible
         ) {
-            Button("Remove model", role: .destructive) {
-                settings.localMathOCR = false
-                Task { await submit(.remove) }
-            }
+            Button("Remove model", role: .destructive) { Task { await remove() } }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Existing encrypted OCR artifacts and corrections remain in the notebook.")
+            Text("Existing encrypted recognition artifacts and corrections remain in the notebook.")
         }
-        .alert("Local processing problem", isPresented: .constant(errorMessage != nil)) {
-            Button("OK") { errorMessage = nil }
+        .alert("Local processing problem", isPresented: Binding(
+            get: { errorMessage != nil },
+            set: { if !$0 { errorMessage = nil } }
+        )) {
+            Button("OK", role: .cancel) { errorMessage = nil }
         } message: {
             Text(errorMessage ?? "")
         }
     }
 
-    private var shortModelVersion: String {
-        guard let value = latestStatus?.modelVersion else { return "Pinned" }
-        return String(value.prefix(12))
+    private var modelName: String {
+        FormulaModelRegistry.productionManifest?.modelId ?? "Development candidate"
     }
 
-    private var pinnedModelVersion: String {
-        "3d46f557e3a1752f4bf81202395af3b5ecfadfd2"
+    private var modelIsInstalled: Bool {
+        if case .installed = formulaState { return true }
+        return false
     }
 
-    private var modelSize: String {
-        let bytes = latestStatus?.expectedBytes ?? 263_548_202
-        return ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
+    private var modelIsUnavailable: Bool {
+        if case .unavailable = formulaState { return true }
+        return false
     }
 
     private var statusLabel: String {
-        if pendingOperation != nil { return "Queued" }
-        switch latestStatus?.state {
-        case .installed: return "Installed and verified"
-        case .invalid: return "Verification failed"
-        case .notInstalled, nil: return "Not installed"
+        switch formulaState {
+        case .unavailable: "Validation required"
+        case .notInstalled: "Not installed"
+        case .installing: "Installing"
+        case let .installed(version): "Installed · \(version)"
+        case .invalid: "Verification failed"
         }
     }
 
@@ -156,75 +141,33 @@ struct LocalProcessingSettingsView: View {
         languageText = settings.normalizedLanguages.joined(separator: ", ")
     }
 
+    @MainActor
     private func loadStatus() async {
         languageText = settings.normalizedLanguages.joined(separator: ", ")
-        guard let store = model.store else { return }
-        latestStatus = try? await store.localModelStatuses().first?.payload
+        await model.formulaModelManager.refresh()
+        formulaState = await model.formulaModelManager.state
+        if !modelIsInstalled { settings.localMathOCR = false }
     }
 
-    private func submit(_ operation: LocalModelControlOperation) async {
-        guard let accountId = model.configuration?.accountId, let aiJobs = model.aiJobs else {
-            errorMessage = "Connect private sync and pair the trusted Mac before managing the formula model."
-            return
-        }
-        pendingOperation = operation
+    @MainActor
+    private func install() async {
         do {
-            let summary = try await aiJobs.submitLocalModelControl(
-                LocalModelControlRequest(accountId: accountId, operation: operation)
-            )
-            pendingJobId = summary.id
-            model.noteLocalMutation()
-            await waitForCompletion(jobId: summary.id)
+            try await model.formulaModelManager.install()
+            await loadStatus()
+            settings.localMathOCR = modelIsInstalled
         } catch {
-            pendingOperation = nil
+            settings.localMathOCR = false
+            await loadStatus()
             errorMessage = error.localizedDescription
         }
     }
 
-    private func waitForCompletion(jobId: UUID) async {
-        guard let aiJobs = model.aiJobs else { return }
-        for _ in 0 ..< 600 {
-            guard pendingJobId == jobId else { return }
-            do {
-                let job = try await aiJobs.localProcessingJob(id: jobId)
-                switch job.status {
-                case "COMPLETE":
-                    await model.synchronize()
-                    await loadStatus()
-                    if pendingOperation == .install {
-                        settings.localMathOCR = latestStatus?.state == .installed
-                    }
-                    pendingOperation = nil
-                    pendingJobId = nil
-                    return
-                case "FAILED":
-                    if pendingOperation == .install { settings.localMathOCR = false }
-                    pendingOperation = nil
-                    pendingJobId = nil
-                    errorMessage = "The trusted Mac could not complete local model management (\(job.errorCode ?? "unknown error"))."
-                    return
-                case "CANCELLED":
-                    pendingOperation = nil
-                    pendingJobId = nil
-                    return
-                default:
-                    try await Task.sleep(for: .seconds(1))
-                }
-            } catch {
-                try? await Task.sleep(for: .seconds(2))
-            }
-        }
-        pendingOperation = nil
-        pendingJobId = nil
-        errorMessage = "The model request is still running. Reopen Local Processing to check its result."
-    }
-
-    private func pauseDownload() async {
-        guard let id = pendingJobId, let aiJobs = model.aiJobs else { return }
+    @MainActor
+    private func remove() async {
         do {
-            _ = try await aiJobs.cancelLocalProcessingJob(id: id)
-            pendingOperation = nil
-            pendingJobId = nil
+            try await model.formulaModelManager.remove()
+            settings.localMathOCR = false
+            await loadStatus()
         } catch {
             errorMessage = error.localizedDescription
         }

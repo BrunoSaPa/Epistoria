@@ -92,16 +92,19 @@ export class AIJobsService {
 
   async complete(auth: AuthContext, jobId: string, artifactEntityId: string) {
     const job = await this.leasedBy(auth, jobId);
+    const expectedEntityType = job.jobType === 'LOCAL_OCR'
+      ? EntityType.RECOGNITION_ARTIFACT
+      : EntityType.AI_ARTIFACT;
     const artifact = await this.prisma.entityEnvelope.findFirst({
       where: {
         id: artifactEntityId,
         ownerId: auth.ownerId,
-        entityType: EntityType.AI_ARTIFACT,
+        entityType: expectedEntityType,
         tombstone: false,
       },
     });
     if (!artifact) {
-      throw new BadRequestException('Synchronize the encrypted AI artifact before completing its job');
+      throw new BadRequestException('Synchronize the encrypted processing result before completing its job');
     }
     const completedAt = new Date();
     const completed = await this.prisma.aIJob.update({

@@ -208,7 +208,7 @@ def decrypt_artifact(mutation: dict[str, Any]) -> bytes:
         envelope,
         account_key=ACCOUNT_KEY,
         account_id=ACCOUNT_ID,
-        aad=entity_aad(ACCOUNT_ID, "AI_ARTIFACT", entity_id, 1),
+        aad=entity_aad(ACCOUNT_ID, mutation["entityType"], entity_id, 1),
     )
 
 

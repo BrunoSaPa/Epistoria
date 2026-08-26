@@ -24,7 +24,7 @@ struct SettingsView: View {
                     } label: {
                         SettingsRow(
                             title: "AI providers",
-                            detail: "Choose the AI service used by your trusted Mac",
+                            detail: "Connect hosted or local AI directly from this iPad",
                             symbol: "cpu"
                         )
                     }
@@ -41,8 +41,17 @@ struct SettingsView: View {
                     } label: {
                         SettingsRow(
                             title: "OCR and formula recognition",
-                            detail: "Offline recognition, languages, and verified Mac models",
+                            detail: "Offline recognition, languages, and on-device models",
                             symbol: "text.viewfinder"
+                        )
+                    }
+                    NavigationLink {
+                        ComputeNodeSettingsView(model: model)
+                    } label: {
+                        SettingsRow(
+                            title: "Compute Nodes",
+                            detail: "Optional acceleration for large local work",
+                            symbol: "desktopcomputer"
                         )
                     }
                 }

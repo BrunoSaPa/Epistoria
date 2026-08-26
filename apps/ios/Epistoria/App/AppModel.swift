@@ -1,4 +1,5 @@
 import EpistoriaCore
+import CryptoKit
 import Foundation
 import Network
 import Observation
@@ -32,7 +33,7 @@ private enum AppModelOperationError: Error, LocalizedError {
         case .unlockedSessionUnavailable:
             "The unlocked notebook changed while this operation was running. Please try again."
         case .aiProviderUnavailable:
-            "Connect private sync before changing an AI provider. The trusted Mac can process the queued change when it is running."
+            "Unlock the notebook before changing an AI provider."
         case .aiProviderSecretRequired:
             "This provider requires an API key. The existing key was not changed."
         case .aiProviderURLInvalid:
@@ -81,6 +82,8 @@ final class AppModel {
     var configuration: AccountConfiguration?
     let pendingSaves = PendingSaveRegistry()
     let localProcessingSettings: LocalProcessingSettings
+    let formulaModelManager: OnDeviceFormulaModelManager
+    let formulaRecognitionEngine: CoreMLFormulaRecognitionEngine
 
     private(set) var database: SQLCipherDatabase?
     private(set) var store: EpistoriaStore?
@@ -95,6 +98,7 @@ final class AppModel {
     private let tokenStore: DeviceTokenStore
     private let aiProviderProfileStore: AIProviderProfileStore
     private let aiProviderSecretStore: AIProviderSecretStore
+    private let directProviderClient: any ProviderClient
     private let crypto: EntityCrypto
     private let applicationSupportOverride: URL?
     private var isOpening = false
@@ -122,7 +126,9 @@ final class AppModel {
         tokenStore: DeviceTokenStore = DeviceTokenStore(),
         aiProviderProfileStore: AIProviderProfileStore = AIProviderProfileStore(),
         aiProviderSecretStore: AIProviderSecretStore = AIProviderSecretStore(),
+        directProviderClient: any ProviderClient = DirectProviderClient(),
         localProcessingSettings: LocalProcessingSettings = LocalProcessingSettings(),
+        formulaModelManager: OnDeviceFormulaModelManager = OnDeviceFormulaModelManager(),
         crypto: EntityCrypto = EntityCrypto(),
         applicationSupportURL: URL? = nil
     ) {
@@ -131,7 +137,10 @@ final class AppModel {
         self.tokenStore = tokenStore
         self.aiProviderProfileStore = aiProviderProfileStore
         self.aiProviderSecretStore = aiProviderSecretStore
+        self.directProviderClient = directProviderClient
         self.localProcessingSettings = localProcessingSettings
+        self.formulaModelManager = formulaModelManager
+        formulaRecognitionEngine = CoreMLFormulaRecognitionEngine(modelManager: formulaModelManager)
         self.crypto = crypto
         applicationSupportOverride = applicationSupportURL
     }
@@ -463,9 +472,9 @@ final class AppModel {
         let profiles = (try? aiProviderProfiles()) ?? []
         guard let profile = profiles.first(where: { $0.isActive && $0.state == .ready }) else {
             if !profiles.isEmpty {
-                return "the provider after its trusted-Mac configuration is confirmed"
+                return "the provider after its connection is ready on this iPad"
             }
-            return "the provider active on your trusted Mac"
+            return "the provider active on this iPad"
         }
         return "\(profile.displayName) at \(profile.destinationHost) using \(profile.textModel)"
     }
@@ -489,7 +498,7 @@ final class AppModel {
         _ proposed: AIProviderProfile,
         replacementSecret: String?
     ) async throws {
-        guard let accountId = configuration?.accountId, let aiJobs else {
+        guard let accountId = configuration?.accountId else {
             throw AppModelOperationError.aiProviderUnavailable
         }
         guard AIProviderURLPolicy.normalized(
@@ -517,160 +526,195 @@ final class AppModel {
             throw AppModelOperationError.aiProviderSecretRequired
         }
 
-        var pending = proposed
-        if !pending.isActive,
-           !profiles.contains(where: { $0.id != pending.id && $0.isActive }) {
-            pending.isActive = true
+        var saved = proposed
+        if !saved.isActive,
+           !profiles.contains(where: { $0.id != saved.id && $0.isActive }) {
+            saved.isActive = true
         }
-        pending.state = .queued
-        pending.pendingOperation = .upsert
-        pending.configurationRevisionId = UUID()
-        pending.lastErrorCode = nil
-        pending.updatedAt = Date()
-        upsert(pending, in: &profiles)
+        if saved.isActive {
+            for index in profiles.indices { profiles[index].isActive = profiles[index].id == saved.id }
+        }
+        saved.state = .ready
+        saved.pendingOperation = nil
+        saved.configurationRevisionId = UUID()
+        saved.lastJobId = nil
+        saved.lastErrorCode = nil
+        saved.updatedAt = Date()
+        upsert(saved, in: &profiles)
         try aiProviderProfileStore.save(profiles, accountId: accountId)
         await refreshAIJobProviderRoute(accountId: accountId)
-
-        do {
-            let request = AIProviderConfigurationRequest(
-                accountId: accountId,
-                operation: .upsert,
-                profileId: pending.id,
-                configurationRevisionId: pending.configurationRevisionId,
-                displayName: pending.displayName,
-                adapter: pending.adapter,
-                baseURL: pending.baseURL.absoluteString,
-                apiKey: secret,
-                textModel: pending.textModel,
-                transcriptionModel: pending.transcriptionModel,
-                capabilities: pending.capabilities,
-                structuredOutput: pending.structuredOutput,
-                inputUSDPerMillion: pending.inputUSDPerMillion,
-                outputUSDPerMillion: pending.outputUSDPerMillion,
-                transcriptionUSDPerMinute: pending.transcriptionUSDPerMinute,
-                makeActive: pending.isActive
-            )
-            let job = try await aiJobs.submitProviderConfiguration(request)
-            pending.lastJobId = job.id
-            upsert(pending, in: &profiles)
-            try aiProviderProfileStore.save(profiles, accountId: accountId)
-            await refreshAIJobProviderRoute(accountId: accountId)
-        } catch {
-            pending.state = .failed
-            pending.lastErrorCode = "SUBMISSION_FAILED"
-            upsert(pending, in: &profiles)
-            try? aiProviderProfileStore.save(profiles, accountId: accountId)
-            throw error
-        }
     }
 
     func activateAIProviderProfile(id: UUID) async throws {
-        guard let accountId = configuration?.accountId, let aiJobs else {
+        guard let accountId = configuration?.accountId else {
             throw AppModelOperationError.aiProviderUnavailable
         }
         var profiles = try aiProviderProfileStore.load(accountId: accountId)
-        guard var profile = profiles.first(where: { $0.id == id }) else { return }
-        let request = AIProviderConfigurationRequest(
-            accountId: accountId,
-            operation: .activate,
-            profileId: id
-        )
-        let job = try await aiJobs.submitProviderConfiguration(request)
-        profile.state = .queued
-        profile.pendingOperation = .activate
-        profile.lastJobId = job.id
-        profile.lastErrorCode = nil
-        profile.updatedAt = Date()
-        upsert(profile, in: &profiles)
+        guard profiles.contains(where: { $0.id == id }) else { return }
+        for index in profiles.indices {
+            profiles[index].isActive = profiles[index].id == id
+            profiles[index].state = .ready
+            profiles[index].pendingOperation = nil
+            profiles[index].lastJobId = nil
+            profiles[index].lastErrorCode = nil
+            profiles[index].updatedAt = Date()
+        }
         try aiProviderProfileStore.save(profiles, accountId: accountId)
         await refreshAIJobProviderRoute(accountId: accountId)
     }
 
     func removeAIProviderProfile(id: UUID) async throws {
-        guard let accountId = configuration?.accountId, let aiJobs else {
+        guard let accountId = configuration?.accountId else {
             throw AppModelOperationError.aiProviderUnavailable
         }
         var profiles = try aiProviderProfileStore.load(accountId: accountId)
-        guard var profile = profiles.first(where: { $0.id == id }) else { return }
-        let request = AIProviderConfigurationRequest(
-            accountId: accountId,
-            operation: .delete,
-            profileId: id
-        )
-        let job = try await aiJobs.submitProviderConfiguration(request)
-        profile.state = .deleting
-        profile.pendingOperation = .delete
-        profile.lastJobId = job.id
-        profile.lastErrorCode = nil
-        profile.updatedAt = Date()
-        upsert(profile, in: &profiles)
+        guard profiles.contains(where: { $0.id == id }) else { return }
+        try aiProviderSecretStore.delete(accountId: accountId, profileId: id)
+        profiles.removeAll { $0.id == id }
+        if !profiles.contains(where: \.isActive), !profiles.isEmpty { profiles[0].isActive = true }
         try aiProviderProfileStore.save(profiles, accountId: accountId)
         await refreshAIJobProviderRoute(accountId: accountId)
     }
 
     func refreshAIProviderProfiles() async throws {
-        guard let accountId = configuration?.accountId, let api else { return }
-        let profiles = try aiProviderProfileStore.load(accountId: accountId)
-        var refreshed: [AIProviderProfile] = []
-        var activationCandidates: [(
-            profileId: UUID,
-            completedAt: String,
-            requestedAt: Date
-        )] = []
+        guard let accountId = configuration?.accountId else { return }
+        var profiles = try aiProviderProfileStore.load(accountId: accountId)
         var changed = false
-        for var profile in profiles {
-            guard let jobId = profile.lastJobId,
-                  let operation = profile.pendingOperation
-            else {
-                refreshed.append(profile)
-                continue
-            }
-            let job = try await api.aiJob(id: jobId)
-            switch job.status {
-            case "COMPLETE":
-                if operation == .delete {
-                    try aiProviderSecretStore.delete(
-                        accountId: accountId,
-                        profileId: profile.id
-                    )
-                    changed = true
-                    continue
-                }
-                if operation == .activate || profile.isActive {
-                    activationCandidates.append((
-                        profile.id,
-                        job.completedAt ?? job.updatedAt,
-                        profile.updatedAt
-                    ))
-                }
-                profile.state = .ready
-                profile.pendingOperation = nil
-                profile.lastErrorCode = nil
-                profile.updatedAt = Date()
-                changed = true
-            case "FAILED", "CANCELLED":
-                profile.state = .failed
-                profile.pendingOperation = nil
-                profile.lastErrorCode = job.errorCode ?? job.status
-                profile.updatedAt = Date()
-                changed = true
-            default:
-                break
-            }
-            refreshed.append(profile)
-        }
-        if let winner = activationCandidates.max(by: {
-            $0.completedAt == $1.completedAt
-                ? $0.requestedAt < $1.requestedAt
-                : $0.completedAt < $1.completedAt
-        }) {
-            for index in refreshed.indices {
-                refreshed[index].isActive = refreshed[index].id == winner.profileId
-            }
+        for index in profiles.indices where profiles[index].state == .local || profiles[index].state == .queued {
+            profiles[index].state = .ready
+            profiles[index].pendingOperation = nil
+            profiles[index].lastJobId = nil
+            profiles[index].lastErrorCode = nil
+            profiles[index].updatedAt = Date()
             changed = true
         }
-        if changed { try aiProviderProfileStore.save(refreshed, accountId: accountId) }
+        if changed { try aiProviderProfileStore.save(profiles, accountId: accountId) }
         await refreshAIJobProviderRoute(accountId: accountId)
+    }
+
+    /// Executes an explicitly approved provider turn directly from this iPad. The durable local
+    /// job contains no prompt or response text; callers store validated output in its typed,
+    /// encrypted artifact only after this method succeeds.
+    func performDirectProviderText(
+        _ request: ProviderTextRequest,
+        approval: ProcessingApproval
+    ) async throws -> (ProviderTextResponse, AIProviderRouteSnapshot, UUID) {
+        guard let accountId = configuration?.accountId, let database else {
+            throw AppModelOperationError.aiProviderUnavailable
+        }
+        let profiles = try aiProviderProfileStore.load(accountId: accountId)
+        guard let profile = profiles.first(where: {
+            $0.id == approval.providerProfileId && $0.isActive && $0.state == .ready
+        }), approval.isValid() else {
+            throw AppModelOperationError.aiProviderUnavailable
+        }
+        let secret = try aiProviderSecretStore.secret(accountId: accountId, profileId: profile.id)
+        let fingerprint = SHA256.hash(data: Data(request.prompt.utf8))
+            .map { String(format: "%02x", $0) }.joined()
+        let router = ProcessingRouter()
+        let route = router.route(
+            requiredCapabilities: [.hostedProvider],
+            approval: approval,
+            availability: [
+                ProcessingRouteAvailability(
+                    route: .directProvider,
+                    capabilities: [.hostedProvider, .localProvider],
+                    isAvailable: true
+                ),
+            ]
+        )
+        guard route == .directProvider else { throw AppModelOperationError.aiProviderUnavailable }
+        var job = ProcessingJob(
+            kind: "DIRECT_PROVIDER_TEXT",
+            inputFingerprint: fingerprint,
+            requiredCapabilities: [.hostedProvider],
+            selectedRoute: .directProvider,
+            approval: approval
+        )
+        _ = try await database.saveProcessingJob(job)
+        job = try await database.transitionProcessingJob(
+            id: job.id,
+            to: .running,
+            route: .directProvider
+        )
+        do {
+            let response = try await directProviderClient.performText(
+                request,
+                route: profile.routeSnapshot,
+                apiKey: secret
+            )
+            _ = try await database.transitionProcessingJob(
+                id: job.id,
+                to: .completed,
+                progress: 1
+            )
+            return (response, profile.routeSnapshot, job.id)
+        } catch DirectProviderError.transport {
+            _ = try? await database.transitionProcessingJob(
+                id: job.id,
+                to: .waitingForNetwork,
+                errorCode: "PROVIDER_UNREACHABLE"
+            )
+            throw DirectProviderError.transport
+        } catch is CancellationError {
+            _ = try? await database.transitionProcessingJob(id: job.id, to: .cancelled)
+            throw CancellationError()
+        } catch {
+            _ = try? await database.transitionProcessingJob(
+                id: job.id,
+                to: .failed,
+                errorCode: "PROVIDER_REQUEST_FAILED"
+            )
+            throw error
+        }
+    }
+
+    func recognizeFormulaOnDevice(_ request: LocalOCRRequest) async throws -> LocalOCRResponse {
+        guard let database else { throw AppModelOperationError.unlockedSessionUnavailable }
+        let fingerprint = SHA256.hash(data: Data(request.imageContent.utf8))
+            .map { String(format: "%02x", $0) }.joined()
+        let job = ProcessingJob(
+            id: request.jobId,
+            kind: "FORMULA_RECOGNITION",
+            inputEntityId: request.targetId,
+            inputRevision: request.inputRevision,
+            inputFingerprint: fingerprint,
+            requiredCapabilities: [.formulaRecognition],
+            selectedRoute: .onDevice
+        )
+        _ = try await database.saveProcessingJob(job)
+        _ = try await database.transitionProcessingJob(
+            id: job.id,
+            to: .running,
+            route: .onDevice
+        )
+        do {
+            let response = try await formulaRecognitionEngine.recognize(request)
+            _ = try await database.transitionProcessingJob(
+                id: job.id,
+                to: .completed,
+                progress: 1
+            )
+            return response
+        } catch OnDeviceFormulaModelError.manifestUnavailable,
+                OnDeviceFormulaModelError.modelUnavailable {
+            _ = try? await database.transitionProcessingJob(
+                id: job.id,
+                to: .waitingForCapability,
+                errorCode: "ON_DEVICE_FORMULA_MODEL_UNAVAILABLE"
+            )
+            throw OnDeviceFormulaModelError.modelUnavailable
+        } catch is CancellationError {
+            _ = try? await database.transitionProcessingJob(id: job.id, to: .cancelled)
+            throw CancellationError()
+        } catch {
+            _ = try? await database.transitionProcessingJob(
+                id: job.id,
+                to: .failed,
+                errorCode: "FORMULA_RECOGNITION_FAILED"
+            )
+            throw error
+        }
     }
 
     private func upsert(_ profile: AIProviderProfile, in profiles: inout [AIProviderProfile]) {
@@ -682,6 +726,90 @@ final class AppModel {
     }
 
     #if DEBUG
+    /// Creates a raw encrypted development backup. The SQLCipher database and encrypted assets
+    /// remain encrypted; the recovery words and account ID are required to use the copy.
+    func createEncryptedDevelopmentBackup() async throws -> URL {
+        guard !isOpening,
+              !isLocking,
+              !isCreatingPortableExport,
+              !isImportingPortableExport,
+              !isCreatingNotePDF
+        else { throw AppModelOperationError.unlockedSessionUnavailable }
+        if case .ready = phase { try await pendingSaves.flushAll() }
+        try? await database?.checkpoint()
+
+        let support = try applicationSupportURL()
+        let storedConfiguration: AccountConfiguration?
+        if let configuration {
+            storedConfiguration = configuration
+        } else {
+            storedConfiguration = try configurationStore.loadValidated()
+        }
+        let storage: AccountStorageLocation
+        let accountLabel: String
+        if let storedConfiguration {
+            storage = AccountStorageLocator(applicationSupportURL: support).location(
+                for: storedConfiguration.accountId,
+                purpose: storagePurpose(for: storedConfiguration)
+            )
+            accountLabel = storedConfiguration.accountId.uuidString.lowercased()
+        } else {
+            storage = AccountStorageLocation(directoryURL: support)
+            accountLabel = "unconfigured-legacy"
+        }
+        guard FileManager.default.fileExists(atPath: storage.databaseURL.path) else {
+            throw AppModelOperationError.unlockedSessionUnavailable
+        }
+        let destination = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "Epistoria-\(accountLabel)-\(UUID().uuidString).epistoria-encrypted-backup",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(
+            at: destination,
+            withIntermediateDirectories: false,
+            attributes: [.posixPermissions: 0o700]
+        )
+        do {
+            try FileManager.default.copyItem(
+                at: storage.databaseURL,
+                to: destination.appendingPathComponent("epistoria.sqlite")
+            )
+            for suffix in ["-wal", "-shm"] {
+                let source = URL(fileURLWithPath: storage.databaseURL.path + suffix)
+                if FileManager.default.fileExists(atPath: source.path) {
+                    try FileManager.default.copyItem(
+                        at: source,
+                        to: destination.appendingPathComponent("epistoria.sqlite\(suffix)")
+                    )
+                }
+            }
+            if FileManager.default.fileExists(atPath: storage.assetsDirectoryURL.path) {
+                try FileManager.default.copyItem(
+                    at: storage.assetsDirectoryURL,
+                    to: destination.appendingPathComponent("Assets", isDirectory: true)
+                )
+            }
+            let manifest: [String: String] = [
+                "schemaVersion": "epistoria-encrypted-development-backup/v1",
+                "accountId": accountLabel,
+                "createdAt": RFC3339Milliseconds.string(from: .now),
+                "encryption": "SQLCipher database and Epistoria encrypted assets",
+            ]
+            let manifestData = try JSONSerialization.data(
+                withJSONObject: manifest,
+                options: [.sortedKeys, .prettyPrinted]
+            )
+            try manifestData.write(
+                to: destination.appendingPathComponent("manifest.json"),
+                options: [.atomic, .completeFileProtection]
+            )
+            return destination
+        } catch {
+            try? FileManager.default.removeItem(at: destination)
+            throw error
+        }
+    }
+
     /// Permanently removes the local development copy after a separate typed confirmation in the
     /// interface. This method is not compiled into release builds and never contacts the server.
     func deleteLocalDevelopmentNotebook() async throws {
@@ -879,6 +1007,7 @@ final class AppModel {
             resumeSyncSchedulingIfNeeded()
         }
         let result = try await service.commit(plan)
+        try? await store?.rebuildRecognitionSearchProjections()
         await refreshDataHealth()
         noteLocalMutation()
         return result
@@ -1072,6 +1201,7 @@ final class AppModel {
                 lastSyncReport = report
                 lastSuccessfulSyncAt = .now
                 syncError = nil
+                try? await store?.rebuildRecognitionSearchProjections()
             } catch is CancellationError {
                 syncAttemptTask = nil
                 break
@@ -1275,6 +1405,11 @@ final class AppModel {
         let generation = sessionGeneration
         try await api.revokeDevice(id: id)
         guard generation == sessionGeneration, !isLocking else { throw CancellationError() }
+    }
+
+    func removeComputeNode(id: UUID) async throws {
+        try await revokeTrustedDevice(id: id)
+        _ = try await database?.rerouteJobs(fromComputeNode: id)
     }
 
     private func open(

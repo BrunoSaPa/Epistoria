@@ -32,6 +32,7 @@
 		595221EF82584E451C0BFE87 /* WorkspacePresentationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 05409469B2C2B557F4ED04A7 /* WorkspacePresentationTests.swift */; };
 		5A5134EA299709B260A44067 /* EpistoriaAccessibilityUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A96413C31E6FBDD6548E083 /* EpistoriaAccessibilityUITests.swift */; };
 		5BA923E33DD56FC8E15298F9 /* NotePDFExportServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F5E9EDA6F3C5E53A7A9D068 /* NotePDFExportServiceTests.swift */; };
+		5C8B62FD6B846169EF018314 /* OnDeviceFormulaRecognition.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02AC1296F471208EFE04B97A /* OnDeviceFormulaRecognition.swift */; };
 		5CDC0722C68F41F50FB24C69 /* TopicStudioView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22B2DB2C7A2173AC08F7A0DE /* TopicStudioView.swift */; };
 		63483CFD426EFD5BD4059DFB /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 9DC037239C3AAD04DDDC7E98 /* PrivacyInfo.xcprivacy */; };
 		75473A2695DFA6965D56A438 /* ConceptEvidenceMapView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F37F52121145FD6B5212E2C /* ConceptEvidenceMapView.swift */; };
@@ -46,6 +47,7 @@
 		B1545FB1ED851A4A6F5AA038 /* AppRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 994FB1067AAB271804368E81 /* AppRootView.swift */; };
 		B1E650B2FF8F504AA6045930 /* AdaptiveTutorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8935DE5EF28714C1897ECF7F /* AdaptiveTutorView.swift */; };
 		B9DACEB1B0ED2EA6FAB4734C /* DeveloperNotebookResetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2ADF9EA8B4CC8ABB172FB42 /* DeveloperNotebookResetView.swift */; };
+		BAB08214CBCE00873ABBA85C /* ComputeNodeSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F88A79D39FA49D05AF885DA9 /* ComputeNodeSettingsView.swift */; };
 		BB890C71994E1892269D508B /* MathAssistanceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 50B24792B8487B5D8E5833CD /* MathAssistanceView.swift */; };
 		C020D783090ACF29E186284D /* KnowledgeSearchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 296046E5F66D2C6212FE9F27 /* KnowledgeSearchView.swift */; };
 		C5F82045B47F32CFF46D15CE /* LibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7931BB0B2776308E4D8C7656 /* LibraryView.swift */; };
@@ -82,6 +84,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		02AC1296F471208EFE04B97A /* OnDeviceFormulaRecognition.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnDeviceFormulaRecognition.swift; sourceTree = "<group>"; };
 		05409469B2C2B557F4ED04A7 /* WorkspacePresentationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspacePresentationTests.swift; sourceTree = "<group>"; };
 		07D6428F2835D5D270587135 /* NotebookView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotebookView.swift; sourceTree = "<group>"; };
 		08B89468624166AB5B132D9F /* StudyView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StudyView.swift; sourceTree = "<group>"; };
@@ -137,6 +140,7 @@
 		DE33F134D1461DBC505B80B8 /* TopicDashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TopicDashboardView.swift; sourceTree = "<group>"; };
 		E0F3B3FDFBB2BCD218101F2E /* DataHealthView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DataHealthView.swift; sourceTree = "<group>"; };
 		E26C40C6CA3FA05AA8956F9C /* LocalTextOCRService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalTextOCRService.swift; sourceTree = "<group>"; };
+		F88A79D39FA49D05AF885DA9 /* ComputeNodeSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComputeNodeSettingsView.swift; sourceTree = "<group>"; };
 		F973AB6FF510D8DED2F212BC /* NoteReviewPreview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteReviewPreview.swift; sourceTree = "<group>"; };
 		FB0B9C8761588D1DEF763E50 /* NoteQuerySheetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteQuerySheetView.swift; sourceTree = "<group>"; };
 		FF1667158D395E586B7CD1DF /* ConflictResolutionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConflictResolutionView.swift; sourceTree = "<group>"; };
@@ -216,6 +220,7 @@
 			children = (
 				9168A7AD8732315016FE923D /* AIProviderProfileStore.swift */,
 				30EFB9A31E1C3EF9A2C4938E /* AIProviderSettingsView.swift */,
+				F88A79D39FA49D05AF885DA9 /* ComputeNodeSettingsView.swift */,
 				CCA1D91BCF0E8F22E9012606 /* LocalProcessingSettings.swift */,
 				411AD8353E00924FDD329665 /* LocalProcessingSettingsView.swift */,
 				21D6211A0941084661F0FDEA /* SettingsView.swift */,
@@ -321,6 +326,7 @@
 				FB0B9C8761588D1DEF763E50 /* NoteQuerySheetView.swift */,
 				F973AB6FF510D8DED2F212BC /* NoteReviewPreview.swift */,
 				D60B32C10ED6AADA33708517 /* OCRReviewView.swift */,
+				02AC1296F471208EFE04B97A /* OnDeviceFormulaRecognition.swift */,
 				D375328611A336119E2F55C0 /* SpatialNotebookCanvas.swift */,
 			);
 			path = Notebook;
@@ -502,6 +508,7 @@
 				35EF6CB34C88412ED6ED3677 /* AppModel.swift in Sources */,
 				B1545FB1ED851A4A6F5AA038 /* AppRootView.swift in Sources */,
 				4295FF11D9057AB5501F087E /* CollectionDetailView.swift in Sources */,
+				BAB08214CBCE00873ABBA85C /* ComputeNodeSettingsView.swift in Sources */,
 				75473A2695DFA6965D56A438 /* ConceptEvidenceMapView.swift in Sources */,
 				DF9CD341ABD3A514D2FF6BB3 /* ConflictResolutionView.swift in Sources */,
 				1969E734A69DCBD13E50C0AF /* ContinuousNotebookPages.swift in Sources */,
@@ -528,6 +535,7 @@
 				D256CAAC165CDDF18A7D8A68 /* NotebookView.swift in Sources */,
 				F24D041C272858D40ABDA08A /* NotebookVisualStyle.swift in Sources */,
 				F5B47A66F44C672C034CA1E8 /* OCRReviewView.swift in Sources */,
+				5C8B62FD6B846169EF018314 /* OnDeviceFormulaRecognition.swift in Sources */,
 				4D7AA72507C0FEEFD041A3F5 /* OnboardingView.swift in Sources */,
 				4C3C9122AB20F2632A91F255 /* PendingSaveRegistry.swift in Sources */,
 				3EFE1A6A662E4985817B5A07 /* SessionsView.swift in Sources */,

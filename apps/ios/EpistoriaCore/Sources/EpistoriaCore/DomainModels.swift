@@ -18,6 +18,8 @@ public enum EntityType: String, Codable, CaseIterable, Sendable {
     case sessionNote = "SESSION_NOTE"
     case sessionResource = "SESSION_RESOURCE"
     case aiArtifact = "AI_ARTIFACT"
+    case recognitionArtifact = "RECOGNITION_ARTIFACT"
+    case recognitionDecision = "RECOGNITION_DECISION"
     case transcriptCorrection = "TRANSCRIPT_CORRECTION"
     case sourceVersion = "SOURCE_VERSION"
     case evidence = "EVIDENCE"

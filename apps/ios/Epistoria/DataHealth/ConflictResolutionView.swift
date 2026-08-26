@@ -237,6 +237,12 @@ struct ConflictResolutionView: View {
             if let digest = try? CanonicalJSON.decode(SessionDigestArtifact.self, from: content) {
                 value = digest.editedDigest?.summary ?? digest.digest.summary
             } else { value = "Derived processing artifact" }
+        case .recognitionArtifact:
+            value = (try? CanonicalJSON.decode(OCRArtifactPayload.self, from: content).recognizedText)
+                ?? "Recognized content"
+        case .recognitionDecision:
+            value = (try? CanonicalJSON.decode(OCRCorrectionPayload.self, from: content).correctedText)
+                ?? "Recognition review"
         case .collectionItem, .sessionNote, .sessionResource, .topicArea,
              .conceptEvidence, .conceptLink:
             value = "Relationship record"

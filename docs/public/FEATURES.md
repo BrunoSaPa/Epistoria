@@ -144,15 +144,16 @@ the current personal beta.
 ## Local OCR
 
 - Recognize changed notebook handwriting and imported images on the iPad with Apple Vision.
-- Recognize scanned PDF pages on the trusted Mac when the page does not contain enough embedded
-  text.
+- Keep recognition as a separate encrypted record. Original Pencil strokes, images, and Sources
+  remain authoritative.
 - Keep unreviewed results available in local search with a handwriting, image, or scanned-Source
   label.
 - Compare the original crop with recognized text or LaTeX. Edit, accept, reject, or copy it.
 - Keep the original Pencil strokes, images, and Source files unchanged.
-- Use an optional local formula model for printed or handwritten formula-to-LaTeX recognition.
-- Download, verify, pause, retry, update, or remove the formula model from Local Processing
-  settings. Model files stay on the Mac and outside notebook sync and export.
+- Use the on-device Core ML formula runtime after a verified model passes physical-iPad release
+  validation. The development build does not silently use an external provider when the model is
+  unavailable.
+- Use an optional Compute Node as an acceleration route for larger formula models.
 - Include accepted handwriting in the searchable text layer of a note PDF.
 - Require accepted or owner-corrected OCR before Evidence, AI grounding, cards, tests, Concepts,
   mastery, Study Next, worked steps, graphing, or error diagnosis can use it.
@@ -171,7 +172,7 @@ This feature requires a paired Mac and a configured AI provider. It is optional.
 
 - Add, edit, activate, and remove provider connections from Settings.
 - Use the official Responses service, Anthropic, Gemini, or a compatible local or hosted service.
-- Keep provider keys in secure device storage on the iPad and trusted Mac.
+- Keep provider keys in device-only iPad Keychain storage. Keys do not synchronize.
 - See the destination host and model before choosing the active provider.
 - Use unencrypted HTTP only for a local or private-network service. Remote services require HTTPS.
 - Declare vision and transcription support only when the selected service provides them.

@@ -31,7 +31,7 @@ LOGGER = logging.getLogger("epistoria.worker")
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="epistoria-worker")
+    parser = argparse.ArgumentParser(prog="epistoria-compute-node")
     parser.add_argument("--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING"])
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("doctor", help="check API, provider, and Keychain readiness")
@@ -173,7 +173,11 @@ def _runtime(command: str) -> int:
 
         signal.signal(signal.SIGINT, stop)
         signal.signal(signal.SIGTERM, stop)
-        LOGGER.info("worker started account=%s device=%s", settings.account_id, settings.device_id)
+        LOGGER.info(
+            "compute node started account=%s device=%s",
+            settings.account_id,
+            settings.device_id,
+        )
         while not stopped.is_set():
             try:
                 processed = processor.process_once()
@@ -181,7 +185,7 @@ def _runtime(command: str) -> int:
                 LOGGER.warning("API unavailable; retrying after poll interval")
                 processed = False
             stopped.wait(0 if processed else settings.poll_seconds)
-        LOGGER.info("worker stopped")
+        LOGGER.info("compute node stopped")
         return 0
 
 

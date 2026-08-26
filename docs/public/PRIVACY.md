@@ -28,18 +28,15 @@ PDF text, questions, or generated answers.
 Synchronization can reveal operational information such as approximate sizes, timing, record
 types, and relationship shape. Encryption does not hide all traffic information.
 
-## Optional trusted Mac processing
+## Local processing and optional Compute Nodes
 
-A paired Mac is used for PDF text extraction and optional AI features. The Mac can read the
-material needed for an approved task while it is processing that task.
+Notebook storage, search, and Apple Vision text recognition run on the iPad. They do not require
+a Mac or an AI provider. Recognition results and corrections synchronize only as encrypted
+records. Downloaded model files do not synchronize or enter notebook backups or exports.
 
-PDF extraction runs locally on the Mac and does not require an AI provider.
-
-Notebook handwriting and imported-image OCR use Apple Vision on the iPad. Scanned PDF OCR uses
-Apple Vision on the paired Mac. Optional formula recognition uses a verified local model on the
-Mac. These OCR paths do not call an external API. OCR images, text, LaTeX, corrections, and review
-state synchronize only as encrypted records. Model files do not synchronize or enter notebook
-backups and exports.
+A paired Mac can be used as an optional Compute Node for larger local models, long transcription,
+office conversion, and selected local providers. The Compute Node can read only the material
+included in work routed to it. Removing it does not remove notebook data.
 
 Unreviewed OCR is available only in the local encrypted search index. Epistoria requires review
 before OCR can be used for learning records or included in a searchable PDF text layer.
@@ -60,10 +57,8 @@ configured provider receives those selected passages and images. The returned su
 translation, answer, and citations are encrypted before synchronization. The original PDF does
 not change.
 
-Provider keys are stored separately in secure storage on the iPad and paired Mac. Saving a
-provider connection sends the key to the trusted Mac through the same private encrypted channel.
-The synchronization service is not intended to receive a readable key, destination, or model.
-Provider keys and connections are not included in readable notebook exports.
+Provider keys are stored in device-only iPad Keychain items. They do not synchronize and are not
+included in notebook exports. A Compute Node or another iPad requires its own credential.
 
 When you approve an AI request, Epistoria records the selected provider connection, destination,
 model, and declared capabilities inside the encrypted request. Changing the active provider does

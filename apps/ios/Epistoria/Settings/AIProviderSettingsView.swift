@@ -56,22 +56,22 @@ struct AIProviderSettingsView: View {
                 ProviderDisclosureRow(
                     symbol: "key",
                     title: "Keys stay in Keychain",
-                    detail: "The iPad and trusted Mac each store API keys in device-only secure storage. Keys are not included in notebook exports."
+                    detail: "This iPad stores API keys in device-only Keychain. Keys are not synchronized or included in notebook exports."
                 )
                 ProviderDisclosureRow(
                     symbol: "lock",
-                    title: "Configuration is encrypted",
-                    detail: "A key reaches the trusted Mac in an end-to-end encrypted configuration job. The sync service cannot decrypt it."
+                    title: "Connections stay on this device",
+                    detail: "Provider configuration does not pass through Epistoria sync. Another device must supply its own key."
                 )
                 ProviderDisclosureRow(
                     symbol: "arrow.up.right",
                     title: "Content goes to the selected service",
-                    detail: "When you approve an AI request, the trusted Mac sends the disclosed notebook content to the active provider endpoint."
+                    detail: "After approval, this iPad sends only the disclosed notebook content directly to the selected endpoint."
                 )
             }
 
             Section {
-                Text("OpenAI-compatible supports Ollama, LM Studio, vLLM, LocalAI, and compatible hosted gateways. Native Anthropic and Gemini protocols are not connected yet.")
+                Text("OpenAI-compatible supports Ollama, LM Studio, vLLM, LocalAI, and compatible hosted gateways. OpenAI Responses, Anthropic Messages, and Gemini Generate Content connect directly from this iPad.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
@@ -94,7 +94,7 @@ struct AIProviderSettingsView: View {
             }
         }
         .confirmationDialog(
-            "Remove this provider from the iPad and trusted Mac?",
+            "Remove this provider from this iPad?",
             isPresented: Binding(
                 get: { profileToDelete != nil },
                 set: { if !$0 { profileToDelete = nil } }
@@ -108,7 +108,7 @@ struct AIProviderSettingsView: View {
             }
             Button("Cancel", role: .cancel) { profileToDelete = nil }
         } message: {
-            Text("Removal is queued for the trusted Mac. Accepted AI results and learning records remain available.")
+            Text("The device-only key is removed immediately. Accepted AI results and learning records remain available.")
         }
         .alert("AI provider problem", isPresented: Binding(
             get: { errorMessage != nil },
@@ -193,10 +193,10 @@ private struct AIProviderRow: View {
     private var statusText: String {
         switch profile.state {
         case .local: "Saved on this iPad"
-        case .queued: "Waiting for trusted Mac"
+        case .queued: "Updating this iPad"
         case .ready: "Ready"
         case .failed: "Could not configure: \(profile.lastErrorCode ?? "unknown error")"
-        case .deleting: "Waiting to remove from trusted Mac"
+        case .deleting: "Removing from this iPad"
         }
     }
 }
@@ -287,7 +287,7 @@ private struct AIProviderEditorView: View {
                 Text("Connection")
             } footer: {
                 if profile.adapter == .openAICompatible {
-                    Text("The trusted Mac resolves this URL. HTTP is accepted only for loopback, private-network, or .local addresses. Leave the key empty for a local server that does not require one.")
+                    Text("This iPad resolves this URL. HTTP is accepted only for loopback, private-network, or .local addresses. Leave the key empty for a local server that does not require one.")
                 } else {
                     Text("The API key is stored in device-only Keychain. Leave this field empty when editing to retain the existing key.")
                 }

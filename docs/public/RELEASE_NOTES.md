@@ -1,5 +1,19 @@
 # Release notes
 
+## iPad-first processing and search
+
+- Made the iPad authoritative for notebook storage, recognition, search, local processing jobs,
+  and provider credentials.
+- Added resumable encrypted local processing state and explicit on-device, direct-provider, and
+  optional Compute Node routes.
+- Replaced generic OCR indexing with dedicated recognition records and typed search segments.
+- Grouped recognition matches under the owning note or Source with exact-region navigation.
+- Added complete local search-index reconstruction after restore, import, or synchronization.
+- Renamed the Mac worker product role to optional Compute Node and added safe removal behavior.
+- Added an encrypted development backup option before confirmed local reset.
+- Added a verified downloaded Core ML formula runtime. Release enablement remains gated on a real
+  permissively licensed model and physical-iPad validation.
+
 ## Local OCR and formula recognition
 
 - Added automatic local handwriting recognition after drawing becomes idle, when a page closes,

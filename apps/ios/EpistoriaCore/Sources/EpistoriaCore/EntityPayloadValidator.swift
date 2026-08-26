@@ -25,6 +25,12 @@ public enum EntityPayloadValidator {
         case .annotation: _ = try CanonicalJSON.decode(AnnotationPayload.self, from: content)
         case .aiArtifact:
             break
+        case .recognitionArtifact:
+            _ = try CanonicalJSON.decode(OCRArtifactPayload.self, from: content)
+        case .recognitionDecision:
+            if (try? CanonicalJSON.decode(OCRCorrectionPayload.self, from: content)) == nil {
+                _ = try CanonicalJSON.decode(OCRReviewDecisionPayload.self, from: content)
+            }
         case .transcriptCorrection:
             _ = try CanonicalJSON.decode(TranscriptCorrectionPayload.self, from: content)
         case .sourceVersion: _ = try CanonicalJSON.decode(SourceVersionPayload.self, from: content)
@@ -104,10 +110,10 @@ public enum EntityPayloadValidator {
             "ai-artifact/source-query/v1",
             "ai-artifact/tutor-turn/v1",
             "ai-artifact/math-assistance/v1",
-            "ocr-artifact/v1",
-            "ocr-correction/v1",
             "ai-artifact/local-model-status/v1",
         ]
+        case .recognitionArtifact: ["recognition-artifact/v1"]
+        case .recognitionDecision: ["recognition-decision/v1"]
         case .transcriptCorrection: ["transcript-correction/v1"]
         case .sourceVersion: ["source-version/v1"]
         case .evidence: ["evidence/v1"]

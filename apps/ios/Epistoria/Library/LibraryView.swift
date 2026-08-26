@@ -1523,12 +1523,16 @@ struct ResourceDetailView: View {
             let mathCharacters = CharacterSet(charactersIn: "=+−-×÷/^√∫∑()[]{}<>²³")
             if model.localProcessingSettings.localMathOCR,
                recognized.rangeOfCharacter(from: mathCharacters) != nil,
-               let aiJobs = model.aiJobs
+               FormulaModelRegistry.productionManifest != nil
             {
                 var formulaRequest = capture.request
                 formulaRequest.jobId = UUID()
                 formulaRequest.mode = .formula
-                _ = try await aiJobs.submitLocalOCR(formulaRequest)
+                let formulaResponse = try await model.recognizeFormulaOnDevice(formulaRequest)
+                _ = try await store.saveOCRArtifact(
+                    request: formulaRequest,
+                    response: formulaResponse
+                )
             }
             ocrArtifacts = try await store.ocrArtifacts(parentId: resourceId)
             model.noteLocalMutation()

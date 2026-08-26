@@ -47,9 +47,13 @@ final class LocalOCRTests: XCTestCase {
             ]
         )
         let artifactId = try await store.saveOCRArtifact(request: request, response: response)
+        let storedArtifactEntity = try await database.entity(id: artifactId)
+        XCTAssertEqual(storedArtifactEntity?.entityType, .recognitionArtifact)
 
         let search = try await database.search("x^2")
-        XCTAssertEqual(search.first?.entity.id, artifactId)
+        XCTAssertEqual(search.first?.entity.id, noteId)
+        XCTAssertEqual(search.first?.sourceEntityId, artifactId)
+        XCTAssertEqual(search.first?.origin, .handwritingOCR)
         let unreviewed = try await store.payload(OCRArtifactPayload.self, id: artifactId)
         XCTAssertNil(unreviewed.payload.reviewState)
 
@@ -59,12 +63,25 @@ final class LocalOCRTests: XCTestCase {
             correctedText: "x^2 - 4 = 0 \\Rightarrow x = \\pm 2"
         )
         try await store.reviewOCRArtifact(id: artifactId, state: .edited)
+        let decisions = try await database.entities(type: .recognitionDecision)
+        XCTAssertTrue(decisions.contains { entity in
+            (try? CanonicalJSON.decode(OCRReviewDecisionPayload.self, from: entity.content).action)
+                == .acceptCorrection
+        })
+        let correctedSearch = try await database.search("Rightarrow")
+        XCTAssertEqual(correctedSearch.first?.entity.id, noteId)
+        XCTAssertEqual(correctedSearch.first?.origin, .correctedRecognition)
 
         let reopened = EpistoriaStore(database: try SQLCipherDatabase(url: url, key: key))
         let resolved = try await reopened.resolvedOCRText(artifactId: artifactId)
         XCTAssertEqual(resolved, "x^2 - 4 = 0 \\Rightarrow x = \\pm 2")
         let reviewed = try await reopened.payload(OCRArtifactPayload.self, id: artifactId)
         XCTAssertEqual(reviewed.payload.reviewState, .edited)
+
+        try await reopened.rebuildSearchIndexes()
+        let rebuiltSearch = try await reopened.database.search("Rightarrow")
+        XCTAssertEqual(rebuiltSearch.first?.entity.id, noteId)
+        XCTAssertEqual(rebuiltSearch.first?.origin, .correctedRecognition)
     }
 
     func testNewInputRevisionMarksOlderOCRStaleWithoutDeletingIt() async throws {

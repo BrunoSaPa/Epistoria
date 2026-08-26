@@ -49,9 +49,10 @@ struct OnboardingView: View {
             }
             #if DEBUG
             .sheet(isPresented: $showDevelopmentReset) {
-                DeveloperNotebookResetView {
-                    try await model.deleteLocalDevelopmentNotebook()
-                }
+                DeveloperNotebookResetView(
+                    onExport: { try await model.createEncryptedDevelopmentBackup() },
+                    onDelete: { try await model.deleteLocalDevelopmentNotebook() }
+                )
             }
             #endif
             .alert("An older notebook is on this iPad", isPresented: $showLegacyNotebookChoice) {

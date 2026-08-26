@@ -6,6 +6,7 @@ struct KnowledgeSearchView: View {
         case all = "All"
         case notes = "Notes"
         case resources = "Resources"
+        case evidence = "Evidence"
         case sessions = "Sessions"
 
         var id: Self { self }
@@ -107,7 +108,9 @@ struct KnowledgeSearchView: View {
         case .notes:
             [.note, .noteBlock]
         case .resources:
-            [.resource, .asset, .annotation, .transcriptCorrection, .evidence, .aiArtifact]
+            [.resource, .asset, .annotation, .transcriptCorrection]
+        case .evidence:
+            [.evidence]
         case .sessions:
             [.studySession]
         }
@@ -143,6 +146,12 @@ struct KnowledgeSearchView: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(3)
                 }
+                ForEach(Array(hit.additionalSnippets.enumerated()), id: \.offset) { _, snippet in
+                    Text(cleanSnippet(snippet))
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(2)
+                }
             }
             .padding(.vertical, 3)
         }
@@ -170,10 +179,9 @@ struct KnowledgeSearchView: View {
         case .asset:
             return (try? CanonicalJSON.decode(AssetPayload.self, from: content).originalFilename) ?? "Asset"
         case .aiArtifact:
-            if let artifact = try? CanonicalJSON.decode(OCRArtifactPayload.self, from: content) {
-                return ocrSourceLabel(artifact)
-            }
             return "AI artifact"
+        case .recognitionArtifact: return "Recognized content"
+        case .recognitionDecision: return "Recognition review"
         default: return typeLabel(hit)
         }
     }
@@ -183,9 +191,8 @@ struct KnowledgeSearchView: View {
     }
 
     private func symbol(for hit: SearchHit) -> String {
-        if hit.entity.entityType == .aiArtifact,
-            (try? CanonicalJSON.decode(OCRArtifactPayload.self, from: hit.entity.content)) != nil
-        { return "text.viewfinder" }
+        if hit.origin == .handwritingOCR || hit.origin == .imageOCR || hit.origin == .sourceOCR
+            || hit.origin == .correctedRecognition { return "text.viewfinder" }
         return switch hit.entity.entityType {
         case .note, .noteBlock: "doc.text"
         case .studySession: "timer"
@@ -198,17 +205,20 @@ struct KnowledgeSearchView: View {
     }
 
     private func typeLabel(_ hit: SearchHit) -> String {
-        if hit.entity.entityType == .aiArtifact,
-            (try? CanonicalJSON.decode(OCRArtifactPayload.self, from: hit.entity.content)) != nil
-        { return "Local OCR" }
+        if let origin = hit.origin { return searchOriginLabel(origin) }
         return hit.entity.entityType.rawValue.replacingOccurrences(of: "_", with: " ").capitalized
     }
 
-    private func ocrSourceLabel(_ artifact: OCRArtifactPayload) -> String {
-        switch artifact.targetKind {
-        case .notebookRegion: "Recognized from handwriting"
-        case .image: "Recognized from image"
-        case .sourcePage: "Recognized from scanned Source"
+    private func searchOriginLabel(_ origin: SearchSegmentOrigin) -> String {
+        switch origin {
+        case .writtenText: "Written text"
+        case .handwritingOCR: "Recognized from handwriting"
+        case .imageOCR: "Recognized from image"
+        case .sourceExtraction: "Source text"
+        case .sourceOCR: "Recognized from scanned Source"
+        case .transcript: "Transcript"
+        case .evidence: "Evidence"
+        case .correctedRecognition: "Corrected by you"
         }
     }
 }
@@ -225,7 +235,13 @@ private struct SearchDestination: View {
     private var destination: some View {
         switch hit.entity.entityType {
         case .note:
-            NoteEditorView(model: model, noteId: hit.entity.id)
+            NoteEditorView(
+                model: model,
+                noteId: hit.entity.id,
+                focusedBlockId: hit.locator?.targetId,
+                highlightText: navigationSearchText(for: hit),
+                focusRectangles: hit.locator?.rectangles ?? []
+            )
         case .noteBlock:
             if let noteId = hit.entity.parentId {
                 NoteEditorView(
@@ -240,7 +256,15 @@ private struct SearchDestination: View {
         case .studySession:
             SessionDetailView(model: model, sessionId: hit.entity.id)
         case .resource:
-            ResourceDetailView(model: model, resourceId: hit.entity.id)
+            ResourceDetailView(
+                model: model,
+                resourceId: hit.entity.id,
+                initialSourceVersionId: hit.locator?.sourceVersionId,
+                initialPageNumber: hit.locator?.pageNumber,
+                highlightText: navigationSearchText(for: hit),
+                initialMediaTimeSeconds: hit.locator?.startSeconds,
+                initialHighlightRectangles: hit.locator?.rectangles ?? []
+            )
         case .annotation:
             if let annotation = try? CanonicalJSON.decode(AnnotationPayload.self, from: hit.entity.content) {
                 ResourceDetailView(
@@ -282,7 +306,7 @@ private struct SearchDestination: View {
             } else {
                 SearchRecordView(hit: hit)
             }
-        case .aiArtifact:
+        case .recognitionArtifact:
             if let ocr = try? CanonicalJSON.decode(
                 OCRArtifactPayload.self,
                 from: hit.entity.content
@@ -306,7 +330,11 @@ private struct SearchDestination: View {
                             ?? ocr.response.regions.flatMap(\.rectangles)
                     )
                 }
-            } else if let artifact = try? CanonicalJSON.decode(SessionDigestArtifact.self, from: hit.entity.content) {
+            } else {
+                SearchRecordView(hit: hit)
+            }
+        case .aiArtifact:
+            if let artifact = try? CanonicalJSON.decode(SessionDigestArtifact.self, from: hit.entity.content) {
                 SessionDetailView(model: model, sessionId: artifact.sessionId)
             } else if let chunk = try? CanonicalJSON.decode(PDFExtractionChunk.self, from: hit.entity.content) {
                 let term = navigationSearchText(for: hit)

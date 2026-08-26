@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 public enum LocalOCRMode: String, Codable, CaseIterable, Sendable {
@@ -19,6 +20,7 @@ public enum LocalOCRContentKind: String, Codable, CaseIterable, Sendable {
 
 public enum LocalOCREngineKind: String, Codable, CaseIterable, Sendable {
     case appleVision = "APPLE_VISION"
+    case coreMLFormula = "CORE_ML_FORMULA"
     case ppFormulaNetPlusS = "PP_FORMULANET_PLUS_S"
     case deterministic = "DETERMINISTIC"
 }
@@ -148,8 +150,8 @@ public struct ResolvedOCRRegion: Equatable, Sendable {
 }
 
 public struct OCRArtifactPayload: EntityPayload, Equatable {
-    public static let entityType = EntityType.aiArtifact
-    public var schemaVersion = "ocr-artifact/v1"
+    public static let entityType = EntityType.recognitionArtifact
+    public var schemaVersion = "recognition-artifact/v1"
     public var jobId: UUID
     public var targetKind: LocalOCRTargetKind
     public var targetId: UUID
@@ -157,6 +159,7 @@ public struct OCRArtifactPayload: EntityPayload, Equatable {
     public var noteId: UUID?
     public var sourceVersionId: UUID?
     public var inputRevision: Int
+    public var inputFingerprint: String
     public var pageNumber: Int?
     public var locator: SourceLocator?
     /// A bounded encrypted preview used only to compare the result with the original selection.
@@ -178,6 +181,8 @@ public struct OCRArtifactPayload: EntityPayload, Equatable {
         noteId = request.noteId
         sourceVersionId = request.sourceVersionId
         inputRevision = request.inputRevision
+        inputFingerprint = SHA256.hash(data: Data(request.imageContent.utf8))
+            .map { String(format: "%02x", $0) }.joined()
         pageNumber = request.pageNumber
         locator = request.locator
         inputPreview = request.imageContent.count <= 900_000 ? request.imageContent : nil
@@ -196,8 +201,8 @@ public struct OCRArtifactPayload: EntityPayload, Equatable {
 }
 
 public struct OCRCorrectionPayload: EntityPayload, Equatable {
-    public static let entityType = EntityType.aiArtifact
-    public var schemaVersion = "ocr-correction/v1"
+    public static let entityType = EntityType.recognitionDecision
+    public var schemaVersion = "recognition-decision/v1"
     public var artifactId: UUID
     public var regionId: UUID
     public var targetId: UUID
@@ -245,6 +250,41 @@ public enum OCRCorrectionState: String, Codable, Sendable {
     case active = "ACTIVE"
     case conflicted = "CONFLICTED"
     case retracted = "RETRACTED"
+}
+
+public enum OCRReviewAction: String, Codable, Sendable {
+    case accept = "ACCEPT"
+    case reject = "REJECT"
+    case acceptCorrection = "ACCEPT_CORRECTION"
+}
+
+/// Append-only owner review event. `OCRArtifactPayload.reviewState` remains a materialized summary
+/// for compatibility with existing readers; this record preserves the action history and sync
+/// conflict candidates independently.
+public struct OCRReviewDecisionPayload: EntityPayload, Equatable {
+    public static let entityType = EntityType.recognitionDecision
+    public var schemaVersion = "recognition-decision/v1"
+    public var artifactId: UUID
+    public var targetId: UUID
+    public var action: OCRReviewAction
+    public var deviceId: UUID?
+    public var createdAt: Date
+    public var updatedAt: Date
+
+    public init(
+        artifactId: UUID,
+        targetId: UUID,
+        action: OCRReviewAction,
+        deviceId: UUID? = nil,
+        now: Date = .now
+    ) {
+        self.artifactId = artifactId
+        self.targetId = targetId
+        self.action = action
+        self.deviceId = deviceId
+        createdAt = now
+        updatedAt = now
+    }
 }
 
 public enum LocalModelControlOperation: String, Codable, Sendable {
@@ -374,17 +414,21 @@ public extension EpistoriaStore {
             response: response,
             generatedAt: generatedAt
         )
-        return try await save(
+        let content = try CanonicalJSON.encode(artifact)
+        _ = try await database.saveLocal(
             id: id,
-            payload: artifact,
+            entityType: .recognitionArtifact,
             parentId: request.parentId,
-            relationIds: [request.targetId, request.noteId, request.sourceVersionId]
-                .compactMap(\.self)
+            relationIds: [request.targetId, request.noteId, request.sourceVersionId].compactMap(\.self),
+            content: content,
+            searchProjection: Self.ocrSearchProjection(artifactId: id, artifact: artifact),
+            modifiedAt: generatedAt
         )
+        return id
     }
 
     func ocrArtifacts(parentId: UUID) async throws -> [IdentifiedPayload<OCRArtifactPayload>] {
-        try await database.entities(type: .aiArtifact, parentId: parentId).compactMap { entity in
+        try await database.entities(type: .recognitionArtifact, parentId: parentId).compactMap { entity in
             guard let artifact = try? CanonicalJSON.decode(OCRArtifactPayload.self, from: entity.content)
             else { return nil }
             return IdentifiedPayload(
@@ -397,7 +441,7 @@ public extension EpistoriaStore {
     }
 
     func markOCRArtifactsStale(targetId: UUID, exceptInputRevision: Int) async throws {
-        let entities = try await database.entities(type: .aiArtifact)
+        let entities = try await database.entities(type: .recognitionArtifact)
         var artifacts: [(UUID, OCRArtifactPayload)] = []
         for entity in entities {
             guard var artifact = try? CanonicalJSON.decode(
@@ -411,12 +455,15 @@ public extension EpistoriaStore {
             artifacts.append((entity.id, artifact))
         }
         for (id, artifact) in artifacts {
-            _ = try await save(
+            let content = try CanonicalJSON.encode(artifact)
+            _ = try await database.saveLocal(
                 id: id,
-                payload: artifact,
+                entityType: .recognitionArtifact,
                 parentId: artifact.parentId,
-                relationIds: [artifact.targetId, artifact.noteId, artifact.sourceVersionId]
-                    .compactMap(\.self)
+                relationIds: [artifact.targetId, artifact.noteId, artifact.sourceVersionId].compactMap(\.self),
+                content: content,
+                searchProjection: Self.ocrSearchProjection(artifactId: id, artifact: artifact),
+                modifiedAt: artifact.updatedAt
             )
         }
     }
@@ -437,15 +484,33 @@ public extension EpistoriaStore {
                 throw StoreError.invalidDraftReview
             }
         }
+        let action: OCRReviewAction = switch state {
+        case .accepted: .accept
+        case .edited: .acceptCorrection
+        case .rejected: .reject
+        }
+        _ = try await save(
+            payload: OCRReviewDecisionPayload(
+                artifactId: id,
+                targetId: artifact.targetId,
+                action: action
+            ),
+            parentId: artifact.parentId,
+            relationIds: [id, artifact.targetId]
+        )
         artifact.reviewState = state
         artifact.reviewedAt = .now
-        _ = try await save(
+        let content = try CanonicalJSON.encode(artifact)
+        _ = try await database.saveLocal(
             id: id,
-            payload: artifact,
+            entityType: .recognitionArtifact,
             parentId: artifact.parentId,
-            relationIds: [artifact.targetId, artifact.noteId, artifact.sourceVersionId]
-                .compactMap(\.self)
+            relationIds: [artifact.targetId, artifact.noteId, artifact.sourceVersionId].compactMap(\.self),
+            content: content,
+            searchProjection: Self.ocrSearchProjection(artifactId: id, artifact: artifact),
+            modifiedAt: artifact.updatedAt
         )
+        try await refreshOCRSearchProjection(artifactId: id)
     }
 
     func resolvedOCRText(artifactId: UUID) async throws -> String {
@@ -457,7 +522,7 @@ public extension EpistoriaStore {
 
     func resolvedOCRRegions(artifactId: UUID) async throws -> [ResolvedOCRRegion] {
         let artifact = try await payload(OCRArtifactPayload.self, id: artifactId).payload
-        let entities = try await database.entities(type: .aiArtifact)
+        let entities = try await database.entities(type: .recognitionDecision)
         let corrections: [(id: UUID, payload: OCRCorrectionPayload)] = entities.compactMap {
             entity -> (id: UUID, payload: OCRCorrectionPayload)? in
             guard let correction = try? CanonicalJSON.decode(
@@ -492,7 +557,7 @@ public extension EpistoriaStore {
         }
         let clean = correctedText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !clean.isEmpty else { throw StoreError.invalidDraftReview }
-        let entities = try await database.entities(type: .aiArtifact)
+        let entities = try await database.entities(type: .recognitionDecision)
         let existing: [(id: UUID, payload: OCRCorrectionPayload)] = entities.compactMap {
             entity -> (id: UUID, payload: OCRCorrectionPayload)? in
             guard let correction = try? CanonicalJSON.decode(
@@ -519,10 +584,111 @@ public extension EpistoriaStore {
             supersedesCorrectionId: leaves.count == 1 ? leaves.first?.id : nil,
             supersedesCorrectionIds: leaves.count > 1 ? leaves.map(\.id) : []
         )
-        return try await save(
+        let id = try await save(
             payload: correction,
             parentId: artifact.parentId,
             relationIds: [artifactId, artifact.targetId]
+        )
+        try await refreshOCRSearchProjection(artifactId: artifactId)
+        return id
+    }
+
+    func refreshOCRSearchProjection(artifactId: UUID) async throws {
+        let artifact = try await payload(OCRArtifactPayload.self, id: artifactId).payload
+        let resolved = try await resolvedOCRRegions(artifactId: artifactId)
+        try await database.replaceSearchProjection(
+            Self.ocrSearchProjection(
+                artifactId: artifactId,
+                artifact: artifact,
+                resolvedRegions: resolved
+            )
+        )
+    }
+
+    /// Recreates every OCR-derived segment from encrypted recognition entities.
+    /// This is safe after synchronization, restore, or deletion of the derived index.
+    func rebuildRecognitionSearchProjections() async throws {
+        let entities = try await database.entities(type: .recognitionArtifact)
+        for entity in entities where !entity.tombstone {
+            guard let artifact = try? CanonicalJSON.decode(
+                OCRArtifactPayload.self,
+                from: entity.content
+            ) else { continue }
+            let resolved = try? await resolvedOCRRegions(artifactId: entity.id)
+            try await database.replaceSearchProjection(
+                Self.ocrSearchProjection(
+                    artifactId: entity.id,
+                    artifact: artifact,
+                    resolvedRegions: resolved
+                )
+            )
+        }
+    }
+
+    /// Rebuilds both exact and semantic source projections. Authoritative entities are unchanged.
+    func rebuildSearchIndexes() async throws {
+        try await database.rebuildBaseSearchProjection()
+        try await rebuildRecognitionSearchProjections()
+        _ = try await database.rebuildSemanticSearchIndex(batchLimit: 256)
+    }
+
+    private static func ocrSearchProjection(
+        artifactId: UUID,
+        artifact: OCRArtifactPayload,
+        resolvedRegions: [ResolvedOCRRegion]? = nil
+    ) -> SearchProjectionWrite {
+        guard artifact.state == .current, artifact.reviewState != .rejected else {
+            return SearchProjectionWrite(sourceEntityId: artifactId, segments: [])
+        }
+        let resolvedById = Dictionary(uniqueKeysWithValues: (resolvedRegions ?? []).compactMap {
+            let original = $0.region.latex ?? $0.region.text
+            return $0.content == original ? nil : ($0.region.id, $0.content)
+        })
+        let ownerId = artifact.noteId ?? artifact.parentId
+        let origin: SearchSegmentOrigin = switch artifact.targetKind {
+        case .notebookRegion: .handwritingOCR
+        case .image: .imageOCR
+        case .sourcePage: .sourceOCR
+        }
+        let reviewState: SearchSegmentReviewState = switch artifact.reviewState {
+        case .accepted: .accepted
+        case .edited: .corrected
+        case .rejected: .unreviewed
+        case nil: .unreviewed
+        }
+        let authority = switch reviewState {
+        case .authored, .corrected: 100
+        case .accepted: 80
+        case .unreviewed: 30
+        }
+        return SearchProjectionWrite(
+            sourceEntityId: artifactId,
+            segments: artifact.response.regions.compactMap { region in
+                let body = resolvedById[region.id] ?? region.latex ?? region.text
+                guard !body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                    return nil
+                }
+                return SearchSegmentWrite(
+                    id: region.id,
+                    ownerEntityId: ownerId,
+                    sourceEntityId: artifactId,
+                    origin: resolvedById[region.id] == nil ? origin : .correctedRecognition,
+                    reviewState: resolvedById[region.id] == nil ? reviewState : .corrected,
+                    authority: resolvedById[region.id] == nil ? authority : 100,
+                    title: "",
+                    body: body,
+                    locator: SearchSegmentLocator(
+                        targetId: artifact.targetId,
+                        sourceVersionId: artifact.sourceVersionId,
+                        pageNumber: artifact.pageNumber,
+                        rectangles: region.rectangles.isEmpty
+                            ? (artifact.locator?.rectangles ?? []) : region.rectangles,
+                        startSeconds: artifact.locator?.startSeconds
+                    ),
+                    contentRevision: artifact.inputRevision,
+                    updatedAt: artifact.updatedAt
+                )
+            }
         )
     }
 
@@ -541,7 +707,7 @@ public extension EpistoriaStore {
     func ocrCorrectionConflicts(
         artifactId: UUID
     ) async throws -> [UUID: [String]] {
-        let entities = try await database.entities(type: .aiArtifact)
+        let entities = try await database.entities(type: .recognitionDecision)
         let corrections: [(id: UUID, payload: OCRCorrectionPayload)] = entities.compactMap {
             entity -> (id: UUID, payload: OCRCorrectionPayload)? in
             guard let correction = try? CanonicalJSON.decode(

@@ -120,14 +120,17 @@ Completed:
 25. A notebook Math tool can recognize selected handwriting, propose worked steps, plot a bounded
    function locally, and diagnose errors. Results require review and never replace original
    Pencil strokes.
-26. Local OCR recognizes changed notebook ink and imported images with Apple Vision. Scanned PDF
-   pages use Apple Vision on the trusted Mac. Optional PP-FormulaNet_plus-S recognition produces
-   reviewable LaTeX without an external OCR API. Accepted handwriting enters searchable note PDFs.
+26. Local OCR recognizes changed notebook ink and imported images with Apple Vision. Dedicated
+   recognition records provide labeled search matches and exact-region return. A downloaded Core
+   ML formula runtime is implemented but remains disabled until a permissively licensed model
+   passes accuracy and physical-iPad performance gates. A Mac is optional as a Compute Node.
 
 Next stages:
 
 1. Validate related-result quality, performance, battery use, VoiceOver, and direct Source
    navigation during representative daily use on a physical iPad.
+2. Complete typed direct-provider execution for every generation screen. Each remaining Compute
+   Node route must remain explicit during the transition.
 
 ## Competitor-informed opportunities
 

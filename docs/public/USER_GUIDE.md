@@ -103,8 +103,8 @@ printing, or sharing. It is not an Epistoria backup and cannot be imported into 
 2. Keep automatic notebook or Source recognition on as needed.
 3. Add optional language tags such as `en-US` and `es-MX`, or leave the field empty to use device
    language detection.
-4. To recognize formulas, enable **Local Math OCR** and approve the verified model download to the
-   trusted Mac. You can pause and resume the download.
+4. To recognize formulas, open **Local Math OCR**. The on-device model can be installed only when
+   the build contains a manifest that passed license, accuracy, performance, and device checks.
 5. Write normally. Notebook recognition starts after drawing has been idle for three seconds. It
    also checks saved ink when a page closes or the app backgrounds.
 6. Open the note or Source recognition status, then compare the original crop and result.
@@ -119,14 +119,14 @@ Source files. A result without engine confidence is labeled **Unverified**.
 1. Open a note and select **Math** in the left tool rail.
 2. Draw around the handwritten equation, calculation, graph, or attempted solution.
 3. Select **Analyze**.
-4. Choose **Recognize equation**. This uses Local Math OCR on the trusted Mac and does not call an
-   AI provider.
+4. Choose **Recognize equation**. This uses the verified on-device model when it is available. It
+   does not silently call an AI provider or require a Compute Node.
 5. Open the OCR review and confirm or correct the expression.
 6. Select the Math region again and choose **Worked steps**, **Graph**, or **Diagnose error**.
 7. Add an optional instruction when the intended task or notation is unclear.
-8. Select **Preview what leaves your Mac**. Check the number of selected items, nearby text items,
-   visual crops, and approximate tokens.
-9. Select **Approve and queue**. Continue writing while the trusted Mac processes the request.
+8. Select the processing preview. Check the route, selected items, nearby text items, visual
+   crops, and approximate tokens.
+9. Select **Approve and queue**. Continue writing while the approved route processes the request.
 10. Open the notebook actions menu and select **Math results**.
 11. Check the recognized expression, confidence, uncertainties, every worked step, and every
    correction. For a graph, confirm the function and domain.
@@ -543,8 +543,6 @@ Already completed drafts remain available for review.
 
 ## Choose an AI provider
 
-The trusted Mac must be paired and running before a provider change can finish.
-
 1. Open **Settings → AI Providers**.
 2. Select **Add provider**.
 3. Choose the official Responses service, Anthropic, Google Gemini, or a compatible local or
@@ -553,7 +551,7 @@ The trusted Mac must be paired and running before a provider change can finish.
 5. Enable only the capabilities supported by that service.
 6. Enter the provider key. A local service that does not require a key can leave it empty.
 7. Review the destination statement and select **Save**.
-8. Wait until the provider shows **Ready**.
+8. Confirm that the provider shows **Ready**.
 
 Only one provider is active. Swipe a ready inactive provider and select **Use** to activate it.
 Open a provider to update its model, capabilities, price estimates, or key. Swipe from the other
@@ -561,7 +559,7 @@ side to remove it.
 
 Every new AI approval keeps the active provider connection and model shown at that time. Later
 activation of another provider does not change queued work. If you edit or remove the approved
-connection before the Mac processes a request, that request stops. Open the task again and review
+connection before the approved route processes a request, that request stops. Open the task again and review
 the new provider settings before submitting it.
 
 Changing the provider connection type clears the previous key unless a replacement is entered.
@@ -571,8 +569,9 @@ Anthropic and Gemini use fixed official HTTPS addresses. Their native connection
 and optional image input. They require structured output and cannot be selected for timestamped
 media transcription. The chosen model must support the capabilities that you enable.
 
-The provider address is reached from the trusted Mac. A loopback address refers to that Mac, not
-the iPad. Remote addresses require HTTPS. Provider keys stay in secure device storage and do not
+Direct provider addresses are reached from the iPad. A loopback address refers to the iPad.
+Remote addresses require HTTPS. A separately selected Compute Node route uses that node's
+network. Provider keys stay in device-only Keychain storage, do not synchronize, and do not
 appear in readable notebook exports. A fresh iPad requires the key to be entered again.
 
 ## Search
@@ -592,14 +591,15 @@ devices may show exact matches only.
 
 ## Ask about part of a note
 
-This optional feature requires a paired Mac and configured AI provider.
+This optional feature requires a configured provider or an explicitly selected Compute Node
+route.
 
 1. Open a note.
 2. Select **Select region**.
 3. Draw around the relevant text, handwriting, or images.
 4. Select **Ask**.
 5. Enter the question.
-6. Select **Preview what leaves your Mac**.
+6. Select the processing preview.
 7. Review the disclosure.
 8. Select **Approve and queue**.
 

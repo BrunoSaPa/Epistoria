@@ -166,9 +166,9 @@ public enum EntitySearchIndexer {
                     body: [value.correctedText, value.reason].compactMap(\ .self).joined(separator: "\n")
                 )
             case .aiArtifact:
-                guard let object = try JSONSerialization.jsonObject(with: content) as? [String: Any]
-                else { return nil }
-                return SearchDocument(title: "AI artifact", body: text(in: object).joined(separator: "\n"))
+                return nil
+            case .recognitionArtifact, .recognitionDecision:
+                return nil
             case .topicArea, .collectionItem, .sessionNote, .sessionResource, .sourceVersion,
                  .conceptEvidence, .conceptLink, .knowledgeMap, .sessionActivity, .flashcardDeck, .flashcard,
                  .flashcardReview, .topicScopeSnapshot, .testBlueprint, .testAttempt,
@@ -180,21 +180,6 @@ public enum EntitySearchIndexer {
         }
     }
 
-    private static func text(in value: Any) -> [String] {
-        if let string = value as? String {
-            if UUID(uuidString: string) != nil || string.contains("/v1") { return [] }
-            return [string]
-        }
-        if let array = value as? [Any] {
-            return array.flatMap(text)
-        }
-        if let dictionary = value as? [String: Any] {
-            return dictionary
-                .filter { !["schemaVersion", "providerRequestId"].contains($0.key) }
-                .flatMap { text(in: $0.value) }
-        }
-        return []
-    }
 }
 
 public actor EpistoriaStore {

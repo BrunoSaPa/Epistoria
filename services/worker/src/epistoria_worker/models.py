@@ -1195,7 +1195,7 @@ class LocalOCRResponseV1(ContractModel):
 
 
 class OCRArtifactV1(ContractModel):
-    schema_version: Literal["ocr-artifact/v1"] = "ocr-artifact/v1"
+    schema_version: Literal["recognition-artifact/v1"] = "recognition-artifact/v1"
     job_id: UUID
     target_kind: LocalOCRTargetKind
     target_id: UUID
@@ -1203,6 +1203,7 @@ class OCRArtifactV1(ContractModel):
     note_id: UUID | None = None
     source_version_id: UUID | None = None
     input_revision: int = Field(ge=0)
+    input_fingerprint: Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
     page_number: int | None = Field(default=None, ge=1)
     locator: dict[str, object] | None = None
     input_preview: Annotated[str | None, StringConstraints(max_length=900_000)] = None

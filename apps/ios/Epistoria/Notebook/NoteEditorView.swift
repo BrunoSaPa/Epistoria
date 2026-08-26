@@ -44,7 +44,7 @@ private enum CanvasSaveState: Equatable {
 private enum OCRRecognitionState: Equatable {
     case idle
     case recognizing
-    case formulaQueued
+    case formulaProcessing
 }
 
 private enum NotebookLassoPurpose {
@@ -1678,7 +1678,7 @@ struct NoteEditorView: View {
         if case .tooLarge = inkSaveState { return inkSaveState.label }
         if inkSaveState == .saving || model.pendingSaves.count > 0 { return "Saving locally…" }
         if ocrRecognitionState == .recognizing { return "Recognizing handwriting…" }
-        if ocrRecognitionState == .formulaQueued { return "Formula recognition queued" }
+        if ocrRecognitionState == .formulaProcessing { return "Recognizing formula on this iPad" }
         let hasQueuedWork = model.pendingRecordCount + model.pendingFileCount > 0
         return note?.syncState == .synced && !hasQueuedWork
             ? "Saved · synced"
@@ -1691,7 +1691,7 @@ struct NoteEditorView: View {
             return "arrow.triangle.2.circlepath"
         }
         if ocrRecognitionState == .recognizing { return "text.viewfinder" }
-        if ocrRecognitionState == .formulaQueued { return "macbook.and.ipad" }
+        if ocrRecognitionState == .formulaProcessing { return "function" }
         let hasQueuedWork = model.pendingRecordCount + model.pendingFileCount > 0
         return note?.syncState == .synced && !hasQueuedWork ? "checkmark.circle" : "ipad"
     }
@@ -2222,30 +2222,28 @@ struct NoteEditorView: View {
                 previousDrawingData: previousDrawingData,
                 preferredLanguages: model.localProcessingSettings.normalizedLanguages
             )
-            var queuedFormula = false
             for capture in captures {
                 _ = try await store.saveOCRArtifact(
                     request: capture.request,
                     response: capture.response
                 )
                 if model.localProcessingSettings.localMathOCR,
-                    capture.suggestsFormula || looksMathematical(capture.response),
-                    let aiJobs = model.aiJobs
+                    capture.suggestsFormula || looksMathematical(capture.response)
                 {
                     var formulaRequest = capture.request
                     formulaRequest.jobId = UUID()
                     formulaRequest.mode = .formula
-                    _ = try await aiJobs.submitLocalOCR(formulaRequest)
-                    queuedFormula = true
+                    ocrRecognitionState = .formulaProcessing
+                    let formulaResponse = try await model.recognizeFormulaOnDevice(formulaRequest)
+                    _ = try await store.saveOCRArtifact(
+                        request: formulaRequest,
+                        response: formulaResponse
+                    )
                 }
             }
             model.noteLocalMutation()
             ocrArtifacts = try await store.ocrArtifacts(parentId: noteId)
-            ocrRecognitionState = queuedFormula ? .formulaQueued : .idle
-            if queuedFormula {
-                try? await Task.sleep(for: .seconds(4))
-                if ocrRecognitionState == .formulaQueued { ocrRecognitionState = .idle }
-            }
+            ocrRecognitionState = .idle
         } catch LocalTextOCRError.emptyDrawing {
             ocrRecognitionState = .idle
         } catch {

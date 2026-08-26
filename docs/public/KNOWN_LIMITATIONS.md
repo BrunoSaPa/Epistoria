@@ -72,7 +72,9 @@ Epistoria remains in personal beta. The following limits apply to the current pr
 
 ## Optional processing
 
-- PDF extraction and AI features require a paired Mac.
+- A Mac is optional. Existing typed generation screens are moving to direct iPad execution in
+  stages; a screen that still uses the encrypted Compute Node queue identifies that route before
+  approval.
 - AI features require a separately configured provider account and can incur provider charges.
 - One provider is active for newly approved work. Each new request keeps the provider and model
   reviewed at approval. Editing or removing that connection before processing stops the request;
@@ -91,9 +93,10 @@ Epistoria remains in personal beta. The following limits apply to the current pr
   contrast, paper patterns, notation, and scan quality. Vector-only diagrams and PDFs with
   incomplete image metadata can still produce incomplete figure notes. The app shows reported
   coverage limits.
-- Automatic formula recognition remains opt-in until representative physical-iPad Pencil and
-  real-model testing is complete. A paired Apple Silicon Mac and an approximately 264 MB verified
-  local model are required. OCR results must be reviewed before learning features use them.
+- On-device formula recognition remains a development feature until a permissively licensed Core
+  ML model passes accuracy, two-second p95 latency, memory, thermal, and Pencil-latency tests.
+  Epistoria does not silently upload formulas or require a Mac when that model is unavailable.
+  OCR results must be reviewed before learning features use them.
 - Large PDFs use a bounded analysis pass. A result can cover selected passages instead of every
   passage and must state that limit.
 - Manual cards, tests, and typed Concept connections are available. Generated card, test, Concept,

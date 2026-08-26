@@ -87,7 +87,7 @@ struct NoteQuerySheetView: View {
         } header: {
             Text("Your question")
         } footer: {
-            Text("Your question and the selected content will be processed on your trusted Mac before anything is sent to the AI provider.")
+            Text("Review the selected content and provider route before sending. Epistoria does not silently switch providers or processing routes.")
                 .font(.caption)
         }
     }
@@ -147,7 +147,7 @@ struct NoteQuerySheetView: View {
             .disabled(isSubmitting)
             .accessibilityIdentifier("note-query.submit")
         } footer: {
-            Text("The answer will appear in the note's AI answers panel after your trusted Mac processes the request.")
+            Text("The answer will appear in the note's AI answers panel after the approved processing route completes.")
                 .font(.caption)
         }
     }
@@ -160,7 +160,7 @@ struct NoteQuerySheetView: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Question queued")
                         .font(.subheadline.weight(.medium))
-                    Text("The trusted Mac will process it when available. Check AI answers in the note toolbar.")
+                    Text("The approved route will process it when available. Check AI answers in the note toolbar.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
