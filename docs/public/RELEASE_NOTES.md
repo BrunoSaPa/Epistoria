@@ -1,5 +1,14 @@
 # Release notes
 
+## Handwritten mathematics beta
+
+- Added a Math selection tool for handwritten equations and attempted solutions.
+- Added separate recognition, worked-step, graph, and error-diagnosis tasks.
+- Added review and editing before an expression or explanation can be inserted into a note.
+- Added local graph evaluation with a limited mathematics grammar.
+- Kept original Pencil strokes unchanged and kept generated results encrypted and removable.
+- Marked physical Apple Pencil quality and interaction validation as open.
+
 ## Concept and Evidence map
 
 - Added one interactive knowledge map for each Topic.

@@ -200,6 +200,23 @@ This feature requires a paired Mac and a configured AI provider. It is optional.
   LocalAI connections.
 - Keep the notebook usable when no provider is available.
 
+### Handwritten mathematics
+
+- Select Pencil writing or another note object with the Math lasso tool.
+- Request equation recognition, worked steps, a graph, or error diagnosis.
+- Review the exact selected-item and nearby-text count before optional processing begins.
+- Check the recognized expression, interpretation, confidence, uncertainty, worked steps, and
+  corrections before accepting a result.
+- Plot supported functions on the iPad. Graph expressions are evaluated locally with a limited
+  mathematics grammar.
+- Edit a result before acceptance. Insert an accepted expression or explanation as a new note
+  object.
+- Keep the original Pencil strokes unchanged. Rejecting or removing a result does not change the
+  note selection.
+
+This feature is in personal beta. Physical Apple Pencil recognition quality and interaction still
+require representative device validation.
+
 - Create and manage flashcard decks.
 - Edit cards by creating durable revisions. Suspend or archive cards without deleting reviews.
 - Edit goals and unresolved questions. Mark goals completed and questions resolved or reopen them.

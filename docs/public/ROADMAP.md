@@ -27,8 +27,9 @@ change after personal use and beta testing.
 - Add image crop and mask tools.
 - Add editing for an existing shape's style, connectors, snapping, and alignment guides.
 - Evaluate square, angled, and custom eraser footprints after physical Apple Pencil testing.
-- Evaluate handwriting recognition, handwritten-math recognition, equation layout, LaTeX input,
-  and graphing after Pencil testing.
+- Validate handwritten-math recognition, result review, graph interaction, and original-stroke
+  preservation on physical Pencil-capable iPads. Evaluate general handwriting recognition, a full
+  equation-layout editor, and direct LaTeX input separately.
 
 ## Review and learning
 
@@ -114,6 +115,9 @@ Completed:
 24. Each Topic has an interactive Concept and Evidence map. Node arrangement is encrypted and
     durable. Evidence can open its exact Source, appear in a note, show its typed Concept
     relationships, or start a grounded Tutor session.
+25. A notebook Math tool can recognize selected handwriting, propose worked steps, plot a bounded
+    function locally, and diagnose errors. Results require review and never replace original
+    Pencil strokes.
 
 Next stages:
 
@@ -138,8 +142,6 @@ the app.
 
 - Add cited audio briefs and optional spoken Tutor sessions. Start with one clear narrator. Do not
   simulate a podcast conversation.
-- Add handwriting-aware mathematics support after Pencil validation. The intended scope includes
-  equation recognition, worked steps, graphing, and error diagnosis.
 - Add source-grounded slide decks, infographics, and visual explanations. Every revision must
   remain bound to the Source Versions used to create it.
 

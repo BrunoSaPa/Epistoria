@@ -31,6 +31,8 @@ from epistoria_worker.models import (
     KnownConceptReferenceV1,
     LearningGenerationArtifactV1,
     LearningGenerationRequestV1,
+    MathAssistanceArtifactV1,
+    MathAssistanceRequestV1,
     MediaTranscriptionChunkV1,
     MediaTranscriptionManifestV1,
     MediaTranscriptionRequestV1,
@@ -75,6 +77,7 @@ def lease_for(
         "FREE_RESPONSE_FEEDBACK",
         "PROVIDER_CONFIGURATION",
         "TUTOR_TURN",
+        "MATH_ASSISTANCE",
     ],
     payload: bytes,
     job_id: UUID | None = None,
@@ -167,6 +170,20 @@ class UnknownTutorCitationProvider(DeterministicDigestProvider):
     def generate_tutor_turn(self, request: TutorTurnRequestV1):
         response, trace = super().generate_tutor_turn(request)
         response.cited_excerpt_ids = [uuid4()]
+        return response, trace
+
+
+class UnknownMathCitationProvider(DeterministicDigestProvider):
+    def generate_math_assistance(self, request: MathAssistanceRequestV1):
+        response, trace = super().generate_math_assistance(request)
+        response.cited_source_ids = [uuid4()]
+        return response, trace
+
+
+class UnsafeMathGraphProvider(DeterministicDigestProvider):
+    def generate_math_assistance(self, request: MathAssistanceRequestV1):
+        response, trace = super().generate_math_assistance(request)
+        response.graph_expression = "system(x)"
         return response, trace
 
 
@@ -301,6 +318,67 @@ def test_tutor_turn_rejects_expired_session_authorization(tmp_path) -> None:
     assert worker.process_once()
     assert api.pushed == []
     assert api.failed == [(job_id, "TUTOR_AUTHORIZATION_INVALID", False)]
+
+
+def math_request(job_id: UUID, *, mode: str = "GRAPH") -> MathAssistanceRequestV1:
+    source_id = uuid4()
+    return MathAssistanceRequestV1(
+        account_id=ACCOUNT_ID,
+        job_id=job_id,
+        note_id=uuid4(),
+        note_title="Algebra scratch work",
+        mode=mode,
+        output_language="English",
+        selection_sources=[
+            {
+                "sourceId": source_id,
+                "sourceKind": "LASSO_SELECTION",
+                "title": "Algebra scratch work",
+                "locator": "selected math on canvas item 1",
+                "imageContent": "aW1hZ2U",
+            }
+        ],
+        context_sources=[],
+        disclosure_acknowledged=True,
+    )
+
+
+def test_math_assistance_is_synced_as_reviewable_encrypted_artifact(tmp_path) -> None:
+    job_id = uuid4()
+    request = math_request(job_id)
+    api = FakeAPI([lease_for("MATH_ASSISTANCE", json_bytes(request), job_id)])
+    worker = processor(api, tmp_path / "math-outbox", DeterministicDigestProvider())
+
+    assert worker.process_once()
+    assert len(api.pushed) == 1
+    artifact = MathAssistanceArtifactV1.model_validate_json(decrypt_artifact(api.pushed[0]))
+    assert artifact.note_id == request.note_id
+    assert artifact.response.graph_expression == "x^2 - 4"
+    assert artifact.response.cited_source_ids == [request.selection_sources[0].source_id]
+    assert b"Algebra scratch work" not in json_bytes(api.pushed)
+    assert api.completed == [(job_id, artifact_id(api.pushed[0]))]
+
+
+def test_math_assistance_rejects_citation_outside_selection(tmp_path) -> None:
+    job_id = uuid4()
+    request = math_request(job_id)
+    api = FakeAPI([lease_for("MATH_ASSISTANCE", json_bytes(request), job_id)])
+    worker = processor(api, tmp_path / "math-citation-outbox", UnknownMathCitationProvider())
+
+    assert worker.process_once()
+    assert api.pushed == []
+    assert api.failed == [(job_id, "PROVIDER_CITATION_INVALID", True)]
+
+
+def test_math_assistance_rejects_non_evaluable_graph_identifiers(tmp_path) -> None:
+    job_id = uuid4()
+    request = math_request(job_id)
+    api = FakeAPI([lease_for("MATH_ASSISTANCE", json_bytes(request), job_id)])
+    worker = processor(api, tmp_path / "math-graph-outbox", UnsafeMathGraphProvider())
+
+    assert worker.process_once()
+    assert api.pushed == []
+    assert api.failed == [(job_id, "PROVIDER_GRAPH_INVALID", True)]
 
 
 def automated_learning_request(

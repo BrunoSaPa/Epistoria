@@ -21,8 +21,8 @@ public enum LearningAIJobType: String, Codable, CaseIterable, Sendable {
     case weeklyReview = "WEEKLY_REVIEW"
 }
 
-public extension AutomationJobKind {
-    var learningJobType: LearningAIJobType? {
+extension AutomationJobKind {
+    public var learningJobType: LearningAIJobType? {
         switch self {
         case .topicSynthesis: .topicSynthesis
         case .flashcardDrafts: .flashcardDrafts
@@ -58,7 +58,9 @@ public struct TestGenerationPlan: Codable, Equatable, Sendable {
         self.objectiveTitles = objectiveTitles.reduce(into: []) { result, rawTitle in
             let title = rawTitle.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !title.isEmpty,
-                  !result.contains(where: { $0.localizedCaseInsensitiveCompare(title) == .orderedSame })
+                !result.contains(where: {
+                    $0.localizedCaseInsensitiveCompare(title) == .orderedSame
+                })
             else { return }
             result.append(title)
         }
@@ -69,7 +71,9 @@ public struct DetectedTestObjective: Equatable, Sendable, Identifiable {
     public var title: String
     public var supportingRecordCount: Int
     public var origin: String
-    public var id: String { title.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current) }
+    public var id: String {
+        title.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+    }
 
     public init(title: String, supportingRecordCount: Int, origin: String) {
         self.title = title
@@ -964,6 +968,8 @@ public enum AIJobCoordinatorError: Error, Equatable {
     case responseEmpty
     case questionNotFound
     case providerRouteUnavailable
+    case mathSelectionTooLarge
+    case mathVisionUnavailable
 }
 
 extension AIJobCoordinatorError: LocalizedError {
@@ -971,8 +977,10 @@ extension AIJobCoordinatorError: LocalizedError {
         switch self {
         case .sessionNotEnded: "End the session before requesting its review."
         case .noReadableSources: "This scope does not contain readable note text or Evidence yet."
-        case .disclosureNotAcknowledged: "Review and approve the disclosure before queueing this request."
-        case .resourceHasNoPDF: "This Source does not contain a PDF that the trusted Mac can extract."
+        case .disclosureNotAcknowledged:
+            "Review and approve the disclosure before queueing this request."
+        case .resourceHasNoPDF:
+            "This Source does not contain a PDF that the trusted Mac can extract."
         case .sourceAnalysisRequiresPDF:
             "Exact Source analysis currently requires a locally available PDF Source Version."
         case .sourceQuestionEmpty: "Enter a question about this Source."
@@ -983,7 +991,8 @@ extension AIJobCoordinatorError: LocalizedError {
         case .transcriptionMediaTooLarge:
             "This recording exceeds the current 25 MB transcription limit. Import a smaller copy before trying again."
         case .topicRequired: "Choose a Topic before creating a learning request."
-        case .invalidTestPlan: "A test plan needs at least one objective and one coverage dimension."
+        case .invalidTestPlan:
+            "A test plan needs at least one objective and one coverage dimension."
         case .feedbackRequiresSubmittedResponse:
             "Free-response feedback must be requested from a submitted test response."
         case .attemptNotSubmitted: "Submit the test before requesting feedback."
@@ -991,6 +1000,10 @@ extension AIJobCoordinatorError: LocalizedError {
         case .questionNotFound: "The frozen question is no longer available in this attempt."
         case .providerRouteUnavailable:
             "Wait for the selected AI provider configuration to finish before approving a request."
+        case .mathSelectionTooLarge:
+            "The selected handwriting image is too large to process safely. Select a smaller region."
+        case .mathVisionUnavailable:
+            "The selected AI provider does not support image input. Choose a vision-capable provider or select typed mathematics."
         }
     }
 }
@@ -1054,7 +1067,7 @@ public actor AIJobCoordinator {
                 .sorted { $0.payload.orderKey < $1.payload.orderKey }
             for block in blocks {
                 let text = [block.payload.plainText, block.payload.transcription]
-                    .compactMap(\ .self)
+                    .compactMap(\.self)
                     .joined(separator: "\n")
                     .trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !text.isEmpty else { continue }
@@ -1073,7 +1086,7 @@ public actor AIJobCoordinator {
             .filter { $0.payload.studySessionId == sessionId }
         for annotation in annotations {
             let text = [annotation.payload.selectedText, annotation.payload.comment]
-                .compactMap(\ .self)
+                .compactMap(\.self)
                 .joined(separator: "\n")
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             guard !text.isEmpty else { continue }
@@ -1114,7 +1127,8 @@ public actor AIJobCoordinator {
         )
     }
 
-    public func submitSessionDigest(_ prepared: PreparedDigestRequest) async throws -> AIJobSummary {
+    public func submitSessionDigest(_ prepared: PreparedDigestRequest) async throws -> AIJobSummary
+    {
         var request = prepared.request
         guard !request.sources.isEmpty else { throw AIJobCoordinatorError.noReadableSources }
         request.disclosureAcknowledged = true
@@ -1134,7 +1148,9 @@ public actor AIJobCoordinator {
         )
     }
 
-    public func latestDigest(sessionId: UUID) async throws -> IdentifiedPayload<SessionDigestArtifact>? {
+    public func latestDigest(sessionId: UUID) async throws -> IdentifiedPayload<
+        SessionDigestArtifact
+    >? {
         let entities = try await database.entities(type: .aiArtifact, parentId: sessionId)
         for entity in entities {
             if let artifact = try? CanonicalJSON.decode(
@@ -1183,8 +1199,9 @@ public actor AIJobCoordinator {
     ) async throws -> IdentifiedPayload<PDFExtractionManifest>? {
         let entities = try await database.entities(type: .aiArtifact, parentId: resourceId)
         for entity in entities {
-            if let artifact = try? CanonicalJSON.decode(PDFExtractionManifest.self, from: entity.content),
-               artifact.resourceId == resourceId
+            if let artifact = try? CanonicalJSON.decode(
+                PDFExtractionManifest.self, from: entity.content),
+                artifact.resourceId == resourceId
             {
                 return IdentifiedPayload(
                     id: entity.id,
@@ -1279,10 +1296,11 @@ public actor AIJobCoordinator {
     ) async throws -> IdentifiedPayload<SourceAnalysisArtifact>? {
         let candidates = try await database.entities(type: .aiArtifact, parentId: sourceId)
             .compactMap { entity -> IdentifiedPayload<SourceAnalysisArtifact>? in
-                guard let artifact = try? CanonicalJSON.decode(
-                    SourceAnalysisArtifact.self, from: entity.content
-                ), artifact.sourceId == sourceId,
-                   sourceVersionId.map({ artifact.sourceVersionId == $0 }) ?? true
+                guard
+                    let artifact = try? CanonicalJSON.decode(
+                        SourceAnalysisArtifact.self, from: entity.content
+                    ), artifact.sourceId == sourceId,
+                    sourceVersionId.map({ artifact.sourceVersionId == $0 }) ?? true
                 else { return nil }
                 return IdentifiedPayload(
                     id: entity.id,
@@ -1300,10 +1318,11 @@ public actor AIJobCoordinator {
     ) async throws -> [IdentifiedPayload<SourceQueryArtifact>] {
         try await database.entities(type: .aiArtifact, parentId: sourceId)
             .compactMap { entity -> IdentifiedPayload<SourceQueryArtifact>? in
-                guard let artifact = try? CanonicalJSON.decode(
-                    SourceQueryArtifact.self, from: entity.content
-                ), artifact.sourceId == sourceId,
-                   sourceVersionId.map({ artifact.sourceVersionId == $0 }) ?? true
+                guard
+                    let artifact = try? CanonicalJSON.decode(
+                        SourceQueryArtifact.self, from: entity.content
+                    ), artifact.sourceId == sourceId,
+                    sourceVersionId.map({ artifact.sourceVersionId == $0 }) ?? true
                 else { return nil }
                 return IdentifiedPayload(
                     id: entity.id,
@@ -1320,11 +1339,12 @@ public actor AIJobCoordinator {
     ) {
         let source = try await store.payload(SourcePayload.self, id: sourceId).payload
         guard source.sourceType == .pdf,
-              let versionId = source.currentVersionId,
-              let version = try? await store.payload(SourceVersionPayload.self, id: versionId).payload,
-              version.sourceId == sourceId,
-              let assetId = version.originalAssetId,
-              let asset = try? await store.payload(AssetPayload.self, id: assetId).payload
+            let versionId = source.currentVersionId,
+            let version = try? await store.payload(SourceVersionPayload.self, id: versionId)
+                .payload,
+            version.sourceId == sourceId,
+            let assetId = version.originalAssetId,
+            let asset = try? await store.payload(AssetPayload.self, id: assetId).payload
         else { throw AIJobCoordinatorError.sourceAnalysisRequiresPDF }
         return (source.title, versionId, assetId, asset)
     }
@@ -1332,7 +1352,8 @@ public actor AIJobCoordinator {
     private func normalizedOutputLanguage(_ value: String) -> String {
         let clean = value.trimmingCharacters(in: .whitespacesAndNewlines)
         if !clean.isEmpty { return String(clean.prefix(64)) }
-        return Locale.current.localizedString(forLanguageCode: Locale.current.language.languageCode?.identifier ?? "en")
+        return Locale.current.localizedString(
+            forLanguageCode: Locale.current.language.languageCode?.identifier ?? "en")
             ?? "English"
     }
 
@@ -1346,10 +1367,11 @@ public actor AIJobCoordinator {
         }
         let source = try await store.payload(SourcePayload.self, id: sourceId).payload
         guard [.audio, .video].contains(source.sourceType),
-              let sourceVersionId = source.currentVersionId,
-              let assetId = source.originalAssetId
+            let sourceVersionId = source.currentVersionId,
+            let assetId = source.originalAssetId
         else { throw AIJobCoordinatorError.sourceHasNoTranscribableMedia }
-        let version = try await store.payload(SourceVersionPayload.self, id: sourceVersionId).payload
+        let version = try await store.payload(SourceVersionPayload.self, id: sourceVersionId)
+            .payload
         guard version.sourceId == sourceId, version.originalAssetId == assetId else {
             throw AIJobCoordinatorError.sourceHasNoTranscribableMedia
         }
@@ -1358,7 +1380,8 @@ public actor AIJobCoordinator {
             throw AIJobCoordinatorError.transcriptionMediaTooLarge
         }
         let ext = URL(fileURLWithPath: asset.originalFilename).pathExtension.lowercased()
-        let supportedExtensions = source.sourceType == .audio
+        let supportedExtensions =
+            source.sourceType == .audio
             ? ["mp3", "m4a", "wav"]
             : ["mp4"]
         guard supportedExtensions.contains(ext) else {
@@ -1398,11 +1421,12 @@ public actor AIJobCoordinator {
     ) async throws -> IdentifiedPayload<MediaTranscriptionManifest>? {
         let candidates = try await database.entities(type: .aiArtifact, parentId: sourceId)
             .compactMap { entity -> IdentifiedPayload<MediaTranscriptionManifest>? in
-                guard let artifact = try? CanonicalJSON.decode(
-                    MediaTranscriptionManifest.self,
-                    from: entity.content
-                ), artifact.sourceId == sourceId,
-                   sourceVersionId.map({ artifact.sourceVersionId == $0 }) ?? true
+                guard
+                    let artifact = try? CanonicalJSON.decode(
+                        MediaTranscriptionManifest.self,
+                        from: entity.content
+                    ), artifact.sourceId == sourceId,
+                    sourceVersionId.map({ artifact.sourceVersionId == $0 }) ?? true
                 else { return nil }
                 return IdentifiedPayload(
                     id: entity.id,
@@ -1420,10 +1444,11 @@ public actor AIJobCoordinator {
         var chunks: [MediaTranscriptionChunk] = []
         for id in manifest.chunkEntityIds {
             guard let entity = try await database.entity(id: id),
-                  let chunk = try? CanonicalJSON.decode(MediaTranscriptionChunk.self, from: entity.content),
-                  chunk.jobId == manifest.jobId,
-                  chunk.sourceId == manifest.sourceId,
-                  chunk.sourceVersionId == manifest.sourceVersionId
+                let chunk = try? CanonicalJSON.decode(
+                    MediaTranscriptionChunk.self, from: entity.content),
+                chunk.jobId == manifest.jobId,
+                chunk.sourceId == manifest.sourceId,
+                chunk.sourceVersionId == manifest.sourceVersionId
             else { throw StoreError.entityNotFound }
             chunks.append(chunk)
         }
@@ -1557,8 +1582,10 @@ public actor AIJobCoordinator {
     ) async throws -> [IdentifiedPayload<NoteQueryArtifact>] {
         let entities = try await database.entities(type: .aiArtifact, parentId: noteId)
         return entities.compactMap { entity in
-            guard let artifact = try? CanonicalJSON.decode(NoteQueryArtifact.self, from: entity.content),
-                  artifact.noteId == noteId
+            guard
+                let artifact = try? CanonicalJSON.decode(
+                    NoteQueryArtifact.self, from: entity.content),
+                artifact.noteId == noteId
             else { return nil }
             return IdentifiedPayload(
                 id: entity.id,
@@ -1568,6 +1595,146 @@ public actor AIJobCoordinator {
             )
         }
         .sorted { $0.payload.generatedAt > $1.payload.generatedAt }
+    }
+
+    // MARK: - Handwriting-aware mathematics
+
+    public func prepareMathAssistance(
+        noteId: UUID,
+        selectedBlockIds: [UUID],
+        selectionImagesByBlockId: [UUID: Data],
+        mode: MathAssistanceMode,
+        learnerInstructions: String? = nil,
+        outputLanguage: String = "English"
+    ) async throws -> PreparedMathAssistanceRequest {
+        guard !selectedBlockIds.isEmpty else { throw AIJobCoordinatorError.noReadableSources }
+        let note = try await store.payload(NotePayload.self, id: noteId).payload
+        let allBlocks = try await store.list(NoteBlockPayload.self, parentId: noteId)
+            .sorted { $0.payload.orderKey < $1.payload.orderKey }
+        let selectedSet = Set(selectedBlockIds)
+        let boundedImages = selectionImagesByBlockId.filter { selectedSet.contains($0.key) }
+        guard boundedImages.values.allSatisfy({ $0.count <= 700_000 }),
+            boundedImages.values.reduce(0, { $0 + $1.count }) <= 800_000
+        else { throw AIJobCoordinatorError.mathSelectionTooLarge }
+
+        var selectionSources: [NoteQuerySourceExcerpt] = []
+        var contextSources: [NoteQuerySourceExcerpt] = []
+        for block in allBlocks {
+            let text = [block.payload.plainText, block.payload.transcription]
+                .compactMap(\.self)
+                .joined(separator: "\n")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if selectedSet.contains(block.id) {
+                if let image = boundedImages[block.id] {
+                    selectionSources.append(
+                        NoteQuerySourceExcerpt(
+                            sourceId: block.id,
+                            sourceKind: .lassoSelection,
+                            title: note.title,
+                            locator: "selected math on canvas item \(block.payload.orderKey)",
+                            imageContent: image.base64EncodedString()
+                        ))
+                } else if !text.isEmpty {
+                    selectionSources.append(
+                        NoteQuerySourceExcerpt(
+                            sourceId: block.id,
+                            sourceKind: .noteBlock,
+                            title: note.title,
+                            locator: "selected math on canvas item \(block.payload.orderKey)",
+                            excerpt: String(text.prefix(8_000))
+                        ))
+                }
+            } else if !text.isEmpty, contextSources.count < 40 {
+                contextSources.append(
+                    NoteQuerySourceExcerpt(
+                        sourceId: block.id,
+                        sourceKind: .noteBlock,
+                        title: note.title,
+                        locator: "nearby canvas item \(block.payload.orderKey)",
+                        excerpt: String(text.prefix(4_000))
+                    ))
+            }
+        }
+        selectionSources = Array(selectionSources.prefix(8))
+        guard !selectionSources.isEmpty else { throw AIJobCoordinatorError.noReadableSources }
+
+        let jobId = UUID()
+        let instructions = learnerInstructions?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let request = MathAssistanceRequest(
+            accountId: accountId,
+            jobId: jobId,
+            noteId: noteId,
+            noteTitle: note.title,
+            mode: mode,
+            learnerInstructions: instructions.flatMap {
+                $0.isEmpty ? nil : String($0.prefix(2_000))
+            },
+            outputLanguage: normalizedOutputLanguage(outputLanguage),
+            selectionSources: selectionSources,
+            contextSources: contextSources,
+            disclosureAcknowledged: false,
+            providerRoute: nil
+        )
+        let characters = (selectionSources + contextSources)
+            .compactMap(\.excerpt).reduce(0) { $0 + $1.count }
+        let imageCount = selectionSources.filter { $0.imageContent != nil }.count
+        return PreparedMathAssistanceRequest(
+            request: request,
+            selectionCount: selectionSources.count,
+            contextCount: contextSources.count,
+            imageCount: imageCount,
+            approximateTokens: max(1, characters / 4 + imageCount * 700)
+        )
+    }
+
+    public func submitMathAssistance(
+        _ prepared: PreparedMathAssistanceRequest
+    ) async throws -> AIJobSummary {
+        var request = prepared.request
+        guard !request.selectionSources.isEmpty else {
+            throw AIJobCoordinatorError.noReadableSources
+        }
+        request.disclosureAcknowledged = true
+        let route = try reviewedProviderRoute()
+        if prepared.imageCount > 0, let route, !route.capabilities.contains(.vision) {
+            throw AIJobCoordinatorError.mathVisionUnavailable
+        }
+        request.providerRoute = route
+        let plaintext = try CanonicalJSON.encode(request)
+        let envelope = try crypto.encryptJob(
+            plaintext,
+            accountKey: accountKey,
+            accountId: accountId,
+            jobType: "MATH_ASSISTANCE",
+            jobId: request.jobId
+        )
+        return try await api.createAIJob(
+            id: request.jobId,
+            type: "MATH_ASSISTANCE",
+            envelope: envelope
+        )
+    }
+
+    public func latestMathAssistanceArtifacts(
+        noteId: UUID
+    ) async throws -> [IdentifiedPayload<MathAssistanceArtifact>] {
+        try await database.entities(type: .aiArtifact, parentId: noteId)
+            .compactMap { entity -> IdentifiedPayload<MathAssistanceArtifact>? in
+                guard
+                    let artifact = try? CanonicalJSON.decode(
+                        MathAssistanceArtifact.self,
+                        from: entity.content
+                    ), artifact.noteId == noteId
+                else { return nil }
+                return IdentifiedPayload(
+                    id: entity.id,
+                    payload: artifact,
+                    revision: entity.revision,
+                    syncState: entity.syncState
+                )
+            }
+            .sorted { $0.payload.generatedAt > $1.payload.generatedAt }
     }
 
     public func detectTestObjectives(
@@ -1580,7 +1747,8 @@ public actor AIJobCoordinator {
             includeConnectedKnowledge: includeConnectedKnowledge
         )
         let concepts = try await store.list(ConceptPayload.self).filter {
-            $0.payload.state == .active && !$0.payload.topicIds.filter(scopedTopicIds.contains).isEmpty
+            $0.payload.state == .active
+                && !$0.payload.topicIds.filter(scopedTopicIds.contains).isEmpty
         }
         let sources = try await store.list(SourcePayload.self).filter {
             $0.payload.archivedAt == nil
@@ -1588,7 +1756,8 @@ public actor AIJobCoordinator {
                     || !$0.payload.relatedTopicIds.filter(scopedTopicIds.contains).isEmpty)
         }
         let notes = try await store.list(NotePayload.self).filter {
-            $0.payload.archivedAt == nil && ($0.payload.courseId.map(scopedTopicIds.contains) ?? false)
+            $0.payload.archivedAt == nil
+                && ($0.payload.courseId.map(scopedTopicIds.contains) ?? false)
         }
         let questions = try await store.list(UnresolvedQuestionPayload.self).filter {
             $0.payload.resolvedAt == nil && scopedTopicIds.contains($0.payload.topicId)
@@ -1602,8 +1771,12 @@ public actor AIJobCoordinator {
         var candidates: [String: Candidate] = [:]
         func add(_ rawTitle: String, origin: String) {
             let title = rawTitle.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !title.isEmpty, title.localizedCaseInsensitiveCompare("Untitled") != .orderedSame else { return }
-            let key = title.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+            guard !title.isEmpty, title.localizedCaseInsensitiveCompare("Untitled") != .orderedSame
+            else {
+                return
+            }
+            let key = title.folding(
+                options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
             if var existing = candidates[key] {
                 existing.count += 1
                 candidates[key] = existing
@@ -1622,11 +1795,13 @@ public actor AIJobCoordinator {
                 return $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending
             }
             .prefix(50)
-            .map { DetectedTestObjective(
-                title: $0.title,
-                supportingRecordCount: $0.count,
-                origin: $0.origin
-            ) }
+            .map {
+                DetectedTestObjective(
+                    title: $0.title,
+                    supportingRecordCount: $0.count,
+                    origin: $0.origin
+                )
+            }
     }
 
     public func prepareFreeResponseFeedback(
@@ -1646,57 +1821,73 @@ public actor AIJobCoordinator {
         guard !userResponse.isEmpty, !savedResponse.payload.isSkipped else {
             throw AIJobCoordinatorError.responseEmpty
         }
-        guard let question = attempt.payload.frozenQuestions.first(where: {
-            $0.questionId == savedResponse.payload.questionId
-        }) else { throw AIJobCoordinatorError.questionNotFound }
+        guard
+            let question = attempt.payload.frozenQuestions.first(where: {
+                $0.questionId == savedResponse.payload.questionId
+            })
+        else { throw AIJobCoordinatorError.questionNotFound }
 
         let snapshotText = """
-        Question: \(question.prompt)
-        Grading guide: \(question.rubric)
-        Reference answer: \(question.correctAnswer)
-        """
-        var evidence = [FeedbackEvidenceExcerpt(
-            sourceId: question.questionId,
-            sourceKind: .questionSnapshot,
-            title: "Frozen question and grading guide",
-            locator: "attempt \(attemptId.uuidString), question \(question.questionId.uuidString)",
-            excerpt: String(snapshotText.prefix(12_000))
-        )]
+            Question: \(question.prompt)
+            Grading guide: \(question.rubric)
+            Reference answer: \(question.correctAnswer)
+            """
+        var evidence = [
+            FeedbackEvidenceExcerpt(
+                sourceId: question.questionId,
+                sourceKind: .questionSnapshot,
+                title: "Frozen question and grading guide",
+                locator:
+                    "attempt \(attemptId.uuidString), question \(question.questionId.uuidString)",
+                excerpt: String(snapshotText.prefix(12_000))
+            )
+        ]
         var seenIds: Set<UUID> = [question.questionId]
         for evidenceId in question.evidenceIds where !seenIds.contains(evidenceId) {
             guard let entity = try await database.entity(id: evidenceId) else { continue }
             let excerpt: FeedbackEvidenceExcerpt?
             switch entity.entityType {
             case .noteBlock:
-                guard let block = try? CanonicalJSON.decode(NoteBlockPayload.self, from: entity.content) else {
+                guard
+                    let block = try? CanonicalJSON.decode(
+                        NoteBlockPayload.self, from: entity.content)
+                else {
                     continue
                 }
                 let text = [block.plainText, block.transcription]
-                    .compactMap(\ .self)
+                    .compactMap(\.self)
                     .joined(separator: "\n")
                     .trimmingCharacters(in: .whitespacesAndNewlines)
-                excerpt = text.isEmpty ? nil : FeedbackEvidenceExcerpt(
-                    sourceId: evidenceId,
-                    sourceKind: .noteBlock,
-                    title: "Note evidence",
-                    locator: "note block \(evidenceId.uuidString)",
-                    excerpt: String(text.prefix(12_000))
-                )
+                excerpt =
+                    text.isEmpty
+                    ? nil
+                    : FeedbackEvidenceExcerpt(
+                        sourceId: evidenceId,
+                        sourceKind: .noteBlock,
+                        title: "Note evidence",
+                        locator: "note block \(evidenceId.uuidString)",
+                        excerpt: String(text.prefix(12_000))
+                    )
             case .evidence:
-                guard let item = try? CanonicalJSON.decode(EvidencePayload.self, from: entity.content) else {
+                guard
+                    let item = try? CanonicalJSON.decode(EvidencePayload.self, from: entity.content)
+                else {
                     continue
                 }
                 let text = [item.excerpt, item.note]
-                    .compactMap(\ .self)
+                    .compactMap(\.self)
                     .joined(separator: "\n")
                     .trimmingCharacters(in: .whitespacesAndNewlines)
-                excerpt = text.isEmpty ? nil : FeedbackEvidenceExcerpt(
-                    sourceId: evidenceId,
-                    sourceKind: .evidence,
-                    title: "Saved Evidence",
-                    locator: item.locator.kind.rawValue,
-                    excerpt: String(text.prefix(12_000))
-                )
+                excerpt =
+                    text.isEmpty
+                    ? nil
+                    : FeedbackEvidenceExcerpt(
+                        sourceId: evidenceId,
+                        sourceKind: .evidence,
+                        title: "Saved Evidence",
+                        locator: item.locator.kind.rawValue,
+                        excerpt: String(text.prefix(12_000))
+                    )
             default:
                 excerpt = nil
             }
@@ -1724,7 +1915,8 @@ public actor AIJobCoordinator {
             evidence: evidence,
             disclosureAcknowledged: false
         )
-        let characterCount = evidence.reduce(0) { $0 + $1.excerpt.count }
+        let characterCount =
+            evidence.reduce(0) { $0 + $1.excerpt.count }
             + request.prompt.count + request.rubric.count
             + request.referenceAnswer.count + request.userResponse.count
         return PreparedFreeResponseFeedbackRequest(
@@ -1758,10 +1950,12 @@ public actor AIJobCoordinator {
     ) async throws -> IdentifiedPayload<FreeResponseFeedbackArtifact>? {
         let entities = try await database.entities(type: .aiArtifact, parentId: attemptId)
         return entities.compactMap { entity in
-            guard let artifact = try? CanonicalJSON.decode(
-                FreeResponseFeedbackArtifact.self,
-                from: entity.content
-            ), artifact.responseId == responseId else { return nil }
+            guard
+                let artifact = try? CanonicalJSON.decode(
+                    FreeResponseFeedbackArtifact.self,
+                    from: entity.content
+                ), artifact.responseId == responseId
+            else { return nil }
             return IdentifiedPayload(
                 id: entity.id,
                 payload: artifact,
@@ -1786,9 +1980,9 @@ public actor AIJobCoordinator {
         _ = try await store.topic(id: topicId)
         if let testPlan {
             guard [.testBlueprint, .testGeneration].contains(jobType),
-                  !testPlan.objectiveTitles.isEmpty,
-                  !testPlan.coverageDimensions.isEmpty,
-                  testPlan.objectiveTitles == objectiveTitles
+                !testPlan.objectiveTitles.isEmpty,
+                !testPlan.coverageDimensions.isEmpty,
+                testPlan.objectiveTitles == objectiveTitles
             else { throw AIJobCoordinatorError.invalidTestPlan }
         }
         let scopedTopicIds = try await topicScopeIds(
@@ -1804,16 +1998,17 @@ public actor AIJobCoordinator {
                 .sorted { $0.payload.orderKey < $1.payload.orderKey }
             for block in blocks {
                 let text = [block.payload.plainText, block.payload.transcription]
-                    .compactMap(\ .self).joined(separator: "\n")
+                    .compactMap(\.self).joined(separator: "\n")
                     .trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !text.isEmpty else { continue }
-                excerpts.append(DigestSourceExcerpt(
-                    sourceId: block.id,
-                    sourceKind: .noteBlock,
-                    title: note.payload.title,
-                    locator: "note block \(block.payload.orderKey)",
-                    excerpt: String(text.prefix(12_000))
-                ))
+                excerpts.append(
+                    DigestSourceExcerpt(
+                        sourceId: block.id,
+                        sourceKind: .noteBlock,
+                        title: note.payload.title,
+                        locator: "note block \(block.payload.orderKey)",
+                        excerpt: String(text.prefix(12_000))
+                    ))
             }
         }
         let evidence = try await store.list(EvidencePayload.self)
@@ -1823,13 +2018,14 @@ public actor AIJobCoordinator {
         }
         let sourceIds = Set(topicSources.map(\.id))
         for item in evidence where sourceIds.contains(item.payload.sourceId) {
-            excerpts.append(DigestSourceExcerpt(
-                sourceId: item.id,
-                sourceKind: .annotation,
-                title: "Evidence",
-                locator: item.payload.locator.kind.rawValue,
-                excerpt: String(item.payload.excerpt.prefix(12_000))
-            ))
+            excerpts.append(
+                DigestSourceExcerpt(
+                    sourceId: item.id,
+                    sourceKind: .annotation,
+                    title: "Evidence",
+                    locator: item.payload.locator.kind.rawValue,
+                    excerpt: String(item.payload.excerpt.prefix(12_000))
+                ))
         }
         guard !excerpts.isEmpty else { throw AIJobCoordinatorError.noReadableSources }
         excerpts = Array(excerpts.prefix(200))
@@ -1838,7 +2034,10 @@ public actor AIJobCoordinator {
                 concept.payload.state == .active
                     && !concept.payload.topicIds.filter(scopedTopicIds.contains).isEmpty
             }
-            .sorted { $0.payload.name.localizedCaseInsensitiveCompare($1.payload.name) == .orderedAscending }
+            .sorted {
+                $0.payload.name.localizedCaseInsensitiveCompare($1.payload.name)
+                    == .orderedAscending
+            }
             .prefix(200)
             .map {
                 KnownConceptReference(
@@ -1876,13 +2075,15 @@ public actor AIJobCoordinator {
         var scopedTopicIds: Set<UUID> = [topicId]
         guard includeConnectedKnowledge else { return scopedTopicIds }
         let topicRelations = try await store.list(TopicAreaRelationPayload.self)
-        let areas = Set(topicRelations.lazy
-            .filter { $0.payload.topicId == topicId }
-            .map(\.payload.areaId))
+        let areas = Set(
+            topicRelations.lazy
+                .filter { $0.payload.topicId == topicId }
+                .map(\.payload.areaId))
         if !areas.isEmpty {
-            scopedTopicIds.formUnion(topicRelations.lazy
-                .filter { areas.contains($0.payload.areaId) }
-                .map(\.payload.topicId))
+            scopedTopicIds.formUnion(
+                topicRelations.lazy
+                    .filter { areas.contains($0.payload.areaId) }
+                    .map(\.payload.topicId))
         }
         return scopedTopicIds
     }
@@ -1918,7 +2119,7 @@ public actor AIJobCoordinator {
             let queuedIds = Set(grant.queuedJobIds ?? [])
             let estimatedSpent = artifacts.reduce(0) { total, artifact in
                 guard queuedIds.contains(artifact.jobId),
-                      let dollars = artifact.trace.estimatedCostUsd
+                    let dollars = artifact.trace.estimatedCostUsd
                 else { return total }
                 return total + max(Int((dollars * 100).rounded()), 0)
             }
@@ -1933,12 +2134,14 @@ public actor AIJobCoordinator {
                     guard let jobType = configuredType.learningJobType else { continue }
                     let scopeKey = "\(topicId.uuidString.lowercased()):\(jobType.rawValue)"
                     if let last = grant.lastQueuedAtByScope?[scopeKey],
-                       date.timeIntervalSince(last) < Double(grant.minimumIntervalHours * 3_600) {
-                        outcomes.append(.notDue(
-                            grantId: identified.id,
-                            topicId: topicId,
-                            jobType: jobType
-                        ))
+                        date.timeIntervalSince(last) < Double(grant.minimumIntervalHours * 3_600)
+                    {
+                        outcomes.append(
+                            .notDue(
+                                grantId: identified.id,
+                                topicId: topicId,
+                                jobType: jobType
+                            ))
                         continue
                     }
                     do {
@@ -1948,11 +2151,12 @@ public actor AIJobCoordinator {
                         )
                         let fingerprint = try automationFingerprint(for: prepared.request)
                         if grant.lastInputFingerprintByScope?[scopeKey] == fingerprint {
-                            outcomes.append(.unchanged(
-                                grantId: identified.id,
-                                topicId: topicId,
-                                jobType: jobType
-                            ))
+                            outcomes.append(
+                                .unchanged(
+                                    grantId: identified.id,
+                                    topicId: topicId,
+                                    jobType: jobType
+                                ))
                             continue
                         }
                         let jobId = Self.automaticJobId(
@@ -1988,19 +2192,21 @@ public actor AIJobCoordinator {
                         if grant.queuedJobIds?.contains(jobId) == false {
                             grant.queuedJobIds?.append(jobId)
                         }
-                        outcomes.append(.queued(
-                            jobId: jobId,
-                            grantId: identified.id,
-                            topicId: topicId,
-                            jobType: jobType
-                        ))
+                        outcomes.append(
+                            .queued(
+                                jobId: jobId,
+                                grantId: identified.id,
+                                topicId: topicId,
+                                jobType: jobType
+                            ))
                     } catch {
-                        outcomes.append(.unavailable(
-                            grantId: identified.id,
-                            topicId: topicId,
-                            jobType: jobType,
-                            reason: error.localizedDescription
-                        ))
+                        outcomes.append(
+                            .unavailable(
+                                grantId: identified.id,
+                                topicId: topicId,
+                                jobType: jobType,
+                                reason: error.localizedDescription
+                            ))
                     }
                 }
             }
@@ -2021,7 +2227,7 @@ public actor AIJobCoordinator {
     private func cancelNonterminalJobs(_ ids: [UUID]) async {
         for id in ids {
             guard let summary = try? await api.aiJob(id: id),
-                  summary.status == "PENDING" || summary.status == "LEASED"
+                summary.status == "PENDING" || summary.status == "LEASED"
             else { continue }
             _ = try? await api.cancelAIJob(id: id)
         }
@@ -2057,17 +2263,21 @@ public actor AIJobCoordinator {
         scopeKey: String,
         fingerprint: String
     ) -> UUID {
-        var bytes = Array(SHA256.hash(data: Data(
-            "\(grantId.uuidString.lowercased()):\(scopeKey):\(fingerprint)".utf8
-        )).prefix(16))
+        var bytes = Array(
+            SHA256.hash(
+                data: Data(
+                    "\(grantId.uuidString.lowercased()):\(scopeKey):\(fingerprint)".utf8
+                )
+            ).prefix(16))
         bytes[6] = (bytes[6] & 0x0f) | 0x50
         bytes[8] = (bytes[8] & 0x3f) | 0x80
-        return UUID(uuid: (
-            bytes[0], bytes[1], bytes[2], bytes[3],
-            bytes[4], bytes[5], bytes[6], bytes[7],
-            bytes[8], bytes[9], bytes[10], bytes[11],
-            bytes[12], bytes[13], bytes[14], bytes[15]
-        ))
+        return UUID(
+            uuid: (
+                bytes[0], bytes[1], bytes[2], bytes[3],
+                bytes[4], bytes[5], bytes[6], bytes[7],
+                bytes[8], bytes[9], bytes[10], bytes[11],
+                bytes[12], bytes[13], bytes[14], bytes[15]
+            ))
     }
 
     public func latestTopicGeneration(
@@ -2076,10 +2286,12 @@ public actor AIJobCoordinator {
     ) async throws -> IdentifiedPayload<LearningGenerationArtifact>? {
         let entities = try await database.entities(type: .aiArtifact, parentId: topicId)
         for entity in entities {
-            guard let artifact = try? CanonicalJSON.decode(
-                LearningGenerationArtifact.self,
-                from: entity.content
-            ) else { continue }
+            guard
+                let artifact = try? CanonicalJSON.decode(
+                    LearningGenerationArtifact.self,
+                    from: entity.content
+                )
+            else { continue }
             if jobType == nil || artifact.jobType == jobType {
                 return IdentifiedPayload(
                     id: entity.id,
@@ -2137,9 +2349,11 @@ public actor AIJobCoordinator {
             throw TutorContractError.spendingLimitReached
         }
         let topic = try await store.topic(id: session.topicId)
-        let objective = session.objective?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let objective =
+            session.objective?.trimmingCharacters(in: .whitespacesAndNewlines)
             .nilIfEmpty ?? topic.payload.name
-        let cleanMessage = learnerMessage?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+        let cleanMessage = learnerMessage?.trimmingCharacters(in: .whitespacesAndNewlines)
+            .nilIfEmpty
         if action == .answer, cleanMessage == nil { throw TutorContractError.messageRequired }
 
         let turns = try await store.tutorTurns(sessionId: sessionId)
@@ -2165,7 +2379,8 @@ public actor AIJobCoordinator {
                 confidence: $0.payload.confidence
             )
         }
-        let history = signals
+        let history =
+            signals
             .filter { $0.payload.topicId == session.topicId && $0.payload.reviewState == .accepted }
             .prefix(50)
             .map {
@@ -2216,7 +2431,8 @@ public actor AIJobCoordinator {
             disclosureAcknowledged: false,
             providerRoute: session.providerRoute
         )
-        let characters = sources.reduce(0) { $0 + $1.excerpt.count }
+        let characters =
+            sources.reduce(0) { $0 + $1.excerpt.count }
             + recentTranscript.reduce(0) { $0 + $1.text.count }
             + (cleanMessage?.count ?? 0)
         return PreparedTutorTurnRequest(
@@ -2236,7 +2452,9 @@ public actor AIJobCoordinator {
     ) async throws -> AIJobSummary {
         var request = prepared.request
         var session = try await store.payload(TutorSessionPayload.self, id: request.tutorSessionId)
-        guard session.payload.topicId == request.topicId else { throw TutorContractError.sessionUnavailable }
+        guard session.payload.topicId == request.topicId else {
+            throw TutorContractError.sessionUnavailable
+        }
         guard session.payload.canQueueTurn(at: now) else {
             if session.payload.state != .active { throw TutorContractError.sessionNotActive }
             if now >= session.payload.budget.expiresAt { throw TutorContractError.approvalExpired }
@@ -2274,8 +2492,10 @@ public actor AIJobCoordinator {
                 id: session.id,
                 payload: session.payload,
                 parentId: session.payload.topicId,
-                relationIds: [session.payload.topicId, session.payload.studySessionId, session.payload.goalId]
-                    .compactMap { $0 } + session.payload.sourceVersionIds
+                relationIds: [
+                    session.payload.topicId, session.payload.studySessionId, session.payload.goalId,
+                ]
+                .compactMap { $0 } + session.payload.sourceVersionIds
             ),
         ])
 
@@ -2303,9 +2523,11 @@ public actor AIJobCoordinator {
     ) async throws -> IdentifiedPayload<TutorTurnArtifact>? {
         let entities = try await database.entities(type: .aiArtifact, parentId: sessionId)
         for entity in entities {
-            guard let artifact = try? CanonicalJSON.decode(TutorTurnArtifact.self, from: entity.content),
-                  artifact.tutorSessionId == sessionId,
-                  jobId == nil || artifact.jobId == jobId
+            guard
+                let artifact = try? CanonicalJSON.decode(
+                    TutorTurnArtifact.self, from: entity.content),
+                artifact.tutorSessionId == sessionId,
+                jobId == nil || artifact.jobId == jobId
             else { continue }
             return IdentifiedPayload(
                 id: entity.id,
@@ -2323,19 +2545,24 @@ public actor AIJobCoordinator {
         now: Date = .now
     ) async throws -> UUID {
         let artifact = try await store.payload(TutorTurnArtifact.self, id: artifactId)
-        var session = try await store.payload(TutorSessionPayload.self, id: artifact.payload.tutorSessionId)
+        var session = try await store.payload(
+            TutorSessionPayload.self, id: artifact.payload.tutorSessionId)
         guard artifact.payload.topicId == session.payload.topicId else {
             throw TutorContractError.artifactMismatch
         }
-        let allowed = Dictionary(uniqueKeysWithValues: artifact.payload.sources.map { ($0.excerptId, $0) })
+        let allowed = Dictionary(
+            uniqueKeysWithValues: artifact.payload.sources.map { ($0.excerptId, $0) })
         guard artifact.payload.response.citedExcerptIds.allSatisfy({ allowed[$0] != nil }) else {
             throw TutorContractError.citationOutsideScope
         }
         let existingTurns = try await store.tutorTurns(sessionId: session.id)
-        if let existing = existingTurns.first(where: { $0.payload.jobId == artifact.payload.jobId && $0.payload.role == .tutor }) {
+        if let existing = existingTurns.first(where: {
+            $0.payload.jobId == artifact.payload.jobId && $0.payload.role == .tutor
+        }) {
             return existing.id
         }
-        let citations = try artifact.payload.response.citedExcerptIds.compactMap { excerptId -> TutorCitation? in
+        let citations = try artifact.payload.response.citedExcerptIds.compactMap {
+            excerptId -> TutorCitation? in
             guard let source = allowed[excerptId] else { return nil }
             try source.locator.validate()
             return TutorCitation(
@@ -2362,17 +2589,25 @@ public actor AIJobCoordinator {
         )
         let topic = try await store.topic(id: session.payload.topicId)
         let objective = session.payload.objective?.nilIfEmpty ?? topic.payload.name
-        guard artifact.payload.response.proposedSignals.allSatisfy({
-            $0.objective.localizedCaseInsensitiveCompare(objective) == .orderedSame
-        }) else { throw TutorContractError.signalOutsideScope }
+        guard
+            artifact.payload.response.proposedSignals.allSatisfy({
+                $0.objective.localizedCaseInsensitiveCompare(objective) == .orderedSame
+            })
+        else { throw TutorContractError.signalOutsideScope }
 
-        var writes = [try tutorWrite(
-            id: tutorTurnId,
-            payload: tutorTurn,
-            parentId: session.id,
-            relationIds: [session.id, session.payload.topicId, artifact.id, artifact.payload.jobId]
-                + citations.flatMap { [$0.sourceId, $0.sourceVersionId, $0.evidenceId].compactMap { $0 } }
-        )]
+        var writes = [
+            try tutorWrite(
+                id: tutorTurnId,
+                payload: tutorTurn,
+                parentId: session.id,
+                relationIds: [
+                    session.id, session.payload.topicId, artifact.id, artifact.payload.jobId,
+                ]
+                    + citations.flatMap {
+                        [$0.sourceId, $0.sourceVersionId, $0.evidenceId].compactMap { $0 }
+                    }
+            )
+        ]
         for draft in artifact.payload.response.proposedSignals {
             let cited = draft.citedExcerptIds.compactMap { allowed[$0] }
             let signal = LearningSignalPayload(
@@ -2389,13 +2624,14 @@ public actor AIJobCoordinator {
                 reviewState: .proposed,
                 now: now
             )
-            writes.append(try tutorWrite(
-                id: draft.id,
-                payload: signal,
-                parentId: session.id,
-                relationIds: [session.id, session.payload.topicId, tutorTurnId]
-                    + cited.compactMap(\.evidenceId)
-            ))
+            writes.append(
+                try tutorWrite(
+                    id: draft.id,
+                    payload: signal,
+                    parentId: session.id,
+                    relationIds: [session.id, session.payload.topicId, tutorTurnId]
+                        + cited.compactMap(\.evidenceId)
+                ))
         }
         if let pending = existingTurns.first(where: {
             $0.payload.jobId == artifact.payload.jobId && $0.payload.role == .learner
@@ -2403,12 +2639,13 @@ public actor AIJobCoordinator {
             var resolved = pending.payload
             resolved.pending = false
             resolved.updatedAt = now
-            writes.append(try tutorWrite(
-                id: pending.id,
-                payload: resolved,
-                parentId: session.id,
-                relationIds: [session.id, session.payload.topicId, artifact.payload.jobId]
-            ))
+            writes.append(
+                try tutorWrite(
+                    id: pending.id,
+                    payload: resolved,
+                    parentId: session.id,
+                    relationIds: [session.id, session.payload.topicId, artifact.payload.jobId]
+                ))
         }
         if artifact.payload.response.sessionSummary != nil {
             session.payload.state = .ended
@@ -2420,13 +2657,16 @@ public actor AIJobCoordinator {
             session.payload.estimatedSpentMinorUnits + max(cost, 0)
         )
         session.payload.updatedAt = now
-        writes.append(try tutorWrite(
-            id: session.id,
-            payload: session.payload,
-            parentId: session.payload.topicId,
-            relationIds: [session.payload.topicId, session.payload.studySessionId, session.payload.goalId]
+        writes.append(
+            try tutorWrite(
+                id: session.id,
+                payload: session.payload,
+                parentId: session.payload.topicId,
+                relationIds: [
+                    session.payload.topicId, session.payload.studySessionId, session.payload.goalId,
+                ]
                 .compactMap { $0 } + session.payload.sourceVersionIds
-        ))
+            ))
         try await database.saveLocalBatch(writes)
         return tutorTurnId
     }
@@ -2448,20 +2688,23 @@ public actor AIJobCoordinator {
         }
         let sourceById = Dictionary(uniqueKeysWithValues: scopedSources.map { ($0.id, $0) })
         let selectedVersions = Set(session.sourceVersionIds)
-        let allowedSourceIds = Set(scopedSources.compactMap { source -> UUID? in
-            guard selectedVersions.isEmpty
-                    || source.payload.currentVersionId.map(selectedVersions.contains) == true
-            else { return nil }
-            return source.id
-        })
+        let allowedSourceIds = Set(
+            scopedSources.compactMap { source -> UUID? in
+                guard
+                    selectedVersions.isEmpty
+                        || source.payload.currentVersionId.map(selectedVersions.contains) == true
+                else { return nil }
+                return source.id
+            })
 
         var excerpts: [TutorSourceExcerpt] = []
         var seen: Set<UUID> = []
-        let hits = (try? await database.search(
-            query,
-            entityTypes: [.evidence, .aiArtifact],
-            limit: 24
-        )) ?? []
+        let hits =
+            (try? await database.search(
+                query,
+                entityTypes: [.evidence, .aiArtifact],
+                limit: 24
+            )) ?? []
         let prioritizedIds = preferredEvidenceIds + hits.map(\.id)
         let allEvidence = try await store.list(EvidencePayload.self)
         let evidence = allEvidence.sorted { left, right in
@@ -2473,41 +2716,45 @@ public actor AIJobCoordinator {
         }
         for item in evidence {
             guard allowedSourceIds.contains(item.payload.sourceId),
-                  selectedVersions.isEmpty || selectedVersions.contains(item.payload.sourceVersionId),
-                  !item.payload.excerpt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                  seen.insert(item.id).inserted
+                selectedVersions.isEmpty || selectedVersions.contains(item.payload.sourceVersionId),
+                !item.payload.excerpt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                seen.insert(item.id).inserted
             else { continue }
             try item.payload.locator.validate()
-            excerpts.append(TutorSourceExcerpt(
-                excerptId: item.id,
-                sourceId: item.payload.sourceId,
-                sourceVersionId: item.payload.sourceVersionId,
-                evidenceId: item.id,
-                title: sourceById[item.payload.sourceId]?.payload.title ?? "Source",
-                locator: item.payload.locator,
-                excerpt: String(item.payload.excerpt.prefix(4_000))
-            ))
+            excerpts.append(
+                TutorSourceExcerpt(
+                    excerptId: item.id,
+                    sourceId: item.payload.sourceId,
+                    sourceVersionId: item.payload.sourceVersionId,
+                    evidenceId: item.id,
+                    title: sourceById[item.payload.sourceId]?.payload.title ?? "Source",
+                    locator: item.payload.locator,
+                    excerpt: String(item.payload.excerpt.prefix(4_000))
+                ))
             if excerpts.count == 16 { break }
         }
 
         if excerpts.count < 16 {
             for source in scopedSources where allowedSourceIds.contains(source.id) {
                 guard let versionId = source.payload.currentVersionId,
-                      selectedVersions.isEmpty || selectedVersions.contains(versionId)
+                    selectedVersions.isEmpty || selectedVersions.contains(versionId)
                 else { continue }
                 let artifacts = try await database.entities(type: .aiArtifact, parentId: source.id)
-                guard let guide = artifacts.compactMap({ entity in
-                    try? CanonicalJSON.decode(SourceAnalysisArtifact.self, from: entity.content)
-                }).first(where: { $0.sourceVersionId == versionId }) else { continue }
+                guard
+                    let guide = artifacts.compactMap({ entity in
+                        try? CanonicalJSON.decode(SourceAnalysisArtifact.self, from: entity.content)
+                    }).first(where: { $0.sourceVersionId == versionId })
+                else { continue }
                 for reference in guide.references where seen.insert(reference.sourceId).inserted {
-                    excerpts.append(TutorSourceExcerpt(
-                        excerptId: reference.sourceId,
-                        sourceId: source.id,
-                        sourceVersionId: versionId,
-                        title: source.payload.title,
-                        locator: reference.locator,
-                        excerpt: String(reference.excerpt.prefix(4_000))
-                    ))
+                    excerpts.append(
+                        TutorSourceExcerpt(
+                            excerptId: reference.sourceId,
+                            sourceId: source.id,
+                            sourceVersionId: versionId,
+                            title: source.payload.title,
+                            locator: reference.locator,
+                            excerpt: String(reference.excerpt.prefix(4_000))
+                        ))
                     if excerpts.count == 16 { break }
                 }
                 if excerpts.count == 16 { break }
@@ -2550,8 +2797,8 @@ public actor AIJobCoordinator {
     }
 }
 
-public extension TutorTurnAction {
-    var displayLabel: String {
+extension TutorTurnAction {
+    public var displayLabel: String {
         switch self {
         case .begin: "Start the learning guide"
         case .answer: "Answer"
@@ -2564,6 +2811,6 @@ public extension TutorTurnAction {
     }
 }
 
-private extension String {
-    var nilIfEmpty: String? { isEmpty ? nil : self }
+extension String {
+    fileprivate var nilIfEmpty: String? { isEmpty ? nil : self }
 }

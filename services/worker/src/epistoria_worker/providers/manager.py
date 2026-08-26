@@ -11,6 +11,8 @@ from ..models import (
     FreeResponseFeedbackResponseV1,
     LearningGenerationRequestV1,
     LearningGenerationResponseV1,
+    MathAssistanceRequestV1,
+    MathAssistanceResponseV1,
     MediaTranscriptionResponseV1,
     NoteQueryRequestV1,
     NoteQueryResponseV1,
@@ -118,6 +120,18 @@ class ProviderManager:
             else "TEXT"
         )
         return self._required_provider(capability, request.provider_route).generate_note_query(
+            request
+        )
+
+    def generate_math_assistance(
+        self, request: MathAssistanceRequestV1
+    ) -> tuple[MathAssistanceResponseV1, ProviderTraceV1]:
+        capability: ProviderCapability = (
+            "VISION"
+            if any(source.image_content for source in request.selection_sources)
+            else "TEXT"
+        )
+        return self._required_provider(capability, request.provider_route).generate_math_assistance(
             request
         )
 

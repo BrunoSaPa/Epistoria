@@ -2,8 +2,8 @@ import EpistoriaCore
 import ImageIO
 import PencilKit
 import SwiftUI
-import UniformTypeIdentifiers
 import UIKit
+import UniformTypeIdentifiers
 
 private let maximumCanvasDrawingBytes = 1_350_000
 
@@ -35,10 +35,15 @@ private enum CanvasSaveState: Equatable {
         case .idle: "Saved locally"
         case .saving: "Saving locally…"
         case .saved: "Saved locally"
-        case let .tooLarge(bytes):
+        case .tooLarge(let bytes):
             "Ink needs a new layer (\(ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)))"
         }
     }
+}
+
+private enum NotebookLassoPurpose {
+    case question
+    case mathematics
 }
 
 /// Keeps high-frequency Pencil save bookkeeping out of SwiftUI invalidation. The visible
@@ -121,8 +126,11 @@ struct NoteEditorView: View {
     @State private var pdfExportResult: NotePDFExportResult?
     @State private var pdfExportTask: Task<Void, Never>?
     @State private var lassoSelection = LassoSelection()
+    @State private var lassoPurpose = NotebookLassoPurpose.question
     @State private var showNoteQuerySheet = false
     @State private var showNoteQueryArtifacts = false
+    @State private var showMathAssistanceSheet = false
+    @State private var showMathAssistanceArtifacts = false
     @State private var showOrganization = false
     @State private var showEvidenceShelf = false
     @State private var showTutor = false
@@ -212,17 +220,44 @@ struct NoteEditorView: View {
                     onInsertBlock: { text in Task { await addText(content: text) } }
                 )
             }
+            .sheet(isPresented: $showMathAssistanceSheet) {
+                MathAssistanceSheetView(
+                    model: model,
+                    noteId: noteId,
+                    selection: lassoSelection,
+                    onDismiss: {
+                        showMathAssistanceSheet = false
+                        mode = .select
+                        lassoSelection = LassoSelection()
+                    }
+                )
+            }
+            .sheet(isPresented: $showMathAssistanceArtifacts) {
+                MathAssistanceArtifactsView(
+                    model: model,
+                    noteId: noteId,
+                    onInsertExpression: { expression in
+                        Task { await addEquation(content: expression) }
+                    },
+                    onInsertExplanation: { explanation in
+                        Task { await addText(content: explanation) }
+                    }
+                )
+            }
             .sheet(isPresented: $showOrganization) {
                 NoteOrganizationView(model: model, noteId: noteId) {
                     onLifecycleChanged?()
                 }
             }
-            .sheet(isPresented: Binding(
-                get: { openedEvidenceId != nil },
-                set: { if !$0 { openedEvidenceId = nil } }
-            )) {
+            .sheet(
+                isPresented: Binding(
+                    get: { openedEvidenceId != nil },
+                    set: { if !$0 { openedEvidenceId = nil } }
+                )
+            ) {
                 if let openedEvidenceId,
-                   let item = evidence.first(where: { $0.id == openedEvidenceId }) {
+                    let item = evidence.first(where: { $0.id == openedEvidenceId })
+                {
                     NavigationStack {
                         ResourceDetailView(
                             model: model,
@@ -254,7 +289,9 @@ struct NoteEditorView: View {
                 }
                 Button("Cancel", role: .cancel) { pendingDeletion = nil }
             } message: {
-                Text("The item can be restored while this notebook remains open. Original image bytes are not erased.")
+                Text(
+                    "The item can be restored while this notebook remains open. Original image bytes are not erased."
+                )
             }
             .confirmationDialog(
                 "Clear ink from this page?",
@@ -264,7 +301,9 @@ struct NoteEditorView: View {
                 Button("Clear ink", role: .destructive) { clearInk() }
                 Button("Cancel", role: .cancel) {}
             } message: {
-                Text("Text, images, and ink on other pages stay in place. You can undo from the tool rail before leaving the page.")
+                Text(
+                    "Text, images, and ink on other pages stay in place. You can undo from the tool rail before leaving the page."
+                )
             }
             .confirmationDialog(
                 "Archive this note?",
@@ -288,7 +327,9 @@ struct NoteEditorView: View {
                 Button("Create readable PDF") { startPDFExport() }
                 Button("Cancel", role: .cancel) {}
             } message: {
-                Text("The PDF contains readable personal content. Save it only to a location you trust. The encrypted note is not changed.")
+                Text(
+                    "The PDF contains readable personal content. Save it only to a location you trust. The encrypted note is not changed."
+                )
             }
             .sheet(item: $pdfExportResult) { result in
                 NotePDFExportReadyView(result: result) {
@@ -311,8 +352,8 @@ struct NoteEditorView: View {
                     .padding(20)
                     .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
             } else if configuration.pageFormat == .infinite,
-                      visibleContentBlocks.isEmpty,
-                      !hasLiveInk(on: 0)
+                visibleContentBlocks.isEmpty,
+                !hasLiveInk(on: 0)
             {
                 VStack(spacing: 8) {
                     Image(systemName: "pencil.and.outline")
@@ -406,7 +447,7 @@ struct NoteEditorView: View {
         .accessibilityIdentifier("note.spatial-canvas.\(pageIndex + 1)")
         .dropDestination(for: String.self) { values, _ in
             guard let value = values.first, let evidenceId = UUID(uuidString: value),
-                  evidence.contains(where: { $0.id == evidenceId })
+                evidence.contains(where: { $0.id == evidenceId })
             else { return false }
             Task { await addEvidence(evidenceId, pageIndex: pageIndex) }
             return true
@@ -430,8 +471,8 @@ struct NoteEditorView: View {
 
     private func focus(on pageIndex: Int) -> SpatialNotebookFocus? {
         guard let focusedBlockId,
-              let block = blocks.first(where: { $0.id == focusedBlockId }),
-              blockPageIndex(block.payload) == pageIndex
+            let block = blocks.first(where: { $0.id == focusedBlockId }),
+            blockPageIndex(block.payload) == pageIndex
         else { return nil }
         return SpatialNotebookFocus(blockId: focusedBlockId, highlightedText: highlightText)
     }
@@ -462,7 +503,8 @@ struct NoteEditorView: View {
             Menu {
                 if let selectedBlock, !isArchived {
                     if let evidenceId = selectedBlock.payload.evidenceId,
-                       let item = evidence.first(where: { $0.id == evidenceId }) {
+                        let item = evidence.first(where: { $0.id == evidenceId })
+                    {
                         Button("Open Evidence source", systemImage: "arrow.up.right.square") {
                             openedEvidenceId = item.id
                         }
@@ -487,6 +529,9 @@ struct NoteEditorView: View {
                 if model.aiJobs != nil {
                     Button("Previous AI answers", systemImage: "sparkles") {
                         showNoteQueryArtifacts = true
+                    }
+                    Button("Math results", systemImage: "function") {
+                        showMathAssistanceArtifacts = true
                     }
                 }
                 Divider()
@@ -544,7 +589,8 @@ struct NoteEditorView: View {
                 }
             }
         } label: {
-            Label(pageLabel, systemImage: configuration.pageFormat == .infinite ? "infinity" : "doc")
+            Label(
+                pageLabel, systemImage: configuration.pageFormat == .infinite ? "infinity" : "doc")
         }
         .disabled(isArchived)
         .accessibilityIdentifier("note.canvas-settings")
@@ -559,7 +605,7 @@ struct NoteEditorView: View {
             Task { await setPage(format: format, orientation: orientation) }
         } label: {
             if configuration.pageFormat == format,
-               (format == .infinite || configuration.orientation == orientation)
+                format == .infinite || configuration.orientation == orientation
             {
                 Label(label, systemImage: "checkmark")
             } else {
@@ -643,26 +689,26 @@ struct NoteEditorView: View {
                 systemImage: "pencil.tip",
                 selected: mode == .ink && inkTool == .pen
             ) { handleInkToolTap(.pen) }
-                .disabled(isArchived)
-                .popover(isPresented: $showPenOptions, arrowEdge: .leading) {
-                    inkOptions(title: "Pen", widths: [2, 4, 8])
-                        .presentationCompactAdaptation(.popover)
-                }
-                .accessibilityHint("When selected, tap again for width and color options")
-                .accessibilityIdentifier("note.tool.pen")
+            .disabled(isArchived)
+            .popover(isPresented: $showPenOptions, arrowEdge: .leading) {
+                inkOptions(title: "Pen", widths: [2, 4, 8])
+                    .presentationCompactAdaptation(.popover)
+            }
+            .accessibilityHint("When selected, tap again for width and color options")
+            .accessibilityIdentifier("note.tool.pen")
 
             railToolButton(
                 "Marker",
                 systemImage: "highlighter",
                 selected: mode == .ink && inkTool == .marker
             ) { handleInkToolTap(.marker) }
-                .disabled(isArchived)
-                .popover(isPresented: $showMarkerOptions, arrowEdge: .leading) {
-                    inkOptions(title: "Marker", widths: [12, 18, 28])
-                        .presentationCompactAdaptation(.popover)
-                }
-                .accessibilityHint("When selected, tap again for width and color options")
-                .accessibilityIdentifier("note.tool.marker")
+            .disabled(isArchived)
+            .popover(isPresented: $showMarkerOptions, arrowEdge: .leading) {
+                inkOptions(title: "Marker", widths: [12, 18, 28])
+                    .presentationCompactAdaptation(.popover)
+            }
+            .accessibilityHint("When selected, tap again for width and color options")
+            .accessibilityIdentifier("note.tool.marker")
 
             railToolButton(
                 "Eraser",
@@ -671,14 +717,14 @@ struct NoteEditorView: View {
             ) {
                 handleInkToolTap(.eraser)
             }
-                .disabled(isArchived)
-                .popover(isPresented: $showEraserOptions, arrowEdge: .leading) {
-                    eraserOptions
-                        .presentationCompactAdaptation(.popover)
-                }
-                .accessibilityLabel("Eraser, \(eraserMode.label)")
-                .accessibilityHint("When selected, tap again for eraser options")
-                .accessibilityIdentifier("note.tool.eraser")
+            .disabled(isArchived)
+            .popover(isPresented: $showEraserOptions, arrowEdge: .leading) {
+                eraserOptions
+                    .presentationCompactAdaptation(.popover)
+            }
+            .accessibilityLabel("Eraser, \(eraserMode.label)")
+            .accessibilityHint("When selected, tap again for eraser options")
+            .accessibilityIdentifier("note.tool.eraser")
 
             Menu {
                 strokeWidthButton("Fine", width: 2)
@@ -706,28 +752,28 @@ struct NoteEditorView: View {
                 systemImage: "square.on.circle",
                 selected: mode == .shape
             ) { handleShapeToolTap() }
-                .disabled(isArchived)
-                .popover(isPresented: $showShapeOptions, arrowEdge: .leading) {
-                    shapeOptions
-                        .presentationCompactAdaptation(.popover)
-                }
-                .accessibilityLabel("Shape, \(selectedShapeKind.label)")
-                .accessibilityHint("When selected, tap again for shape options")
-                .accessibilityIdentifier("note.tool.shape")
+            .disabled(isArchived)
+            .popover(isPresented: $showShapeOptions, arrowEdge: .leading) {
+                shapeOptions
+                    .presentationCompactAdaptation(.popover)
+            }
+            .accessibilityLabel("Shape, \(selectedShapeKind.label)")
+            .accessibilityHint("When selected, tap again for shape options")
+            .accessibilityIdentifier("note.tool.shape")
 
             railToolButton(
                 "Symbol",
                 systemImage: "function",
                 selected: mode == .symbol
             ) { handleSymbolToolTap() }
-                .disabled(isArchived)
-                .popover(isPresented: $showSymbolOptions, arrowEdge: .leading) {
-                    symbolOptions
-                        .presentationCompactAdaptation(.popover)
-                }
-                .accessibilityLabel("Math symbol, \(selectedMathSymbol)")
-                .accessibilityHint("When selected, tap again for symbol options")
-                .accessibilityIdentifier("note.tool.symbol")
+            .disabled(isArchived)
+            .popover(isPresented: $showSymbolOptions, arrowEdge: .leading) {
+                symbolOptions
+                    .presentationCompactAdaptation(.popover)
+            }
+            .accessibilityLabel("Math symbol, \(selectedMathSymbol)")
+            .accessibilityHint("When selected, tap again for symbol options")
+            .accessibilityIdentifier("note.tool.symbol")
 
             railToolButton("Text", systemImage: "textformat") {
                 Task { await addText() }
@@ -760,7 +806,10 @@ struct NoteEditorView: View {
                 selected: showTutor
             ) {
                 showEvidenceShelf = false
-                withAnimation(reduceMotion ? .easeOut(duration: 0.12) : .snappy(duration: 0.26, extraBounce: 0)) {
+                withAnimation(
+                    reduceMotion
+                        ? .easeOut(duration: 0.12) : .snappy(duration: 0.26, extraBounce: 0)
+                ) {
                     showTutor.toggle()
                 }
             }
@@ -769,19 +818,43 @@ struct NoteEditorView: View {
 
             if model.aiJobs != nil {
                 railToolButton(
-                    lassoSelection.isEmpty ? "Ask" : "Send",
-                    systemImage: lassoSelection.isEmpty ? "lasso" : "sparkles",
-                    selected: mode == .lasso
+                    lassoSelection.isEmpty || lassoPurpose != .question ? "Ask" : "Send",
+                    systemImage: lassoSelection.isEmpty || lassoPurpose != .question
+                        ? "lasso"
+                        : "sparkles",
+                    selected: mode == .lasso && lassoPurpose == .question
                 ) {
-                    if mode == .lasso, !lassoSelection.isEmpty {
+                    if mode == .lasso, lassoPurpose == .question, !lassoSelection.isEmpty {
                         showNoteQuerySheet = true
                     } else {
                         selectedItemId = nil
                         lassoSelection = LassoSelection()
+                        lassoPurpose = .question
                         mode = .lasso
                     }
                 }
                 .accessibilityIdentifier("note.tool.lasso")
+
+                railToolButton(
+                    lassoSelection.isEmpty || lassoPurpose != .mathematics ? "Math" : "Analyze",
+                    systemImage: lassoSelection.isEmpty || lassoPurpose != .mathematics
+                        ? "function"
+                        : "text.viewfinder",
+                    selected: mode == .lasso && lassoPurpose == .mathematics
+                ) {
+                    if mode == .lasso, lassoPurpose == .mathematics, !lassoSelection.isEmpty {
+                        showMathAssistanceSheet = true
+                    } else {
+                        selectedItemId = nil
+                        lassoSelection = LassoSelection()
+                        lassoPurpose = .mathematics
+                        mode = .lasso
+                    }
+                }
+                .accessibilityHint(
+                    "Select handwritten mathematics for recognition, worked steps, graphing, or error diagnosis"
+                )
+                .accessibilityIdentifier("note.tool.math-assistance")
             }
 
             Spacer(minLength: 8)
@@ -829,12 +902,12 @@ struct NoteEditorView: View {
             preferredEvidenceIds: tutorSelectionEvidenceIds,
             compact: true
         )
-            .frame(width: 410)
-            .frame(maxHeight: .infinity)
-            .background(reduceTransparency ? EpistoriaDesign.page : Color.clear)
-            .overlay(alignment: .leading) { Divider() }
-            .shadow(color: reduceTransparency ? .clear : .black.opacity(0.12), radius: 18, x: -4)
-            .transition(reduceMotion ? .opacity : .move(edge: .trailing).combined(with: .opacity))
+        .frame(width: 410)
+        .frame(maxHeight: .infinity)
+        .background(reduceTransparency ? EpistoriaDesign.page : Color.clear)
+        .overlay(alignment: .leading) { Divider() }
+        .shadow(color: reduceTransparency ? .clear : .black.opacity(0.12), radius: 18, x: -4)
+        .transition(reduceMotion ? .opacity : .move(edge: .trailing).combined(with: .opacity))
     }
 
     private var tutorSelectionEvidenceIds: [UUID] {
@@ -850,7 +923,8 @@ struct NoteEditorView: View {
             return block.payload.transcription?.trimmingCharacters(in: .whitespacesAndNewlines)
         }.filter { !$0.isEmpty }.joined(separator: "\n\n")
         guard !text.isEmpty else { return nil }
-        return "Help me understand this selected notebook material:\n\n\(String(text.prefix(8_000)))"
+        return
+            "Help me understand this selected notebook material:\n\n\(String(text.prefix(8_000)))"
     }
 
     private var evidenceShelf: some View {
@@ -873,7 +947,9 @@ struct NoteEditorView: View {
                 ContentUnavailableView(
                     "No Evidence yet",
                     systemImage: "quote.bubble",
-                    description: Text("Create an annotation from a Source. It will remain anchored to that exact version.")
+                    description: Text(
+                        "Create an annotation from a Source. It will remain anchored to that exact version."
+                    )
                 )
                 .frame(maxHeight: .infinity)
             } else {
@@ -894,10 +970,12 @@ struct NoteEditorView: View {
         .frame(maxHeight: .infinity)
         .background(.regularMaterial)
         .overlay(alignment: .leading) { Divider() }
-        .popover(isPresented: Binding(
-            get: { inspectedEvidenceId != nil },
-            set: { if !$0 { inspectedEvidenceId = nil } }
-        ), arrowEdge: .trailing) {
+        .popover(
+            isPresented: Binding(
+                get: { inspectedEvidenceId != nil },
+                set: { if !$0 { inspectedEvidenceId = nil } }
+            ), arrowEdge: .trailing
+        ) {
             evidenceBacklinksPopover
                 .presentationCompactAdaptation(.popover)
         }
@@ -922,10 +1000,12 @@ struct NoteEditorView: View {
                     .buttonStyle(.plain)
                     .font(.caption.weight(.medium))
                 Spacer()
-                Button("Insert") { Task { await addEvidence(item.id, pageIndex: currentPageIndex) } }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .disabled(isArchived)
+                Button("Insert") {
+                    Task { await addEvidence(item.id, pageIndex: currentPageIndex) }
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(isArchived)
             }
         }
         .padding(12)
@@ -947,9 +1027,11 @@ struct NoteEditorView: View {
                     .labelStyle(.iconOnly)
             }
             if inspectedEvidenceBacklinks.isEmpty {
-                Text("This Evidence is not used by another note, Concept, card, or test question yet.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                Text(
+                    "This Evidence is not used by another note, Concept, card, or test question yet."
+                )
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
             } else {
                 ForEach(inspectedEvidenceBacklinks) { backlink in
                     Label {
@@ -981,7 +1063,7 @@ struct NoteEditorView: View {
 
     private var pageJumpMenu: some View {
         Menu {
-            ForEach(0 ..< finitePageCount, id: \.self) { pageIndex in
+            ForEach(0..<finitePageCount, id: \.self) { pageIndex in
                 Button {
                     Task { await switchPage(to: pageIndex) }
                 } label: {
@@ -1021,12 +1103,13 @@ struct NoteEditorView: View {
                     .lineLimit(1)
                     .minimumScaleFactor(0.75)
             }
-                .frame(width: 68, height: 48)
-                .background(
-                    selected ? EpistoriaDesign.subtleFill : Color.clear,
-                    in: RoundedRectangle(cornerRadius: EpistoriaDesign.compactRadius, style: .continuous)
-                )
-                .contentShape(Rectangle())
+            .frame(width: 68, height: 48)
+            .background(
+                selected ? EpistoriaDesign.subtleFill : Color.clear,
+                in: RoundedRectangle(
+                    cornerRadius: EpistoriaDesign.compactRadius, style: .continuous)
+            )
+            .contentShape(Rectangle())
         }
         .buttonStyle(EpistoriaPressButtonStyle())
     }
@@ -1172,7 +1255,7 @@ struct NoteEditorView: View {
             colorPalette(selection: shapeStrokeColor) { shapeStrokeColor = $0 }
             HStack {
                 Text("Line width")
-                Slider(value: $shapeLineWidth, in: 1 ... 12, step: 1)
+                Slider(value: $shapeLineWidth, in: 1...12, step: 1)
                 Text("\(Int(shapeLineWidth))")
                     .monospacedDigit()
                     .frame(width: 22)
@@ -1241,7 +1324,9 @@ struct NoteEditorView: View {
     ) -> some View {
         HStack(spacing: 10) {
             ForEach(NoteCanvasColor.allCases, id: \.self) { color in
-                Button { onSelect(color) } label: {
+                Button {
+                    onSelect(color)
+                } label: {
                     Circle()
                         .fill(Color(uiColor: color.uiColor))
                         .frame(width: 28, height: 28)
@@ -1307,7 +1392,7 @@ struct NoteEditorView: View {
                     HStack {
                         Image(systemName: "circle.fill")
                             .font(.system(size: 7))
-                        Slider(value: $eraserWidth, in: 8 ... 64, step: 2)
+                        Slider(value: $eraserWidth, in: 8...64, step: 2)
                         Image(systemName: "circle.fill")
                             .font(.system(size: 20))
                     }
@@ -1405,12 +1490,15 @@ struct NoteEditorView: View {
             .background(.regularMaterial, in: Capsule())
             .padding(.bottom, 8)
         } else if mode == .shape {
-            Label("Tap the page to place a \(selectedShapeKind.label.lowercased())", systemImage: selectedShapeKind.systemImage)
-                .font(.subheadline)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 11)
-                .background(.regularMaterial, in: Capsule())
-                .padding(.bottom, 8)
+            Label(
+                "Tap the page to place a \(selectedShapeKind.label.lowercased())",
+                systemImage: selectedShapeKind.systemImage
+            )
+            .font(.subheadline)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 11)
+            .background(.regularMaterial, in: Capsule())
+            .padding(.bottom, 8)
         } else if mode == .symbol {
             Label("Tap the page to place \(selectedMathSymbol)", systemImage: "function")
                 .font(.subheadline)
@@ -1426,16 +1514,20 @@ struct NoteEditorView: View {
         let activeInkId = inkBlock(on: pageIndex)?.id
         return pageBlocks.enumerated().compactMap { index, block in
             guard block.id != activeInkId else { return nil }
-            let placement = block.payload.canvasPlacement ?? legacyPlacement(for: block, index: index)
+            let placement =
+                block.payload.canvasPlacement ?? legacyPlacement(for: block, index: index)
             let content: SpatialNotebookItem.Content
             switch block.payload.blockType {
             case .text, .equation:
                 content = .text(decodeRichText(block.payload))
             case .callout:
                 if let evidenceId = block.payload.evidenceId,
-                   let item = evidence.first(where: { $0.id == evidenceId }) {
+                    let item = evidence.first(where: { $0.id == evidenceId })
+                {
                     let citation = evidenceCitation(item.payload)
-                    content = .evidence(evidenceAttributedText(item.payload, citation: citation), citation: citation)
+                    content = .evidence(
+                        evidenceAttributedText(item.payload, citation: citation), citation: citation
+                    )
                 } else {
                     content = .unsupported("Evidence unavailable")
                 }
@@ -1447,7 +1539,7 @@ struct NoteEditorView: View {
                 }
             case .handwriting:
                 if let data = block.payload.drawingData,
-                   let drawing = try? PKDrawing(data: data)
+                    let drawing = try? PKDrawing(data: data)
                 {
                     content = .legacyDrawing(drawing)
                 } else {
@@ -1527,7 +1619,9 @@ struct NoteEditorView: View {
 
     private var statusSymbol: String {
         if case .tooLarge = inkSaveState { return "exclamationmark.triangle" }
-        if inkSaveState == .saving || model.pendingSaves.count > 0 { return "arrow.triangle.2.circlepath" }
+        if inkSaveState == .saving || model.pendingSaves.count > 0 {
+            return "arrow.triangle.2.circlepath"
+        }
         let hasQueuedWork = model.pendingRecordCount + model.pendingFileCount > 0
         return note?.syncState == .synced && !hasQueuedWork ? "checkmark.circle" : "ipad"
     }
@@ -1541,7 +1635,9 @@ struct NoteEditorView: View {
             async let loadedEvidence = store.list(EvidencePayload.self)
             async let loadedSources = store.list(SourcePayload.self)
             async let loadedVersions = store.list(SourceVersionPayload.self)
-            let result = try await (loadedNote, loadedBlocks, loadedEvidence, loadedSources, loadedVersions)
+            let result = try await (
+                loadedNote, loadedBlocks, loadedEvidence, loadedSources, loadedVersions
+            )
             note = result.0
             configuration = result.0.payload.canvas ?? NoteCanvasConfiguration()
             if title != result.0.payload.title {
@@ -1561,8 +1657,8 @@ struct NoteEditorView: View {
             if configuration.pageFormat == .infinite {
                 currentPageIndex = 0
             } else if isInitialLoad,
-                      let focusedBlockId,
-                      let focused = blocks.first(where: { $0.id == focusedBlockId })
+                let focusedBlockId,
+                let focused = blocks.first(where: { $0.id == focusedBlockId })
             {
                 currentPageIndex = min(
                     max(focused.payload.canvasPageIndex ?? 0, 0),
@@ -1572,7 +1668,8 @@ struct NoteEditorView: View {
                 currentPageIndex = min(max(currentPageIndex, 0), finitePageCount - 1)
             }
             var loadedInk: [Int: Data] = [:]
-            for block in blocks where block.payload.canvasRole == .inkLayer && !block.payload.tombstone {
+            for block in blocks
+            where block.payload.canvasRole == .inkLayer && !block.payload.tombstone {
                 loadedInk[blockPageIndex(block.payload)] = block.payload.drawingData ?? Data()
             }
             inkDataByPage = loadedInk
@@ -1593,13 +1690,14 @@ struct NoteEditorView: View {
         previewLoadGeneration &+= 1
         let generation = previewLoadGeneration
         let lowerPage = max(pageIndex - 1, 0)
-        let upperPage = configuration.pageFormat == .infinite
+        let upperPage =
+            configuration.pageFormat == .infinite
             ? 0
             : min(pageIndex + 1, finitePageCount - 1)
         let retainedBlocks = blocks.filter {
             !$0.payload.tombstone
                 && $0.payload.blockType == .image
-                && (lowerPage ... upperPage).contains(blockPageIndex($0.payload))
+                && (lowerPage...upperPage).contains(blockPageIndex($0.payload))
         }
         let retainedIDs = Set(retainedBlocks.map(\.id))
         var loaded = imagePreviews.filter { retainedIDs.contains($0.key) }
@@ -1805,6 +1903,31 @@ struct NoteEditorView: View {
         } catch { report(error) }
     }
 
+    private func addEquation(content: String) async {
+        guard !isArchived else { return }
+        let value = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty else { return }
+        do {
+            try await flushTitle()
+            guard let store = model.store else {
+                throw NoteEditorSaveError.encryptedStoreUnavailable
+            }
+            let width = min(440.0, max((configuration.pageWidth ?? 520) - 72, 260))
+            let placement = placementCentered(width: width, height: 100, zIndex: nextZIndex)
+            let id = try await store.appendCanvasEquation(
+                noteId: noteId,
+                symbol: value,
+                placement: placement,
+                pageIndex: currentPageIndex
+            )
+            model.noteLocalMutation()
+            try await refreshBlock(id)
+            selectedItemId = id
+            editingItemId = nil
+            mode = .select
+        } catch { report(error) }
+    }
+
     private func importImage(_ result: Result<[URL], Error>) async {
         guard !isArchived, let assetManager = model.assetManager, let store = model.store else {
             return
@@ -1885,7 +2008,8 @@ struct NoteEditorView: View {
                 id: block.id,
                 payload: snapshot,
                 parentId: snapshot.noteId,
-                relationIds: [snapshot.noteId, snapshot.assetId, snapshot.evidenceId].compactMap(\.self)
+                relationIds: [snapshot.noteId, snapshot.assetId, snapshot.evidenceId].compactMap(
+                    \.self)
             )
             model.noteLocalMutation()
         }
@@ -1932,7 +2056,7 @@ struct NoteEditorView: View {
                 relationIds: [snapshot.noteId]
             )
             if inkSaveBuffer.isCurrent(generation, for: inkBlock.id),
-               pageIndex == currentPageIndex
+                pageIndex == currentPageIndex
             {
                 inkSaveState = .saved
             }
@@ -1945,7 +2069,7 @@ struct NoteEditorView: View {
                 try await model.pendingSaves.flush(id: inkBlock.id)
             } catch {
                 if inkSaveBuffer.isCurrent(generation, for: inkBlock.id),
-                   pageIndex == currentPageIndex
+                    pageIndex == currentPageIndex
                 {
                     inkSaveState = .idle
                 }
@@ -1974,7 +2098,8 @@ struct NoteEditorView: View {
             changed.orientation = orientation
             changed.pageCount = format == .infinite ? 1 : max(changed.pageCount, 1)
             try await persistCanvasConfiguration(changed)
-            currentPageIndex = format == .infinite
+            currentPageIndex =
+                format == .infinite
                 ? 0
                 : min(currentPageIndex, changed.effectivePageCount - 1)
             requestedPageIndex = format == .infinite ? nil : currentPageIndex
@@ -2064,8 +2189,10 @@ struct NoteEditorView: View {
         _ block: IdentifiedPayload<NoteBlockPayload>,
         direction: Int
     ) {
-        let current = block.payload.canvasPlacement
-            ?? legacyPlacement(for: block, index: visibleContentBlocks.firstIndex { $0.id == block.id } ?? 0)
+        let current =
+            block.payload.canvasPlacement
+            ?? legacyPlacement(
+                for: block, index: visibleContentBlocks.firstIndex { $0.id == block.id } ?? 0)
         var changed = current
         changed.zIndex = min(max(current.zIndex + direction, -10_000), 10_000)
         savePlacement(id: block.id, placement: changed)
@@ -2091,7 +2218,9 @@ struct NoteEditorView: View {
                 id: deleted.id,
                 payload: deleted.payload,
                 parentId: noteId,
-                relationIds: [noteId, deleted.payload.assetId, deleted.payload.evidenceId].compactMap(\.self)
+                relationIds: [noteId, deleted.payload.assetId, deleted.payload.evidenceId]
+                    .compactMap(
+                        \.self)
             )
             recentlyDeleted = nil
             selectedItemId = deleted.id
@@ -2312,15 +2441,16 @@ struct NoteEditorView: View {
 
     private func decodeRichText(_ payload: NoteBlockPayload) -> NSAttributedString {
         if let rtf = payload.richTextRtf,
-           let value = try? NSAttributedString(
-               data: rtf,
-               options: [.documentType: NSAttributedString.DocumentType.rtf],
-               documentAttributes: nil
-           )
+            let value = try? NSAttributedString(
+                data: rtf,
+                options: [.documentType: NSAttributedString.DocumentType.rtf],
+                documentAttributes: nil
+            )
         {
             return value
         }
-        let font = payload.blockType == .equation
+        let font =
+            payload.blockType == .equation
             ? UIFont.systemFont(ofSize: 34, weight: .regular)
             : UIFont.preferredFont(forTextStyle: .body)
         return NSAttributedString(string: payload.plainText, attributes: [.font: font])
@@ -2350,14 +2480,18 @@ struct NoteEditorView: View {
         case .web: return locator.heading ?? "Web excerpt"
         case .media:
             let start = evidenceMediaTimeLabel(locator.startSeconds ?? 0)
-            guard let end = locator.endSeconds, end > (locator.startSeconds ?? 0) else { return start }
+            guard let end = locator.endSeconds, end > (locator.startSeconds ?? 0) else {
+                return start
+            }
             return "\(start)–\(evidenceMediaTimeLabel(end))"
-        case .document: return locator.heading ?? locator.page.map { "Page \($0)" } ?? "Document excerpt"
+        case .document:
+            return locator.heading ?? locator.page.map { "Page \($0)" } ?? "Document excerpt"
         case .image: return "Image region"
         case .plainText: return "Text excerpt"
         case .slide: return locator.slide.map { "Slide \($0)" } ?? "Slide excerpt"
         case .sheet:
-            let value = [locator.sheet, locator.cellRange].compactMap(\.self).joined(separator: " · ")
+            let value = [locator.sheet, locator.cellRange].compactMap(\.self).joined(
+                separator: " · ")
             return value.isEmpty ? "Sheet excerpt" : value
         }
     }
@@ -2383,13 +2517,14 @@ struct NoteEditorView: View {
                 .foregroundColor: UIColor.label,
             ]
         )
-        value.append(NSAttributedString(
-            string: "\n\n\(citation)",
-            attributes: [
-                .font: UIFont.preferredFont(forTextStyle: .caption1),
-                .foregroundColor: UIColor.secondaryLabel,
-            ]
-        ))
+        value.append(
+            NSAttributedString(
+                string: "\n\n\(citation)",
+                attributes: [
+                    .font: UIFont.preferredFont(forTextStyle: .caption1),
+                    .foregroundColor: UIColor.secondaryLabel,
+                ]
+            ))
         return value
     }
 
@@ -2411,8 +2546,8 @@ struct NoteEditorView: View {
     }
 }
 
-private extension EvidenceBacklinkKind {
-    var displayName: String {
+extension EvidenceBacklinkKind {
+    fileprivate var displayName: String {
         switch self {
         case .note: "Note"
         case .concept: "Concept"
@@ -2421,7 +2556,7 @@ private extension EvidenceBacklinkKind {
         }
     }
 
-    var symbol: String {
+    fileprivate var symbol: String {
         switch self {
         case .note: "note.text"
         case .concept: "point.3.connected.trianglepath.dotted"
@@ -2444,7 +2579,8 @@ private struct NotePDFExportReadyView: View {
                     .font(.headline)
                 Text(
                     "\(result.pageCount) \(result.pageCount == 1 ? "page" : "pages") · "
-                        + ByteCountFormatter.string(fromByteCount: result.byteCount, countStyle: .file)
+                        + ByteCountFormatter.string(
+                            fromByteCount: result.byteCount, countStyle: .file)
                 )
                 .foregroundStyle(EpistoriaDesign.mutedInk)
                 Label(

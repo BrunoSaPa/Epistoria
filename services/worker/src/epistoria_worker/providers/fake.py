@@ -10,6 +10,11 @@ from ..models import (
     LearningDraftItemV1,
     LearningGenerationRequestV1,
     LearningGenerationResponseV1,
+    MathAssistanceRequestV1,
+    MathAssistanceResponseV1,
+    MathErrorDiagnosisV1,
+    MathGraphDomainV1,
+    MathWorkedStepV1,
     MediaTranscriptionResponseV1,
     NoteQueryRequestV1,
     NoteQueryResponseV1,
@@ -71,6 +76,62 @@ class DeterministicDigestProvider:
             provider="deterministic-test",
             model="fixture-v1",
             prompt_version="note-query/v1",
+            input_tokens=None,
+            output_tokens=None,
+            estimated_cost_usd=0,
+        )
+
+    def generate_math_assistance(
+        self, request: MathAssistanceRequestV1
+    ) -> tuple[MathAssistanceResponseV1, ProviderTraceV1]:
+        source_ids = [source.source_id for source in request.selection_sources]
+        steps = [
+            MathWorkedStepV1(
+                id=uuid5(request.job_id, "math-step:0"),
+                expression="x^2 = 4",
+                explanation="Keep the selected equation unchanged as the starting point.",
+            ),
+            MathWorkedStepV1(
+                id=uuid5(request.job_id, "math-step:1"),
+                expression="x = -2 or x = 2",
+                explanation="Take both square roots and verify each result.",
+            ),
+        ]
+        diagnoses = (
+            [
+                MathErrorDiagnosisV1(
+                    id=uuid5(request.job_id, "math-diagnosis:0"),
+                    kind="METHOD",
+                    observed="x = 2",
+                    explanation="Taking a square root requires both signs.",
+                    correction="x = -2 or x = 2",
+                )
+            ]
+            if request.mode == "DIAGNOSE"
+            else []
+        )
+        graph_expression = "x^2 - 4" if request.mode == "GRAPH" else None
+        response = MathAssistanceResponseV1(
+            recognized_expression="x^2 = 4",
+            latex="x^2 = 4",
+            interpretation="Solve the selected quadratic equation over the real numbers.",
+            steps=steps if request.mode in {"WORKED_STEPS", "DIAGNOSE"} else [],
+            final_answer="x = -2 or x = 2",
+            diagnoses=diagnoses,
+            graph_expression=graph_expression,
+            graph_domain=(
+                MathGraphDomainV1(minimum_x=-5, maximum_x=5)
+                if graph_expression is not None
+                else None
+            ),
+            confidence=0.95,
+            uncertainties=[],
+            cited_source_ids=source_ids,
+        )
+        return response, ProviderTraceV1(
+            provider="deterministic-test",
+            model="fixture-v1",
+            prompt_version="math-assistance/v1",
             input_tokens=None,
             output_tokens=None,
             estimated_cost_usd=0,

@@ -770,6 +770,9 @@ actor EpistoriaExportService {
         if let artifact = try? CanonicalJSON.decode(NoteQueryArtifact.self, from: content) {
             return artifact.reviewState == .accepted || artifact.reviewState == .edited
         }
+        if let artifact = try? CanonicalJSON.decode(MathAssistanceArtifact.self, from: content) {
+            return artifact.reviewState == .accepted || artifact.reviewState == .edited
+        }
         if let artifact = try? CanonicalJSON.decode(MediaTranscriptionManifest.self, from: content) {
             return artifact.reviewState == .accepted || artifact.reviewState == .edited
         }

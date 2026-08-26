@@ -28,12 +28,17 @@ Epistoria remains in personal beta. The following limits apply to the current pr
 - Very large Pencil documents have a current per-page ink limit.
 - The pixel eraser has a round adjustable footprint. Square, angled, and custom eraser tips are
   not available. Whole-stroke erasing remains a separate mode.
-- Image crop, masks, handwriting recognition, handwritten-math recognition, and direct printing
-  are not available.
+- Image crop, masks, general handwriting recognition, and direct printing are not available.
 - Shapes support placement, movement, resizing, rotation, outline, optional fill, and PDF output.
   Existing shape style cannot yet be changed after placement.
-- Math symbols are editable text items. The app does not yet provide equation layout, LaTeX
-  input, graphing, or recognition of handwritten equations.
+- Math symbols and accepted recognized expressions are editable text items. The app does not yet
+  provide a full equation-layout editor or direct LaTeX input.
+- Handwritten mathematics recognition, worked steps, graphing, and error diagnosis are in personal
+  beta. They require a vision-capable configured provider for image selections. Recognition and
+  solution quality vary by handwriting, notation, crop, and model. Physical Pencil validation is
+  still open.
+- Local graphs use a limited explicit function grammar. They do not support implicit equations,
+  parametric curves, inequalities, symbolic algebra, or arbitrary code.
 - Evidence cards can be moved, resized, removed, and opened at their saved Source Version. Their
   quoted content is intentionally not editable on the canvas. Create a new Source annotation and
   Evidence record when the quoted content must change.

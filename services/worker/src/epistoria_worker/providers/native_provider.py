@@ -13,6 +13,8 @@ from ..models import (
     FreeResponseFeedbackResponseV1,
     LearningGenerationRequestV1,
     LearningGenerationResponseV1,
+    MathAssistanceRequestV1,
+    MathAssistanceResponseV1,
     MediaTranscriptionResponseV1,
     NoteQueryRequestV1,
     NoteQueryResponseV1,
@@ -32,6 +34,7 @@ from .openai_provider import (
     _DIGEST_SYSTEM_PROMPT,
     _FEEDBACK_SYSTEM_PROMPT,
     _LEARNING_SYSTEM_PROMPT,
+    _MATH_ASSISTANCE_SYSTEM_PROMPT,
     _MAX_IMAGE_BYTES,
     _NOTE_QUERY_SYSTEM_PROMPT,
     _SOURCE_GUIDE_SYSTEM_PROMPT,
@@ -148,6 +151,47 @@ def _note_query_content(request: NoteQueryRequestV1) -> list[_ContentPart]:
     return content
 
 
+def _math_content(request: MathAssistanceRequestV1) -> list[_ContentPart]:
+    instructions = request.learner_instructions or "None"
+    content: list[_ContentPart] = [
+        {
+            "type": "text",
+            "text": (
+                f"Mode: {request.mode}\nOutput language: {request.output_language}\n"
+                f"Learner instructions: {instructions}\n\n=== SELECTED MATHEMATICS ===\n"
+            ),
+        }
+    ]
+    for source in request.selection_sources:
+        content.append(
+            {
+                "type": "text",
+                "text": (
+                    f"[sourceId={source.source_id} kind={source.source_kind} "
+                    f"locator={source.locator!r}]\n"
+                ),
+            }
+        )
+        if source.image_content is not None:
+            content.append(_image_part(source.image_content, label="Math image"))
+        elif source.excerpt is not None:
+            content.append({"type": "text", "text": source.excerpt + "\n"})
+    if request.context_sources:
+        content.append({"type": "text", "text": "\n=== NEARBY NOTE CONTEXT ===\n"})
+        for source in request.context_sources:
+            if source.excerpt:
+                content.append(
+                    {
+                        "type": "text",
+                        "text": (
+                            f"[sourceId={source.source_id} locator={source.locator!r}]\n"
+                            f"{source.excerpt}\n"
+                        ),
+                    }
+                )
+    return content
+
+
 def _source_content(
     request: SourceGuidePromptV1 | SourceQueryPromptV1,
 ) -> list[_ContentPart]:
@@ -239,6 +283,16 @@ class _NativeStructuredDigestProvider:
             system_prompt=_NOTE_QUERY_SYSTEM_PROMPT,
             user_content=_note_query_content(request),
             prompt_version="note-query/v1",
+        )
+
+    def generate_math_assistance(
+        self, request: MathAssistanceRequestV1
+    ) -> tuple[MathAssistanceResponseV1, ProviderTraceV1]:
+        return self._generate(
+            response_type=MathAssistanceResponseV1,
+            system_prompt=_MATH_ASSISTANCE_SYSTEM_PROMPT,
+            user_content=_math_content(request),
+            prompt_version="math-assistance/v1",
         )
 
     def generate_free_response_feedback(

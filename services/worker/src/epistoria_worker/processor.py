@@ -3,6 +3,7 @@ from __future__ import annotations
 import hmac
 import json
 import logging
+import re
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID, uuid5
@@ -22,6 +23,8 @@ from .models import (
     FreeResponseFeedbackRequestV1,
     LearningGenerationArtifactV1,
     LearningGenerationRequestV1,
+    MathAssistanceArtifactV1,
+    MathAssistanceRequestV1,
     MediaTranscriptionChunkV1,
     MediaTranscriptionManifestV1,
     MediaTranscriptionRequestV1,
@@ -134,6 +137,8 @@ class WorkerProcessor:
             return self._pdf_extraction(lease, plaintext)
         if lease.job_type == "NOTE_QUERY":
             return self._note_query(lease, plaintext)
+        if lease.job_type == "MATH_ASSISTANCE":
+            return self._math_assistance(lease, plaintext)
         if lease.job_type == "SOURCE_ANALYSIS":
             return self._source_analysis(lease, plaintext)
         if lease.job_type == "SOURCE_QUERY":
@@ -605,6 +610,68 @@ class WorkerProcessor:
             entity_id=artifact_id,
             parent_id=request.note_id,
             relation_ids=list(query_response.cited_source_ids)[:64],
+            plaintext=json_bytes(artifact),
+        )
+        return CachedCompletion(
+            job_id=lease.id,
+            artifact_entity_id=artifact_id,
+            mutations=[mutation],
+        )
+
+    def _math_assistance(self, lease: AIJobLease, plaintext: bytes) -> CachedCompletion:
+        if self._digest_provider is None:
+            raise ProcessingFailure(code="AI_NOT_CONFIGURED", retryable=False)
+        try:
+            request = MathAssistanceRequestV1.model_validate_json(plaintext)
+        except ValidationError as error:
+            raise ProcessingFailure(code="INVALID_JOB_PAYLOAD", retryable=False) from error
+        if request.account_id != self._account_id or request.job_id != lease.id:
+            raise ProcessingFailure(code="JOB_IDENTITY_MISMATCH", retryable=False)
+
+        response, trace = self._digest_provider.generate_math_assistance(request)
+        allowed_ids = {
+            source.source_id for source in request.selection_sources + request.context_sources
+        }
+        selected_ids = {source.source_id for source in request.selection_sources}
+        cited_ids = set(response.cited_source_ids)
+        if not cited_ids.issubset(allowed_ids) or not cited_ids.intersection(selected_ids):
+            raise ProcessingFailure(code="PROVIDER_CITATION_INVALID", retryable=True)
+        if response.graph_expression is not None:
+            if not re.fullmatch(r"[0-9A-Za-z+*/^().\-\s]+", response.graph_expression):
+                raise ProcessingFailure(code="PROVIDER_GRAPH_INVALID", retryable=True)
+            identifiers = set(re.findall(r"[A-Za-z]+", response.graph_expression.lower()))
+            if not identifiers.issubset(
+                {"x", "pi", "e", "sin", "cos", "tan", "sqrt", "abs", "ln", "log", "exp"}
+            ):
+                raise ProcessingFailure(code="PROVIDER_GRAPH_INVALID", retryable=True)
+
+        if self._cost_ledger is not None:
+            self._cost_ledger.record(
+                job_id=lease.id,
+                provider=trace.provider,
+                model=trace.model,
+                prompt_version=trace.prompt_version,
+                input_tokens=trace.input_tokens,
+                output_tokens=trace.output_tokens,
+                estimated_cost_usd=trace.estimated_cost_usd,
+                provider_request_id=trace.provider_request_id,
+            )
+
+        artifact_id = uuid5(lease.id, "ai-artifact/math-assistance/v1")
+        artifact = MathAssistanceArtifactV1(
+            job_id=lease.id,
+            note_id=request.note_id,
+            mode=request.mode,
+            learner_instructions=request.learner_instructions,
+            generated_at=datetime.now(UTC),
+            source_ids=list(response.cited_source_ids),
+            trace=trace,
+            response=response,
+        )
+        mutation = self._encrypted_mutation(
+            entity_id=artifact_id,
+            parent_id=request.note_id,
+            relation_ids=list(response.cited_source_ids)[:48],
             plaintext=json_bytes(artifact),
         )
         return CachedCompletion(

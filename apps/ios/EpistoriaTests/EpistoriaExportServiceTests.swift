@@ -1,6 +1,7 @@
-@testable import Epistoria
 import EpistoriaCore
 import XCTest
+
+@testable import Epistoria
 
 @MainActor
 final class EpistoriaExportServiceTests: XCTestCase {
@@ -77,7 +78,8 @@ final class EpistoriaExportServiceTests: XCTestCase {
 
         let png = try XCTUnwrap(
             Data(
-                base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+                base64Encoded:
+                    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
             )
         )
         let imageURL = fixture.root.appendingPathComponent("diagram.png")
@@ -101,7 +103,8 @@ final class EpistoriaExportServiceTests: XCTestCase {
         try csv.write(to: csvURL, options: .atomic)
         let importedCSV = try await fixture.assetManager.importSource(from: csvURL)
         let webHTML = Data(
-            "<html><head><title>Exported page</title></head><body><p>Readable theorem</p><script>ignored()</script></body></html>".utf8
+            "<html><head><title>Exported page</title></head><body><p>Readable theorem</p><script>ignored()</script></body></html>"
+                .utf8
         )
         let webURL = fixture.root.appendingPathComponent("captured.html")
         try webHTML.write(to: webURL, options: .atomic)
@@ -114,17 +117,20 @@ final class EpistoriaExportServiceTests: XCTestCase {
             canonicalURL: canonicalWebURL,
             capturedURL: canonicalWebURL
         )
-        let googleDocument = try XCTUnwrap(Data(base64Encoded:
-            "UEsDBBQAAAAIALwgFl0FejLKdgAAAI8AAAATABwAW0NvbnRlbnRfVHlwZXNdLnhtbFVUCQADhHSJaoR0iWp1eAsAAQT1AQAABAAAAAA9jjEOwjAMRXdOUWVFJBdIu7ADAxewEgdZiu3ICQVuTysk5v/+04v3T8O+xOuKZpRxuoGNCzDOLjCQ+DdXN51VBsrY2dlBa5USDFIJq2SvDWWjihrD6CcthRJmTU/eLv6llptpwt5JHlz9f9n1x10flhh+GYcvUEsDBAoAAAAAALwgFl0AAAAAAAAAAAAAAAAFABwAd29yZC9VVAkAA4R0iWqHdIlqdXgLAAEE9QEAAAQAAAAAUEsDBBQAAAAIALwgFl0GDEA/VAAAAHIAAAARABwAd29yZC9kb2N1bWVudC54bWxVVAkAA4R0iWqEdIlqdXgLAAEE9QEAAAQAAAAAsym3SslPLs1NzStRqMjNySu2KrdVKs8vSlGysym3SspPqQTRBSCiCESU2AWlJqYkJuWkKrjn56cDqZKM1Pyi1FwbfZAkiCwCkwVgEmKAPsISOy4AUEsBAh4DFAAAAAgAvCAWXQV6Msp2AAAAjwAAABMAGAAAAAAAAQAAAKSBAAAAAFtDb250ZW50X1R5cGVzXS54bWxVVAUAA4R0iWp1eAsAAQT1AQAABAAAAABQSwECHgMKAAAAAAC8IBZdAAAAAAAAAAAAAAAABQAYAAAAAAAAABAA7UHDAAAAd29yZC9VVAUAA4R0iWp1eAsAAQT1AQAABAAAAABQSwECHgMUAAAACAC8IBZdBgxAP1QAAAByAAAAEQAYAAAAAAABAAAApIECAQAAd29yZC9kb2N1bWVudC54bWxVVAUAA4R0iWp1eAsAAQT1AQAABAAAAABQSwUGAAAAAAMAAwD7AAAAoQEAAAAA"
-        ))
+        let googleDocument = try XCTUnwrap(
+            Data(
+                base64Encoded:
+                    "UEsDBBQAAAAIALwgFl0FejLKdgAAAI8AAAATABwAW0NvbnRlbnRfVHlwZXNdLnhtbFVUCQADhHSJaoR0iWp1eAsAAQT1AQAABAAAAAA9jjEOwjAMRXdOUWVFJBdIu7ADAxewEgdZiu3ICQVuTysk5v/+04v3T8O+xOuKZpRxuoGNCzDOLjCQ+DdXN51VBsrY2dlBa5USDFIJq2SvDWWjihrD6CcthRJmTU/eLv6llptpwt5JHlz9f9n1x10flhh+GYcvUEsDBAoAAAAAALwgFl0AAAAAAAAAAAAAAAAFABwAd29yZC9VVAkAA4R0iWqHdIlqdXgLAAEE9QEAAAQAAAAAUEsDBBQAAAAIALwgFl0GDEA/VAAAAHIAAAARABwAd29yZC9kb2N1bWVudC54bWxVVAkAA4R0iWqEdIlqdXgLAAEE9QEAAAQAAAAAsym3SslPLs1NzStRqMjNySu2KrdVKs8vSlGysym3SspPqQTRBSCiCESU2AWlJqYkJuWkKrjn56cDqZKM1Pyi1FwbfZAkiCwCkwVgEmKAPsISOy4AUEsBAh4DFAAAAAgAvCAWXQV6Msp2AAAAjwAAABMAGAAAAAAAAQAAAKSBAAAAAFtDb250ZW50X1R5cGVzXS54bWxVVAUAA4R0iWp1eAsAAQT1AQAABAAAAABQSwECHgMKAAAAAAC8IBZdAAAAAAAAAAAAAAAABQAYAAAAAAAAABAA7UHDAAAAd29yZC9VVAUAA4R0iWp1eAsAAQT1AQAABAAAAABQSwECHgMUAAAACAC8IBZdBgxAP1QAAAByAAAAEQAYAAAAAAABAAAApIECAQAAd29yZC9kb2N1bWVudC54bWxVVAUAA4R0iWp1eAsAAQT1AQAABAAAAABQSwUGAAAAAAMAAwD7AAAAoQEAAAAA"
+            ))
         let googleDocumentURL = fixture.root.appendingPathComponent("google-export.docx")
         try googleDocument.write(to: googleDocumentURL, options: .atomic)
         let importedGoogleDocument = try await fixture.assetManager.importSource(
             from: googleDocumentURL
         )
-        let googleShareURL = try XCTUnwrap(URL(
-            string: "https://docs.google.com/document/d/export-test"
-        ))
+        let googleShareURL = try XCTUnwrap(
+            URL(
+                string: "https://docs.google.com/document/d/export-test"
+            ))
         let googleSourceId = try await fixture.store.createSource(
             type: .googleDocument,
             title: "Google theorem",
@@ -132,9 +138,10 @@ final class EpistoriaExportServiceTests: XCTestCase {
             canonicalURL: googleShareURL,
             capturedURL: try GoogleWorkspaceReference(url: googleShareURL).exportURL
         )
-        let youtubeURL = try XCTUnwrap(URL(
-            string: "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
-        ))
+        let youtubeURL = try XCTUnwrap(
+            URL(
+                string: "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+            ))
         let youtubeSourceId = try await fixture.store.createSource(
             type: .youtube,
             title: "Video reference",
@@ -151,7 +158,8 @@ final class EpistoriaExportServiceTests: XCTestCase {
         )
         let annotationDrawing = Data([0x41, 0x4e, 0x4e, 0x4f, 0x54])
         annotation.drawingData = annotationDrawing
-        let importedSource = try await fixture.store.payload(SourcePayload.self, id: imported.resourceId)
+        let importedSource = try await fixture.store.payload(
+            SourcePayload.self, id: imported.resourceId)
         let annotationResult = try await fixture.store.createAnnotationEvidence(
             annotation: annotation,
             sourceVersionId: try XCTUnwrap(importedSource.payload.currentVersionId)
@@ -194,21 +202,24 @@ final class EpistoriaExportServiceTests: XCTestCase {
         XCTAssertGreaterThan(validation.fileCount, 12)
         XCTAssertGreaterThan(validation.byteCount, 0)
         XCTAssertEqual(
-            try Data(contentsOf: package.appendingPathComponent(
-                "resources/originals/\(imported.assetId.uuidString.lowercased()).pdf"
-            )),
+            try Data(
+                contentsOf: package.appendingPathComponent(
+                    "resources/originals/\(imported.assetId.uuidString.lowercased()).pdf"
+                )),
             pdf
         )
         XCTAssertEqual(
-            try Data(contentsOf: package.appendingPathComponent(
-                "resources/readable/\(importedCSV.resourceId.uuidString.lowercased()).csv"
-            )),
+            try Data(
+                contentsOf: package.appendingPathComponent(
+                    "resources/readable/\(importedCSV.resourceId.uuidString.lowercased()).csv"
+                )),
             csv
         )
         XCTAssertEqual(
-            try Data(contentsOf: package.appendingPathComponent(
-                "resources/originals/\(importedHTML.assetId.uuidString.lowercased()).html"
-            )),
+            try Data(
+                contentsOf: package.appendingPathComponent(
+                    "resources/originals/\(importedHTML.assetId.uuidString.lowercased()).html"
+                )),
             webHTML
         )
         XCTAssertEqual(
@@ -221,9 +232,10 @@ final class EpistoriaExportServiceTests: XCTestCase {
             "Readable theorem"
         )
         XCTAssertEqual(
-            try Data(contentsOf: package.appendingPathComponent(
-                "resources/originals/\(importedGoogleDocument.assetId.uuidString.lowercased()).docx"
-            )),
+            try Data(
+                contentsOf: package.appendingPathComponent(
+                    "resources/originals/\(importedGoogleDocument.assetId.uuidString.lowercased()).docx"
+                )),
             googleDocument
         )
         XCTAssertEqual(
@@ -245,27 +257,31 @@ final class EpistoriaExportServiceTests: XCTestCase {
             "Video reference\n\nYouTube URL: https://www.youtube.com/watch?v=dQw4w9WgXcQ\n"
         )
         XCTAssertEqual(
-            try Data(contentsOf: package.appendingPathComponent(
-                "notes/drawings/\(richBlockId.uuidString.lowercased()).pkdrawing"
-            )),
+            try Data(
+                contentsOf: package.appendingPathComponent(
+                    "notes/drawings/\(richBlockId.uuidString.lowercased()).pkdrawing"
+                )),
             noteDrawing
         )
         XCTAssertEqual(
-            try Data(contentsOf: package.appendingPathComponent(
-                "notes/rich-text/\(richBlockId.uuidString.lowercased()).rtf"
-            )),
+            try Data(
+                contentsOf: package.appendingPathComponent(
+                    "notes/rich-text/\(richBlockId.uuidString.lowercased()).rtf"
+                )),
             richText
         )
         XCTAssertEqual(
-            try Data(contentsOf: package.appendingPathComponent(
-                "annotation-drawings/\(annotationId.uuidString.lowercased()).pkdrawing"
-            )),
+            try Data(
+                contentsOf: package.appendingPathComponent(
+                    "annotation-drawings/\(annotationId.uuidString.lowercased()).pkdrawing"
+                )),
             annotationDrawing
         )
         XCTAssertEqual(
-            try Data(contentsOf: package.appendingPathComponent(
-                "notes/images/\(importedImage.assetId.uuidString.lowercased()).png"
-            )),
+            try Data(
+                contentsOf: package.appendingPathComponent(
+                    "notes/images/\(importedImage.assetId.uuidString.lowercased()).png"
+                )),
             png
         )
         let canvasAssets = try String(
@@ -273,7 +289,8 @@ final class EpistoriaExportServiceTests: XCTestCase {
             encoding: .utf8
         )
         XCTAssertTrue(canvasAssets.lowercased().contains(imageItemId.uuidString.lowercased()))
-        XCTAssertTrue(canvasAssets.lowercased().contains(importedImage.assetId.uuidString.lowercased()))
+        XCTAssertTrue(
+            canvasAssets.lowercased().contains(importedImage.assetId.uuidString.lowercased()))
         XCTAssertTrue(canvasAssets.contains("notes/images/"))
         let noteRecord = try String(
             contentsOf: package.appendingPathComponent(
@@ -283,10 +300,14 @@ final class EpistoriaExportServiceTests: XCTestCase {
         )
         XCTAssertTrue(noteRecord.contains("\"pageCount\" : 2"))
         XCTAssertTrue(noteRecord.contains("\"canvasPageIndex\" : 1"))
-        let metadata = try String(contentsOf: package.appendingPathComponent("metadata.json"), encoding: .utf8)
-        let taxonomy = try String(contentsOf: package.appendingPathComponent("taxonomy.json"), encoding: .utf8)
-        let knowledge = try String(contentsOf: package.appendingPathComponent("knowledge.json"), encoding: .utf8)
-        let learning = try String(contentsOf: package.appendingPathComponent("learning.json"), encoding: .utf8)
+        let metadata = try String(
+            contentsOf: package.appendingPathComponent("metadata.json"), encoding: .utf8)
+        let taxonomy = try String(
+            contentsOf: package.appendingPathComponent("taxonomy.json"), encoding: .utf8)
+        let knowledge = try String(
+            contentsOf: package.appendingPathComponent("knowledge.json"), encoding: .utf8)
+        let learning = try String(
+            contentsOf: package.appendingPathComponent("learning.json"), encoding: .utf8)
         XCTAssertTrue(metadata.contains("epistoria-export/5"))
         let entities = try String(
             contentsOf: package.appendingPathComponent("entities.json"),
@@ -313,7 +334,8 @@ final class EpistoriaExportServiceTests: XCTestCase {
             )
         }
         XCTAssertTrue(taxonomy.lowercased().contains(topicId.uuidString.lowercased()))
-        XCTAssertTrue(knowledge.lowercased().contains(annotationResult.evidenceId.uuidString.lowercased()))
+        XCTAssertTrue(
+            knowledge.lowercased().contains(annotationResult.evidenceId.uuidString.lowercased()))
         XCTAssertTrue(knowledge.lowercased().contains(conceptLinkId.uuidString.lowercased()))
         XCTAssertTrue(knowledge.contains("knowledge-map/v1"))
         XCTAssertTrue(knowledge.contains("\"knowledgeMaps\""))
@@ -325,8 +347,9 @@ final class EpistoriaExportServiceTests: XCTestCase {
 
         let exportedBytes = try recursiveFileData(in: package)
         XCTAssertFalse(exportedBytes.contains { $0.range(of: fixture.accountKey) != nil })
-        XCTAssertFalse(exportedBytes.compactMap { String(data: $0, encoding: .utf8) }
-            .contains { $0.contains(asset.payload.assetKey) })
+        XCTAssertFalse(
+            exportedBytes.compactMap { String(data: $0, encoding: .utf8) }
+                .contains { $0.contains(asset.payload.assetKey) })
 
         let result = try await fixture.service.exportDecrypted(includingDerivedAI: false)
         XCTAssertTrue(FileManager.default.fileExists(atPath: result.archiveURL.path))
@@ -353,12 +376,14 @@ final class EpistoriaExportServiceTests: XCTestCase {
             sourceId: sourceId,
             sourceVersionId: sourceVersionId,
             chunkIndex: 0,
-            segments: [TranscriptSegment(
-                index: 0,
-                startSeconds: 0,
-                endSeconds: 2,
-                text: "Accepted transcript text."
-            )]
+            segments: [
+                TranscriptSegment(
+                    index: 0,
+                    startSeconds: 0,
+                    endSeconds: 2,
+                    text: "Accepted transcript text."
+                )
+            ]
         )
         _ = try await fixture.database.saveLocal(
             id: chunkId,
@@ -423,12 +448,16 @@ final class EpistoriaExportServiceTests: XCTestCase {
         XCTAssertTrue(knowledge.contains("Owner-corrected transcript text."))
     }
 
-    func testVersionFiveExportRestoresStableRecordsAndHistoricalAssetsIntoCleanAccount() async throws {
+    func testVersionFiveExportRestoresStableRecordsAndHistoricalAssetsIntoCleanAccount()
+        async throws
+    {
         let source = try makeFixture()
         defer { try? FileManager.default.removeItem(at: source.root) }
         let areaId = try await source.store.createArea(name: "Mathematics")
-        let topicId = try await source.store.createTopic(name: "Factorization", primaryAreaId: areaId)
-        let noteId = try await source.store.createNote(title: "Difference of squares", courseId: topicId)
+        let topicId = try await source.store.createTopic(
+            name: "Factorization", primaryAreaId: areaId)
+        let noteId = try await source.store.createNote(
+            title: "Difference of squares", courseId: topicId)
         _ = try await source.store.appendTextBlock(noteId: noteId, text: "a² - b²")
 
         let firstPDF = Data("%PDF-1.4\nfirst immutable version\n%%EOF\n".utf8)
@@ -506,6 +535,59 @@ final class EpistoriaExportServiceTests: XCTestCase {
         let health = try await targetDatabase.dataHealth()
         XCTAssertGreaterThan(health.pendingMutations, 0)
         XCTAssertEqual(health.pendingAssets, 2)
+    }
+
+    func testReadableExportIncludesOnlyReviewedMathAssistance() async throws {
+        let fixture = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let noteId = try await fixture.store.createNote(title: "Synthetic algebra")
+        let sourceId = try await fixture.store.appendTextBlock(noteId: noteId, text: "x² = 4")
+
+        func artifact(expression: String, state: AIArtifactReviewState) -> MathAssistanceArtifact {
+            MathAssistanceArtifact(
+                jobId: UUID(),
+                noteId: noteId,
+                mode: .recognize,
+                generatedAt: Date(timeIntervalSince1970: 1_800_000_000),
+                sourceIds: [sourceId],
+                trace: ProviderTrace(
+                    provider: "deterministic-test",
+                    model: "fixture-math-v1",
+                    promptVersion: "math-assistance/v1"
+                ),
+                response: MathAssistanceResponse(
+                    recognizedExpression: expression,
+                    interpretation: "Synthetic reviewed expression.",
+                    confidence: 1,
+                    citedSourceIds: [sourceId]
+                ),
+                reviewState: state,
+                reviewedAt: Date(timeIntervalSince1970: 1_800_000_100)
+            )
+        }
+
+        _ = try await fixture.store.save(
+            payload: artifact(expression: "accepted-expression", state: .accepted),
+            parentId: noteId,
+            relationIds: [sourceId]
+        )
+        _ = try await fixture.store.save(
+            payload: artifact(expression: "rejected-expression", state: .rejected),
+            parentId: noteId,
+            relationIds: [sourceId]
+        )
+
+        let package = try await fixture.service.prepareDecryptedDirectoryForTesting(
+            includingDerivedAI: true
+        )
+        defer { try? FileManager.default.removeItem(at: package.deletingLastPathComponent()) }
+        let artifacts = try String(
+            contentsOf: package.appendingPathComponent("ai-artifacts.json"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(artifacts.contains("accepted-expression"))
+        XCTAssertFalse(artifacts.contains("rejected-expression"))
     }
 
     func testPortableImportRejectsNonEmptyTargetWithoutChangingIt() async throws {
@@ -656,13 +738,15 @@ final class EpistoriaExportServiceTests: XCTestCase {
     }
 
     private func recursiveFileData(in directory: URL) throws -> [Data] {
-        guard let enumerator = FileManager.default.enumerator(
-            at: directory,
-            includingPropertiesForKeys: [.isRegularFileKey]
-        ) else { return [] }
+        guard
+            let enumerator = FileManager.default.enumerator(
+                at: directory,
+                includingPropertiesForKeys: [.isRegularFileKey]
+            )
+        else { return [] }
         return try enumerator.compactMap { value in
             guard let url = value as? URL,
-                  try url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile == true
+                try url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile == true
             else { return nil }
             return try Data(contentsOf: url, options: .mappedIfSafe)
         }

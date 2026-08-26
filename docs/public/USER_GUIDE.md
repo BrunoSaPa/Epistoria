@@ -97,6 +97,25 @@ area. The PDF includes paper appearance, typed text, math symbols, vector shapes
 Pencil ink. It is for reading, printing, or sharing. It is not an Epistoria backup and cannot be
 imported into the app.
 
+## Work with handwritten mathematics
+
+1. Open a note and select **Math** in the left tool rail.
+2. Draw around the handwritten equation, calculation, graph, or attempted solution.
+3. Select **Analyze**.
+4. Choose **Recognize equation**, **Worked steps**, **Graph**, or **Diagnose error**.
+5. Add an optional instruction when the intended task or notation is unclear.
+6. Select **Preview what leaves your Mac**. Check the number of selected items, nearby text items,
+   visual crops, and approximate tokens.
+7. Select **Approve and queue**. Continue writing while the trusted Mac processes the request.
+8. Open the notebook actions menu and select **Math results**.
+9. Check the recognized expression, confidence, uncertainties, every worked step, and every
+   correction. For a graph, confirm the function and domain.
+10. Accept, edit, or reject the result. Only accepted or edited results can be inserted.
+11. Select **Insert expression** or **Insert worked explanation** to create a new note object.
+
+The selected Pencil strokes remain unchanged. Epistoria plots supported graph expressions on the
+iPad and does not execute provider-supplied code. Recognition is not a proof of correctness.
+
 ## Organize notes
 
 Notebook contains:

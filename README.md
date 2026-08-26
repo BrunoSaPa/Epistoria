@@ -50,6 +50,8 @@ The app also provides:
   changes its next activity only from reviewed learning signals.
 - A per-Topic Concept and Evidence map with durable encrypted arrangement, exact Source return
   links, note reuse, typed relationships, and Tutor entry.
+- Handwritten mathematics tools for equation recognition, worked steps, local graphing, and error
+  diagnosis. Results remain separate from the original Pencil strokes until reviewed.
 
 The learning system stores durable source-linked flashcards, practice tests, review history, and a
 **Study Next** queue. Accepted cards and tests are notebook records, not temporary chat output. A

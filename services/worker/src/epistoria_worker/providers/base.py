@@ -7,6 +7,8 @@ from ..models import (
     FreeResponseFeedbackResponseV1,
     LearningGenerationRequestV1,
     LearningGenerationResponseV1,
+    MathAssistanceRequestV1,
+    MathAssistanceResponseV1,
     MediaTranscriptionResponseV1,
     NoteQueryRequestV1,
     NoteQueryResponseV1,
@@ -45,6 +47,12 @@ class DigestProvider(Protocol):
         self, request: NoteQueryRequestV1
     ) -> tuple[NoteQueryResponseV1, ProviderTraceV1]:
         """Answer a focused question about a lasso-selected note region."""
+        ...
+
+    def generate_math_assistance(
+        self, request: MathAssistanceRequestV1
+    ) -> tuple[MathAssistanceResponseV1, ProviderTraceV1]:
+        """Recognize and explain selected mathematics without modifying notebook strokes."""
         ...
 
     def generate_free_response_feedback(

@@ -8,6 +8,8 @@
     { "$ref": "#/$defs/pdfExtractionRequest" },
     { "$ref": "#/$defs/noteQueryRequest" },
     { "$ref": "#/$defs/noteQueryResponse" },
+    { "$ref": "#/$defs/mathAssistanceRequest" },
+    { "$ref": "#/$defs/mathAssistanceResponse" },
     { "$ref": "#/$defs/sourceAnalysisRequest" },
     { "$ref": "#/$defs/sourceQueryRequest" },
     { "$ref": "#/$defs/sourceGuideResponse" },
@@ -255,6 +257,81 @@
           "type": "array", "maxItems": 5,
           "items": { "type": "string", "maxLength": 500 }
         }
+      }
+    },
+    "mathGraphDomain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["minimumX", "maximumX"],
+      "properties": {
+        "minimumX": { "type": "number", "minimum": -1000000, "maximum": 1000000 },
+        "maximumX": { "type": "number", "minimum": -1000000, "maximum": 1000000 }
+      }
+    },
+    "mathWorkedStep": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "expression", "explanation"],
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "expression": { "type": "string", "minLength": 1, "maxLength": 2000 },
+        "explanation": { "type": "string", "minLength": 1, "maxLength": 4000 }
+      }
+    },
+    "mathErrorDiagnosis": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "observed", "explanation", "correction"],
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "kind": { "enum": ["RECOGNITION", "NOTATION", "CONCEPTUAL", "METHOD", "ALGEBRA", "ARITHMETIC", "VERIFICATION"] },
+        "observed": { "type": "string", "minLength": 1, "maxLength": 2000 },
+        "explanation": { "type": "string", "minLength": 1, "maxLength": 4000 },
+        "correction": { "type": "string", "minLength": 1, "maxLength": 2000 }
+      }
+    },
+    "mathAssistanceRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "accountId", "jobId", "noteId", "mode", "outputLanguage", "selectionSources", "contextSources", "disclosureAcknowledged"],
+      "properties": {
+        "schemaVersion": { "const": "math-assistance-request/v1" },
+        "accountId": { "$ref": "#/$defs/uuid" },
+        "jobId": { "$ref": "#/$defs/uuid" },
+        "noteId": { "$ref": "#/$defs/uuid" },
+        "noteTitle": { "type": ["string", "null"], "maxLength": 500 },
+        "mode": { "enum": ["RECOGNIZE", "WORKED_STEPS", "GRAPH", "DIAGNOSE"] },
+        "learnerInstructions": { "type": ["string", "null"], "maxLength": 2000 },
+        "outputLanguage": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "selectionSources": {
+          "type": "array", "minItems": 1, "maxItems": 8,
+          "items": { "$ref": "#/$defs/noteQuerySource" }
+        },
+        "contextSources": {
+          "type": "array", "minItems": 0, "maxItems": 40,
+          "items": { "$ref": "#/$defs/noteQuerySource" }
+        },
+        "disclosureAcknowledged": { "const": true },
+        "providerRoute": { "$ref": "#/$defs/providerRoute" }
+      }
+    },
+    "mathAssistanceResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "recognizedExpression", "latex", "interpretation", "steps", "diagnoses", "confidence", "uncertainties", "citedSourceIds"],
+      "properties": {
+        "schemaVersion": { "const": "math-assistance-response/v1" },
+        "recognizedExpression": { "type": "string", "minLength": 1, "maxLength": 2000 },
+        "latex": { "type": "string", "maxLength": 4000 },
+        "interpretation": { "type": "string", "minLength": 1, "maxLength": 6000 },
+        "steps": { "type": "array", "maxItems": 40, "items": { "$ref": "#/$defs/mathWorkedStep" } },
+        "finalAnswer": { "type": ["string", "null"], "maxLength": 2000 },
+        "diagnoses": { "type": "array", "maxItems": 20, "items": { "$ref": "#/$defs/mathErrorDiagnosis" } },
+        "graphExpression": { "type": ["string", "null"], "maxLength": 500 },
+        "graphDomain": { "anyOf": [{ "$ref": "#/$defs/mathGraphDomain" }, { "type": "null" }] },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "uncertainties": { "type": "array", "maxItems": 12, "items": { "type": "string", "maxLength": 500 } },
+        "citedSourceIds": { "type": "array", "minItems": 1, "maxItems": 48, "items": { "$ref": "#/$defs/uuid" } }
       }
     },
     "sessionDigestRequest": {

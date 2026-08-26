@@ -509,6 +509,124 @@ class NoteQueryArtifactV1(ContractModel):
     response: NoteQueryResponseV1
 
 
+MathAssistanceMode = Literal["RECOGNIZE", "WORKED_STEPS", "GRAPH", "DIAGNOSE"]
+MathErrorKind = Literal[
+    "RECOGNITION",
+    "NOTATION",
+    "CONCEPTUAL",
+    "METHOD",
+    "ALGEBRA",
+    "ARITHMETIC",
+    "VERIFICATION",
+]
+
+
+class MathGraphDomainV1(ContractModel):
+    minimum_x: float = Field(ge=-1_000_000, le=1_000_000)
+    maximum_x: float = Field(ge=-1_000_000, le=1_000_000)
+
+    @model_validator(mode="after")
+    def validate_span(self) -> MathGraphDomainV1:
+        if self.maximum_x - self.minimum_x < 0.000_001:
+            raise ValueError("graph domain must have a positive span")
+        return self
+
+
+class MathWorkedStepV1(ContractModel):
+    id: UUID
+    expression: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2_000)
+    ]
+    explanation: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=4_000)
+    ]
+
+
+class MathErrorDiagnosisV1(ContractModel):
+    id: UUID
+    kind: MathErrorKind
+    observed: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2_000)
+    ]
+    explanation: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=4_000)
+    ]
+    correction: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2_000)
+    ]
+
+
+class MathAssistanceRequestV1(ContractModel):
+    schema_version: Literal["math-assistance-request/v1"] = "math-assistance-request/v1"
+    account_id: UUID
+    job_id: UUID
+    note_id: UUID
+    note_title: ShortText | None = None
+    mode: MathAssistanceMode
+    learner_instructions: Annotated[
+        str | None, StringConstraints(strip_whitespace=True, max_length=2_000)
+    ] = None
+    output_language: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=64)
+    ]
+    selection_sources: list[NoteQuerySourceV1] = Field(min_length=1, max_length=8)
+    context_sources: list[NoteQuerySourceV1] = Field(default_factory=list, max_length=40)
+    disclosure_acknowledged: Literal[True]
+    provider_route: ProviderRouteSnapshotV1 | None = None
+
+    @model_validator(mode="after")
+    def validate_source_ids_unique(self) -> MathAssistanceRequestV1:
+        ids = [source.source_id for source in self.selection_sources + self.context_sources]
+        if len(ids) != len(set(ids)):
+            raise ValueError("source IDs must be unique across selection and context")
+        return self
+
+
+class MathAssistanceResponseV1(ContractModel):
+    schema_version: Literal["math-assistance-response/v1"] = "math-assistance-response/v1"
+    recognized_expression: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2_000)
+    ]
+    latex: Annotated[str, StringConstraints(strip_whitespace=True, max_length=4_000)] = ""
+    interpretation: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=6_000)
+    ]
+    steps: list[MathWorkedStepV1] = Field(default_factory=list, max_length=40)
+    final_answer: Annotated[
+        str | None, StringConstraints(strip_whitespace=True, max_length=2_000)
+    ] = None
+    diagnoses: list[MathErrorDiagnosisV1] = Field(default_factory=list, max_length=20)
+    graph_expression: Annotated[
+        str | None, StringConstraints(strip_whitespace=True, max_length=500)
+    ] = None
+    graph_domain: MathGraphDomainV1 | None = None
+    confidence: float = Field(ge=0, le=1)
+    uncertainties: list[ShortText] = Field(default_factory=list, max_length=12)
+    cited_source_ids: list[UUID] = Field(min_length=1, max_length=48)
+
+    @model_validator(mode="after")
+    def validate_graph_pair(self) -> MathAssistanceResponseV1:
+        if (self.graph_expression is None) != (self.graph_domain is None):
+            raise ValueError("graphExpression and graphDomain must be supplied together")
+        return self
+
+
+class MathAssistanceArtifactV1(ContractModel):
+    schema_version: Literal["ai-artifact/math-assistance/v1"] = (
+        "ai-artifact/math-assistance/v1"
+    )
+    job_id: UUID
+    note_id: UUID
+    mode: MathAssistanceMode
+    learner_instructions: Annotated[
+        str | None, StringConstraints(strip_whitespace=True, max_length=2_000)
+    ] = None
+    generated_at: AwareDatetime
+    source_ids: list[UUID] = Field(min_length=1, max_length=48)
+    trace: ProviderTraceV1
+    response: MathAssistanceResponseV1
+
+
 FeedbackEvidenceKind = Literal["QUESTION_SNAPSHOT", "NOTE_BLOCK", "EVIDENCE"]
 
 
@@ -994,6 +1112,7 @@ class AIJobLease(ContractModel):
         "SESSION_DIGEST",
         "PDF_EXTRACTION",
         "NOTE_QUERY",
+        "MATH_ASSISTANCE",
         "SOURCE_ANALYSIS",
         "SOURCE_QUERY",
         "SOURCE_EXTRACTION",
