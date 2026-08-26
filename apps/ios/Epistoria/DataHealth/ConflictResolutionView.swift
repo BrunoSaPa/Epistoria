@@ -246,6 +246,8 @@ struct ConflictResolutionView: View {
             value = (try? CanonicalJSON.decode(EvidencePayload.self, from: content).excerpt) ?? "Evidence"
         case .concept:
             value = (try? CanonicalJSON.decode(ConceptPayload.self, from: content).name) ?? "Concept"
+        case .knowledgeMap:
+            value = "Knowledge Map arrangement"
         case .studyGoal:
             value = (try? CanonicalJSON.decode(StudyGoalPayload.self, from: content).title) ?? "Study goal"
         case .unresolvedQuestion:

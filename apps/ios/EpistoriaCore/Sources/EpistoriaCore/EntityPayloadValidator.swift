@@ -33,6 +33,7 @@ public enum EntityPayloadValidator {
         case .conceptEvidence:
             _ = try CanonicalJSON.decode(ConceptEvidenceRelationPayload.self, from: content)
         case .conceptLink: _ = try CanonicalJSON.decode(ConceptLinkPayload.self, from: content)
+        case .knowledgeMap: _ = try CanonicalJSON.decode(KnowledgeMapPayload.self, from: content)
         case .studyGoal: _ = try CanonicalJSON.decode(StudyGoalPayload.self, from: content)
         case .unresolvedQuestion:
             _ = try CanonicalJSON.decode(UnresolvedQuestionPayload.self, from: content)
@@ -109,6 +110,7 @@ public enum EntityPayloadValidator {
         case .concept: ["concept/v1"]
         case .conceptEvidence: ["concept-evidence/v1"]
         case .conceptLink: ["concept-link/v1"]
+        case .knowledgeMap: ["knowledge-map/v1"]
         case .studyGoal: ["study-goal/v1"]
         case .unresolvedQuestion: ["unresolved-question/v1"]
         case .sessionActivity: ["session-activity/v1"]

@@ -111,6 +111,9 @@ Completed:
 23. The Adaptive Tutor keeps encrypted session transcripts, uses cited automatic hybrid-search
     excerpts, adapts its next activity from accepted learning signals, and requires bounded
     provider approval. It is available from Study, Topics, and the notebook.
+24. Each Topic has an interactive Concept and Evidence map. Node arrangement is encrypted and
+    durable. Evidence can open its exact Source, appear in a note, show its typed Concept
+    relationships, or start a grounded Tutor session.
 
 Next stages:
 
@@ -124,9 +127,6 @@ the app.
 
 ### Next
 
-- Add an interactive Concept and Evidence map. One Evidence item should open as source material,
-  a notebook object, a Concept relationship, or a study prompt. This direction is informed by
-  MarginNote.
 - Add deadline-aware learning plans. A plan should use an exam or target date, remaining coverage,
   daily workload, missed-day catch-up, and an explanation of readiness. This direction is informed
   by RemNote.

@@ -172,6 +172,18 @@ final class EpistoriaExportServiceTests: XCTestCase {
             rationale: "Factoring can expose roots.",
             evidenceIds: [annotationResult.evidenceId]
         )
+        _ = try await fixture.store.linkConcept(
+            firstConceptId,
+            toEvidence: annotationResult.evidenceId,
+            relation: .supporting
+        )
+        try await fixture.store.saveKnowledgeMapPlacement(
+            topicId: topicId,
+            nodeId: firstConceptId,
+            kind: .concept,
+            x: 420,
+            y: 360
+        )
 
         let package = try await fixture.service.prepareDecryptedDirectoryForTesting(
             includingDerivedAI: false
@@ -303,6 +315,9 @@ final class EpistoriaExportServiceTests: XCTestCase {
         XCTAssertTrue(taxonomy.lowercased().contains(topicId.uuidString.lowercased()))
         XCTAssertTrue(knowledge.lowercased().contains(annotationResult.evidenceId.uuidString.lowercased()))
         XCTAssertTrue(knowledge.lowercased().contains(conceptLinkId.uuidString.lowercased()))
+        XCTAssertTrue(knowledge.contains("knowledge-map/v1"))
+        XCTAssertTrue(knowledge.contains("\"knowledgeMaps\""))
+        XCTAssertTrue(knowledge.contains("\"x\" : 420"))
         XCTAssertTrue(knowledge.contains("Factoring can expose roots."))
         XCTAssertTrue(learning.contains("Review factoring"))
         XCTAssertTrue(learning.contains("I would identify the leading coefficient."))

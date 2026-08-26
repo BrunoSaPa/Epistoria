@@ -48,6 +48,8 @@ The app also provides:
   endpoints, with device Keychain storage and encrypted trusted-Mac configuration.
 - An Adaptive Tutor that keeps durable encrypted transcripts, cites frozen Source Versions, and
   changes its next activity only from reviewed learning signals.
+- A per-Topic Concept and Evidence map with durable encrypted arrangement, exact Source return
+  links, note reuse, typed relationships, and Tutor entry.
 
 The learning system stores durable source-linked flashcards, practice tests, review history, and a
 **Study Next** queue. Accepted cards and tests are notebook records, not temporary chat output. A

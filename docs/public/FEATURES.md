@@ -165,6 +165,21 @@ This feature requires a paired Mac and a configured AI provider. It is optional.
 
 ## Learning
 
+### Concept and Evidence map
+
+- Open a Topic's knowledge map from its dashboard.
+- See active Concepts, connected Evidence, Concept relationships, and Concept-to-Evidence
+  relationships in one workspace.
+- Drag nodes directly and keep the encrypted arrangement after relaunch and synchronization.
+- Pan and zoom the map, hide Evidence temporarily, reset the arrangement, or use a linear List
+  view.
+- Select Evidence to see its typed locator and open the frozen Source Version. PDF pages and media
+  times open at the saved position.
+- Insert the same Evidence into a Topic note without copying the Evidence record.
+- Open existing note backlinks, inspect connected Concepts, or start a grounded Tutor session from
+  the selected Evidence.
+- Add and remove typed Concept and Evidence connections without deleting either underlying item.
+
 ### Adaptive Tutor
 
 - Start a Learning Guide from Study, a Topic, or the persistent notebook tool rail.

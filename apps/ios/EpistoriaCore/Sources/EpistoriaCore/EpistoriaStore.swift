@@ -170,7 +170,7 @@ public enum EntitySearchIndexer {
                 else { return nil }
                 return SearchDocument(title: "AI artifact", body: text(in: object).joined(separator: "\n"))
             case .topicArea, .collectionItem, .sessionNote, .sessionResource, .sourceVersion,
-                 .conceptEvidence, .conceptLink, .sessionActivity, .flashcardDeck, .flashcard,
+                 .conceptEvidence, .conceptLink, .knowledgeMap, .sessionActivity, .flashcardDeck, .flashcard,
                  .flashcardReview, .topicScopeSnapshot, .testBlueprint, .testAttempt,
                  .testResponse, .recommendationResponse, .automationGrant:
                 return nil
@@ -2464,6 +2464,92 @@ public actor EpistoriaStore {
         )
     }
 
+    public func knowledgeMap(
+        topicId: UUID
+    ) async throws -> IdentifiedPayload<KnowledgeMapPayload>? {
+        _ = try await topic(id: topicId)
+        return try await list(KnowledgeMapPayload.self, parentId: topicId)
+            .filter { $0.payload.topicId == topicId }
+            .sorted { $0.payload.updatedAt > $1.payload.updatedAt }
+            .first
+    }
+
+    /// Saves only one node's visual position. Concepts, Evidence, and relationships remain
+    /// independent records and are never rewritten by a map gesture.
+    public func saveKnowledgeMapPlacement(
+        topicId: UUID,
+        nodeId: UUID,
+        kind: KnowledgeMapNodeKind,
+        x: Double,
+        y: Double,
+        at date: Date = .now
+    ) async throws {
+        _ = try await topic(id: topicId)
+        switch kind {
+        case .concept:
+            let concept = try await payload(ConceptPayload.self, id: nodeId)
+            guard concept.payload.topicIds.contains(topicId) else { throw StoreError.relationshipNotFound }
+        case .evidence:
+            _ = try await payload(EvidencePayload.self, id: nodeId)
+            let conceptIds = Set(try await list(ConceptPayload.self)
+                .filter { $0.payload.topicIds.contains(topicId) }
+                .map(\.id))
+            let isConnected = try await list(ConceptEvidenceRelationPayload.self).contains {
+                $0.payload.evidenceId == nodeId && conceptIds.contains($0.payload.conceptId)
+            }
+            guard isConnected else { throw StoreError.relationshipNotFound }
+        }
+        let boundedX = min(max(x.isFinite ? x : KnowledgeMapProjectionBuilder.worldWidth / 2, 90),
+                           KnowledgeMapProjectionBuilder.worldWidth - 90)
+        let boundedY = min(max(y.isFinite ? y : KnowledgeMapProjectionBuilder.worldHeight / 2, 70),
+                           KnowledgeMapProjectionBuilder.worldHeight - 70)
+        if var map = try await knowledgeMap(topicId: topicId) {
+            map.payload.placements.removeAll { $0.nodeId == nodeId }
+            map.payload.placements.append(KnowledgeMapNodePlacement(
+                nodeId: nodeId,
+                kind: kind,
+                x: boundedX,
+                y: boundedY
+            ))
+            map.payload.placements.sort { $0.nodeId.uuidString < $1.nodeId.uuidString }
+            map.payload.updatedAt = date
+            _ = try await save(
+                id: map.id,
+                payload: map.payload,
+                parentId: topicId,
+                relationIds: [topicId] + map.payload.placements.map(\.nodeId)
+            )
+        } else {
+            let payload = KnowledgeMapPayload(
+                topicId: topicId,
+                placements: [KnowledgeMapNodePlacement(
+                    nodeId: nodeId,
+                    kind: kind,
+                    x: boundedX,
+                    y: boundedY
+                )],
+                now: date
+            )
+            _ = try await save(
+                payload: payload,
+                parentId: topicId,
+                relationIds: [topicId, nodeId]
+            )
+        }
+    }
+
+    public func resetKnowledgeMapLayout(topicId: UUID, at date: Date = .now) async throws {
+        guard var map = try await knowledgeMap(topicId: topicId) else { return }
+        map.payload.placements = []
+        map.payload.updatedAt = date
+        _ = try await save(
+            id: map.id,
+            payload: map.payload,
+            parentId: topicId,
+            relationIds: [topicId]
+        )
+    }
+
     @discardableResult
     public func linkConcept(
         _ conceptId: UUID,
@@ -2472,6 +2558,13 @@ public actor EpistoriaStore {
     ) async throws -> UUID {
         _ = try await payload(ConceptPayload.self, id: conceptId)
         _ = try await payload(EvidencePayload.self, id: evidenceId)
+        if let existing = try await list(ConceptEvidenceRelationPayload.self).first(where: {
+            $0.payload.conceptId == conceptId
+                && $0.payload.evidenceId == evidenceId
+                && $0.payload.relation == relation
+        }) {
+            return existing.id
+        }
         return try await save(
             payload: ConceptEvidenceRelationPayload(
                 conceptId: conceptId,
@@ -2481,6 +2574,34 @@ public actor EpistoriaStore {
             parentId: conceptId,
             relationIds: [conceptId, evidenceId]
         )
+    }
+
+    public func updateConceptEvidenceRelation(
+        id: UUID,
+        relation: ConceptEvidenceKind,
+        at date: Date = .now
+    ) async throws {
+        var value = try await payload(ConceptEvidenceRelationPayload.self, id: id)
+        let duplicate = try await list(ConceptEvidenceRelationPayload.self).contains {
+            $0.id != id
+                && $0.payload.conceptId == value.payload.conceptId
+                && $0.payload.evidenceId == value.payload.evidenceId
+                && $0.payload.relation == relation
+        }
+        guard !duplicate else { throw StoreError.invalidConceptLink }
+        value.payload.relation = relation
+        value.payload.updatedAt = date
+        _ = try await save(
+            id: id,
+            payload: value.payload,
+            parentId: value.payload.conceptId,
+            relationIds: [value.payload.conceptId, value.payload.evidenceId]
+        )
+    }
+
+    public func removeConceptEvidenceRelation(id: UUID, at date: Date = .now) async throws {
+        _ = try await payload(ConceptEvidenceRelationPayload.self, id: id)
+        try await database.deleteLocal(id: id, modifiedAt: date)
     }
 
     /// Creates one durable typed edge between two Concepts. Identical edges are idempotent so a

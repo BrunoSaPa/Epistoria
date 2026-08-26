@@ -175,6 +175,33 @@ When generated cards, questions, Concepts, or Concept connections return:
 The original generated response remains available for provenance. The reviewed selection is
 encrypted and remains available after relaunch. Acceptance cannot be repeated to create duplicates.
 
+## Use the Concept and Evidence map
+
+1. Open **Topics**, select a Topic, then select **Knowledge map**.
+2. Select **Add connection** to connect two Concepts or connect Evidence to a Concept.
+3. Choose a typed relationship. Concept-to-Evidence choices include supporting, contradicting,
+   example, prerequisite, and application.
+4. Drag a node to arrange the map. The position saves when the drag ends. Moving a node does not
+   edit or duplicate its Concept or Evidence record.
+5. Pan with one finger or pointer scrolling. Pinch to zoom, or use **Map options → Zoom in** and
+   **Zoom out**.
+6. Turn **Evidence** off to review only Concept relationships. Turn it on to restore the Evidence
+   nodes.
+7. Select a node to open the inspector. Select a connected item to move the inspector to that
+   item.
+8. For Evidence, review the displayed locator and select **Open exact Source** to open its frozen
+   Source Version. PDF pages and media times open at the saved position.
+9. Select **Add to note** to insert a reference to the same Evidence record in a Topic note. Select
+   an existing note backlink to open that Evidence object in its note.
+10. Select **Ask Tutor** to start a Topic-scoped Tutor with that Evidence prioritized for grounding.
+11. Use a connection menu to remove only the relationship. The Concepts and Evidence remain.
+12. Select **List** for a linear representation with the same nodes, relationships, and actions.
+13. Use **Map options → Reset arrangement** to restore the deterministic layout without deleting
+    knowledge records.
+
+Map arrangement is encrypted and included in readable export. The map works offline and does not
+require an AI provider. Tutor requests still use the Tutor approval and provider boundaries.
+
 ## Use Study
 
 Study contains Tutor, Study Next, Week, Sessions, Flashcards, Tests, and History.

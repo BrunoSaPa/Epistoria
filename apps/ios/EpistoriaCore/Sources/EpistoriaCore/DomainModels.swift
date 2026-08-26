@@ -23,6 +23,7 @@ public enum EntityType: String, Codable, CaseIterable, Sendable {
     case concept = "CONCEPT"
     case conceptEvidence = "CONCEPT_EVIDENCE"
     case conceptLink = "CONCEPT_LINK"
+    case knowledgeMap = "KNOWLEDGE_MAP"
     case studyGoal = "STUDY_GOAL"
     case unresolvedQuestion = "UNRESOLVED_QUESTION"
     case sessionActivity = "SESSION_ACTIVITY"

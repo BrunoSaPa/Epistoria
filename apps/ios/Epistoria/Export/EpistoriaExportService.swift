@@ -83,6 +83,7 @@ actor EpistoriaExportService {
         var concepts: [Record<ConceptPayload>]
         var conceptEvidence: [Record<ConceptEvidenceRelationPayload>]
         var conceptLinks: [Record<ConceptLinkPayload>]
+        var knowledgeMaps: [Record<KnowledgeMapPayload>]
     }
 
     private struct LearningRecords: Codable {
@@ -630,13 +631,15 @@ actor EpistoriaExportService {
         async let concepts = store.list(ConceptPayload.self)
         async let conceptEvidence = store.list(ConceptEvidenceRelationPayload.self)
         async let links = store.list(ConceptLinkPayload.self)
+        async let maps = store.list(KnowledgeMapPayload.self)
         let value = try await KnowledgeRecords(
             sourceVersions: versions.map { Record(id: $0.id, payload: $0.payload) },
             evidence: evidence.map { Record(id: $0.id, payload: $0.payload) },
             transcriptCorrections: transcriptCorrections.map { Record(id: $0.id, payload: $0.payload) },
             concepts: concepts.map { Record(id: $0.id, payload: $0.payload) },
             conceptEvidence: conceptEvidence.map { Record(id: $0.id, payload: $0.payload) },
-            conceptLinks: links.map { Record(id: $0.id, payload: $0.payload) }
+            conceptLinks: links.map { Record(id: $0.id, payload: $0.payload) },
+            knowledgeMaps: maps.map { Record(id: $0.id, payload: $0.payload) }
         )
         try write(value, to: root.appendingPathComponent("knowledge.json"))
     }

@@ -32,6 +32,7 @@
 		5BA923E33DD56FC8E15298F9 /* NotePDFExportServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F5E9EDA6F3C5E53A7A9D068 /* NotePDFExportServiceTests.swift */; };
 		5CDC0722C68F41F50FB24C69 /* TopicStudioView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22B2DB2C7A2173AC08F7A0DE /* TopicStudioView.swift */; };
 		63483CFD426EFD5BD4059DFB /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 9DC037239C3AAD04DDDC7E98 /* PrivacyInfo.xcprivacy */; };
+		75473A2695DFA6965D56A438 /* ConceptEvidenceMapView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F37F52121145FD6B5212E2C /* ConceptEvidenceMapView.swift */; };
 		7B47D68D383BA5605CF24828 /* TopicDashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE33F134D1461DBC505B80B8 /* TopicDashboardView.swift */; };
 		95F88D19371F947D93F4BC43 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21D6211A0941084661F0FDEA /* SettingsView.swift */; };
 		9608B8B5525AE37248D76356 /* EpistoriaCore in Frameworks */ = {isa = PBXBuildFile; productRef = DBFCA34805D80887859E9A10 /* EpistoriaCore */; };
@@ -105,6 +106,7 @@
 		7931BB0B2776308E4D8C7656 /* LibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryView.swift; sourceTree = "<group>"; };
 		84F79068F407B2C7BBC367E9 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		8935DE5EF28714C1897ECF7F /* AdaptiveTutorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdaptiveTutorView.swift; sourceTree = "<group>"; };
+		8F37F52121145FD6B5212E2C /* ConceptEvidenceMapView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConceptEvidenceMapView.swift; sourceTree = "<group>"; };
 		9168A7AD8732315016FE923D /* AIProviderProfileStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIProviderProfileStore.swift; sourceTree = "<group>"; };
 		98E92AF31F99B4E43AAC5CFF /* EpistoriaApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EpistoriaApp.swift; sourceTree = "<group>"; };
 		994FB1067AAB271804368E81 /* AppRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppRootView.swift; sourceTree = "<group>"; };
@@ -233,6 +235,7 @@
 		53829770C0584AF790B8B3A1 /* Topics */ = {
 			isa = PBXGroup;
 			children = (
+				8F37F52121145FD6B5212E2C /* ConceptEvidenceMapView.swift */,
 				DE33F134D1461DBC505B80B8 /* TopicDashboardView.swift */,
 				22B2DB2C7A2173AC08F7A0DE /* TopicStudioView.swift */,
 				6A4D9E067E22ADC8DE6945B5 /* TopicsView.swift */,
@@ -484,6 +487,7 @@
 				35EF6CB34C88412ED6ED3677 /* AppModel.swift in Sources */,
 				B1545FB1ED851A4A6F5AA038 /* AppRootView.swift in Sources */,
 				4295FF11D9057AB5501F087E /* CollectionDetailView.swift in Sources */,
+				75473A2695DFA6965D56A438 /* ConceptEvidenceMapView.swift in Sources */,
 				DF9CD341ABD3A514D2FF6BB3 /* ConflictResolutionView.swift in Sources */,
 				1969E734A69DCBD13E50C0AF /* ContinuousNotebookPages.swift in Sources */,
 				426067C698D45A2AD8D2CED3 /* DataHealthView.swift in Sources */,

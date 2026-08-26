@@ -1,5 +1,15 @@
 # Release notes
 
+## Concept and Evidence map
+
+- Added one interactive knowledge map for each Topic.
+- Added direct node arrangement, pinch and button zoom, typed connection labels, and a linear List
+  view.
+- Added frozen Source navigation, note insertion and backlinks, Concept relationship review, and
+  grounded Tutor entry from Evidence.
+- Stored only the encrypted node arrangement. Concepts, Evidence, and typed relationships remain
+  independent durable records.
+
 ## Adaptive Tutor
 
 - Added durable encrypted Tutor sessions, transcripts, cited responses, confidence, bounded
