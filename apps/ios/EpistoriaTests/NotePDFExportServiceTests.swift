@@ -136,6 +136,58 @@ final class NotePDFExportServiceTests: XCTestCase {
         XCTAssertLessThanOrEqual(max(bounds.width, bounds.height), 14_400)
     }
 
+    func testAcceptedOCRAddsSearchableTextWithoutChangingInk() async throws {
+        let fixture = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let noteID = try await fixture.store.createNote(title: "OCR export")
+        let inkID = try await fixture.store.appendCanvasInkLayer(noteId: noteID, pageIndex: 0)
+        var ink = try await fixture.store.payload(NoteBlockPayload.self, id: inkID)
+        let originalDrawing = makeDrawing().dataRepresentation()
+        ink.payload.drawingData = originalDrawing
+        _ = try await fixture.store.save(
+            id: inkID,
+            payload: ink.payload,
+            parentId: noteID,
+            relationIds: [noteID]
+        )
+        let savedInk = try await fixture.store.payload(NoteBlockPayload.self, id: inkID)
+        let request = LocalOCRRequest(
+            accountId: UUID(),
+            targetKind: .notebookRegion,
+            targetId: inkID,
+            parentId: noteID,
+            noteId: noteID,
+            inputRevision: savedInk.payload.ocrInputRevision,
+            pageNumber: 1,
+            imageData: Data("synthetic crop".utf8),
+            mode: .text
+        )
+        let artifactID = try await fixture.store.saveOCRArtifact(
+            request: request,
+            response: LocalOCRResponse(
+                engine: .deterministic,
+                engineVersion: "fixture/v1",
+                regions: [
+                    LocalOCRRegion(
+                        kind: .text,
+                        text: "accepted handwritten factorization",
+                        rectangles: [
+                            AnnotationRectangle(x: 0.1, y: 0.2, width: 0.6, height: 0.08)
+                        ]
+                    )
+                ]
+            )
+        )
+        try await fixture.store.reviewOCRArtifact(id: artifactID, state: .accepted)
+
+        let result = try await fixture.service.export(noteId: noteID)
+        let page = try XCTUnwrap(PDFDocument(url: result.fileURL)?.page(at: 0))
+
+        XCTAssertTrue(page.string?.contains("accepted handwritten factorization") == true)
+        let unchanged = try await fixture.store.payload(NoteBlockPayload.self, id: inkID)
+        XCTAssertEqual(unchanged.payload.drawingData, originalDrawing)
+    }
+
     func testCleanupRefusesPDFOutsideOwnedTemporaryLocation() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("EpistoriaPDFCleanupTests-\(UUID().uuidString)", isDirectory: true)

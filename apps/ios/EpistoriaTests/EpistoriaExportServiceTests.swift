@@ -15,6 +15,73 @@ final class EpistoriaExportServiceTests: XCTestCase {
         var service: EpistoriaExportService
     }
 
+    func testAcceptedLocalOCRAndCorrectionsExportWithoutProviderArtifacts() async throws {
+        let fixture = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let noteID = try await fixture.store.createNote(title: "OCR portability")
+        let blockID = try await fixture.store.appendHandwritingBlock(noteId: noteID)
+        let inputRevision = try await fixture.store.payload(NoteBlockPayload.self, id: blockID)
+            .payload.ocrInputRevision
+        let regionID = UUID()
+        let request = LocalOCRRequest(
+            accountId: fixture.accountId,
+            targetKind: .notebookRegion,
+            targetId: blockID,
+            parentId: noteID,
+            noteId: noteID,
+            inputRevision: inputRevision,
+            imageData: Data("synthetic crop".utf8),
+            mode: .text
+        )
+        let artifactID = try await fixture.store.saveOCRArtifact(
+            request: request,
+            response: LocalOCRResponse(
+                engine: .deterministic,
+                engineVersion: "fixture/v1",
+                regions: [
+                    LocalOCRRegion(id: regionID, kind: .text, text: "generated OCR text")
+                ]
+            )
+        )
+        _ = try await fixture.store.createOCRCorrection(
+            artifactId: artifactID,
+            regionId: regionID,
+            correctedText: "owner-corrected OCR text"
+        )
+        try await fixture.store.reviewOCRArtifact(id: artifactID, state: .edited)
+        let unreviewed = try await fixture.store.saveOCRArtifact(
+            request: LocalOCRRequest(
+                accountId: fixture.accountId,
+                targetKind: .notebookRegion,
+                targetId: blockID,
+                parentId: noteID,
+                noteId: noteID,
+                inputRevision: inputRevision,
+                imageData: Data("other crop".utf8),
+                mode: .text
+            ),
+            response: LocalOCRResponse(
+                engine: .deterministic,
+                engineVersion: "fixture/v1",
+                regions: [LocalOCRRegion(kind: .text, text: "unreviewed OCR text")]
+            )
+        )
+
+        let package = try await fixture.service.prepareDecryptedDirectoryForTesting(
+            includingDerivedAI: false
+        )
+        defer { try? FileManager.default.removeItem(at: package.deletingLastPathComponent()) }
+        let entities = try String(
+            contentsOf: package.appendingPathComponent("entities.json"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(entities.lowercased().contains(artifactID.uuidString.lowercased()))
+        XCTAssertTrue(entities.contains("owner-corrected OCR text"))
+        XCTAssertFalse(entities.lowercased().contains(unreviewed.uuidString.lowercased()))
+        XCTAssertFalse(entities.contains("unreviewed OCR text"))
+    }
+
     func testDecryptedExportIsCompleteExcludesKeysAndIsRemovable() async throws {
         let fixture = try makeFixture()
         defer { try? FileManager.default.removeItem(at: fixture.root) }

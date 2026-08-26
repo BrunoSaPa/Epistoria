@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 public enum EntityType: String, Codable, CaseIterable, Sendable {
@@ -529,6 +530,15 @@ public struct NoteBlockPayload: EntityPayload, Equatable {
     public var tombstone: Bool
     public var createdAt: Date
     public var updatedAt: Date
+
+    /// Stable identity for OCR input bytes. Local database revisions represent synchronized
+    /// server state and do not advance for every pending local edit.
+    public var ocrInputRevision: Int {
+        guard let drawingData, !drawingData.isEmpty else { return 0 }
+        let prefix = SHA256.hash(data: drawingData).prefix(MemoryLayout<UInt64>.size)
+        let value = prefix.reduce(UInt64(0)) { ($0 << 8) | UInt64($1) }
+        return Int(value & UInt64(Int.max))
+    }
 
     public init(
         noteId: UUID,
