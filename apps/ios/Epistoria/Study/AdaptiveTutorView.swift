@@ -25,7 +25,7 @@ struct AdaptiveTutorView: View {
     @State private var spendingLimitMinorUnits = 100
     @State private var learnerMessage = ""
     @State private var confidence = 3
-    @State private var submittedJob: AIJobSummary?
+    @State private var requestTask: Task<Void, Never>?
     @State private var isWorking = false
     @State private var errorMessage: String?
 
@@ -67,7 +67,7 @@ struct AdaptiveTutorView: View {
                     ToolbarItem(placement: .primaryAction) {
                         Menu {
                             Button("Pause session", systemImage: "pause") { Task { await setSession(.paused) } }
-                            Button("End session", systemImage: "checkmark") { Task { await send(.end) } }
+                            Button("End session", systemImage: "checkmark") { beginRequest(.end) }
                             Button("Abandon session", systemImage: "xmark", role: .destructive) { Task { await setSession(.abandoned) } }
                         } label: { Label("Session actions", systemImage: "ellipsis.circle") }
                     }
@@ -178,7 +178,7 @@ struct AdaptiveTutorView: View {
                             } description: {
                                 Text("The Tutor uses accepted learning history and cited Source excerpts to choose the next activity.")
                             } actions: {
-                                Button("Begin", systemImage: "play") { Task { await send(.begin) } }
+                                Button("Begin", systemImage: "play") { beginRequest(.begin) }
                                     .buttonStyle(.borderedProminent)
                                     .tint(EpistoriaDesign.ink)
                             }
@@ -286,11 +286,10 @@ struct AdaptiveTutorView: View {
                     actionButton("Explain directly", "text.book.closed", .explainDirectly)
                     actionButton("Another example", "arrow.triangle.2.circlepath", .tryAnotherExample)
                     actionButton("Why this next?", "questionmark.circle", .whyNext)
-                    if submittedJob != nil {
-                        Button("Check response", systemImage: "arrow.clockwise") { Task { await refresh() } }
-                            .buttonStyle(.bordered)
+                    if requestTask != nil {
+                        ProgressView("Waiting for provider")
                         Button("Cancel request", systemImage: "xmark.circle", role: .destructive) {
-                            Task { await cancelRequest() }
+                            cancelRequest()
                         }
                         .buttonStyle(.bordered)
                     }
@@ -307,7 +306,7 @@ struct AdaptiveTutorView: View {
                     .pickerStyle(.segmented)
                     .accessibilityHint("1 is uncertain. 5 is very confident.")
                 }
-                Button("Send", systemImage: "arrow.up.circle.fill") { Task { await send(.answer) } }
+                Button("Send", systemImage: "arrow.up.circle.fill") { beginRequest(.answer) }
                     .labelStyle(.iconOnly).font(.title2)
                     .disabled(learnerMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isWorking)
             }
@@ -317,8 +316,8 @@ struct AdaptiveTutorView: View {
     }
 
     private func actionButton(_ title: String, _ symbol: String, _ action: TutorTurnAction) -> some View {
-        Button(title, systemImage: symbol) { Task { await send(action) } }
-            .buttonStyle(.bordered).disabled(isWorking)
+        Button(title, systemImage: symbol) { beginRequest(action) }
+            .buttonStyle(.bordered).disabled(isWorking || requestTask != nil)
     }
 
     private var topicSources: [IdentifiedPayload<SourcePayload>] {
@@ -379,6 +378,7 @@ struct AdaptiveTutorView: View {
         isWorking = true
         defer { isWorking = false }
         let message = learnerMessage.trimmingCharacters(in: .whitespacesAndNewlines)
+        var pendingJobId: UUID?
         do {
             guard let coordinator = model.aiJobs else {
                 _ = try await store.appendOfflineTutorTurn(
@@ -398,60 +398,40 @@ struct AdaptiveTutorView: View {
                 learnerConfidence: action == .answer ? confidence : nil,
                 preferredEvidenceIds: preferredEvidenceIds
             )
-            submittedJob = try await coordinator.submitTutorTurn(prepared)
+            pendingJobId = prepared.request.jobId
+            _ = try await model.generateTutorTurnDirect(prepared)
             learnerMessage = ""
-            model.noteLocalMutation()
+            await loadSession(sessionId)
+        } catch is CancellationError {
+            if let pendingJobId {
+                try? await store.resolvePendingTutorTurn(
+                    sessionId: sessionId,
+                    jobId: pendingJobId,
+                    statusMessage: "The provider request was cancelled. Your message remains in this session."
+                )
+            }
             await loadSession(sessionId)
         } catch { errorMessage = error.localizedDescription }
+    }
+
+    private func beginRequest(_ action: TutorTurnAction) {
+        guard requestTask == nil else { return }
+        requestTask = Task {
+            await send(action)
+            requestTask = nil
+        }
     }
 
     private func refresh() async {
         guard let sessionId = activeSession?.id else { await load(); return }
         isWorking = true
         defer { isWorking = false }
-        do {
-            if let job = submittedJob, let coordinator = model.aiJobs {
-                let current = try await coordinator.tutorJob(id: job.id)
-                submittedJob = current
-                if current.status == "COMPLETE", let artifactId = current.artifactEntityId {
-                    await model.synchronize()
-                    _ = try await coordinator.importTutorTurnArtifact(artifactId: artifactId)
-                    submittedJob = nil
-                    model.noteLocalMutation()
-                } else if current.status == "FAILED" {
-                    try await model.store?.resolvePendingTutorTurn(
-                        sessionId: sessionId,
-                        jobId: current.id,
-                        statusMessage: "The provider request failed. Your message remains in this session."
-                    )
-                    errorMessage = current.errorCode ?? "The provider could not complete this turn. Your message remains saved."
-                    submittedJob = nil
-                }
-            } else {
-                await model.synchronize()
-            }
-            await loadSession(sessionId)
-        } catch { errorMessage = error.localizedDescription }
+        await model.synchronize()
+        await loadSession(sessionId)
     }
 
-    private func cancelRequest() async {
-        guard let job = submittedJob,
-              let sessionId = activeSession?.id,
-              let coordinator = model.aiJobs
-        else { return }
-        isWorking = true
-        defer { isWorking = false }
-        do {
-            _ = try await coordinator.cancelTutorJob(id: job.id)
-            try await model.store?.resolvePendingTutorTurn(
-                sessionId: sessionId,
-                jobId: job.id,
-                statusMessage: "The provider request was cancelled. Your message remains in this session."
-            )
-            submittedJob = nil
-            model.noteLocalMutation()
-            await loadSession(sessionId)
-        } catch { errorMessage = error.localizedDescription }
+    private func cancelRequest() {
+        requestTask?.cancel()
     }
 
     private func review(_ id: UUID, _ state: LearningSignalReviewState) async {
@@ -505,11 +485,6 @@ struct AdaptiveTutorView: View {
             activeSession = values.0
             turns = values.1
             signals = values.2
-            if submittedJob == nil,
-               let jobId = turns.last(where: { $0.payload.pending })?.payload.jobId,
-               let coordinator = model.aiJobs {
-                submittedJob = try? await coordinator.tutorJob(id: jobId)
-            }
             if activeSession?.payload.state == .paused {
                 try await store.setTutorSessionState(id: id, state: .active)
                 activeSession = try await store.payload(TutorSessionPayload.self, id: id)

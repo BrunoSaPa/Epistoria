@@ -2,7 +2,7 @@
 
 Epistoria is a personal, local-first iPad notebook for study and research. It supports spatial
 notes, Apple Pencil input, images, PDFs, annotations, study sessions, local search, encrypted
-sync, and optional AI processing on a trusted Mac.
+sync, direct provider processing from the iPad, and an optional Mac Compute Node.
 
 This project started because I needed one notebook that I could use while learning any subject.
 It is a personal project. It is not currently intended for sale or multi-user use.
@@ -45,7 +45,7 @@ The app also provides:
 - A readable ZIP export with JSON, original files, PencilKit data, and SHA-256 checksums.
 - Validated version 5 export import into an empty notebook under a new local encryption key.
 - AI provider management for OpenAI, Anthropic, Gemini, and OpenAI-compatible local or hosted
-  endpoints, with device Keychain storage and encrypted trusted-Mac configuration.
+  endpoints, with device-only Keychain storage.
 - An Adaptive Tutor that keeps durable encrypted transcripts, cites frozen Source Versions, and
   changes its next activity only from reviewed learning signals.
 - A per-Topic Concept and Evidence map with durable encrypted arrangement, exact Source return
@@ -63,7 +63,8 @@ coverage outline, then include every relevant learning objective found in that n
 questions that combine related skills, and a visible report of anything it could not cover. The
 queue will use goals, due reviews, unresolved questions, and practice results. It will state why it
 recommends each action. Manual learning features and local recommendations work offline. Generated
-drafts and written-answer feedback require the optional trusted Mac workflow.
+drafts and written-answer feedback require an approved provider connection. They do not require a
+Mac.
 
 The iPad stores data in SQLCipher. Each local record change and its sync outbox entry commit in
 one transaction. A successful local save does not wait for the network. The sync service stores
@@ -75,25 +76,27 @@ filenames, annotations, extracted PDF text, prompts, or AI results.
 The selected challenge theme is **AI-augmented personal productivity tools**.
 
 Epistoria treats AI as an optional processing feature. The notebook remains usable when the AI
-provider, trusted Mac, or sync server is unavailable.
+provider, Compute Node, or sync server is unavailable.
 
 ## AI approach and architecture
 
-The iPad does not send notebook content directly to the AI provider. It creates an encrypted job
-for an explicitly requested operation. A paired Mac decrypts the job, prepares the selected
-evidence, calls the configured provider, validates the response, and encrypts the result before
-syncing it back.
+For approved AI work, the iPad prepares a bounded request and sends it directly to the selected
+provider. The approval identifies the provider, model, destination, source scope, and configured
+maximum estimate. The iPad validates the response and its citations before saving an encrypted
+artifact. Provider keys stay in device-only Keychain storage.
 
 ```text
 iPad
   -> SQLCipher database and local outbox
-  -> encrypted sync API
-  -> encrypted job queue
-  -> trusted Mac worker
   -> optional AI provider
-  -> validated and encrypted artifact
-  -> encrypted sync API
-  -> iPad review
+  -> validated encrypted artifact
+  -> owner review
+
+Optional synchronization
+  -> opaque encrypted sync API
+
+Optional Compute Node
+  -> explicitly selected large local models or document conversion
 ```
 
 The current system supports these processing jobs:
@@ -116,21 +119,23 @@ The planned assistant will support three levels of proactivity:
 1. **Off** disables AI processing.
 2. **Suggest** identifies useful actions on the iPad but does not send notebook content to a
    provider.
-3. **Automatic for selected material** uses a revocable permission that names the courses or
-   notebooks, permitted job types, frequency, and spending limit.
+3. **Automatic for selected material** uses a revocable permission that names the Topics,
+   provider route, permitted job types, frequency, expiration, and spending limit.
 
 Opening the app will not itself send notebook content to a provider. The local study queue will
-continue to work when the Mac, network, or provider is unavailable.
+continue to work when the network, provider, or optional Compute Node is unavailable.
 
 AI results are derived records. The user can accept, edit, reject, or delete them. They do not
 replace original notes, drawings, images, PDFs, annotations, or relationships. Each reviewed
 artifact records its source IDs and processing metadata.
 
-The trusted Mac has provider adapters for OpenAI Responses, Anthropic Messages, Gemini
-`generateContent`, and OpenAI-compatible services such as Ollama, LM Studio, vLLM, and LocalAI.
-Provider keys are stored in device Keychains and cross the server only inside an end-to-end
-encrypted configuration job. The user sees a disclosure before an AI job is queued. Provider
-processing remains a separate plaintext disclosure from encrypted sync. See the public
+The iPad has provider adapters for OpenAI Responses, Anthropic Messages, Gemini `generateContent`,
+and OpenAI-compatible services such as Ollama, LM Studio, vLLM, and LocalAI. OpenAI and compatible
+connections can also provide timestamped transcription. The optional Compute Node remains
+available for explicitly selected large local models and conversion work. Provider keys are
+stored in device-only Keychain storage and never enter synchronization. The user sees a
+disclosure before content leaves the iPad. Provider processing remains a separate plaintext
+disclosure from encrypted sync. See the public
 [privacy overview](docs/public/PRIVACY.md) for the user-facing processing boundaries.
 
 ## How IBM Bob was used

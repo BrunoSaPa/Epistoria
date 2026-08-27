@@ -808,7 +808,7 @@ private struct PairMacView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
-                    Text("Complete this on your trusted Mac")
+                    Text("Set up this optional Compute Node")
                         .font(.title2.bold())
                     Text("1. From the repository root, run `make worker-install`. Copy services/worker/.env.example to services/worker/.env and add these values. Keep that file private; the device token is shown only now.")
                     secretValue("EPISTORIA_API_URL", apiURL?.absoluteString ?? "")
@@ -822,7 +822,7 @@ private struct PairMacView: View {
                 }
                 .padding(30)
             }
-            .navigationTitle("Pair Mac")
+            .navigationTitle("Pair Compute Node")
             .toolbar { Button("Done") { dismiss() } }
         }
         .interactiveDismissDisabled()

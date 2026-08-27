@@ -559,7 +559,7 @@ private struct FreeResponseFeedbackReviewView: View {
     let onChanged: () async -> Void
 
     @State private var prepared: PreparedFreeResponseFeedbackRequest?
-    @State private var submittedJob: AIJobSummary?
+    @State private var disclosure: DirectProviderDisclosure?
     @State private var artifact: IdentifiedPayload<FreeResponseFeedbackArtifact>?
     @State private var feedback = ""
     @State private var strengths = ""
@@ -580,10 +580,10 @@ private struct FreeResponseFeedbackReviewView: View {
                         .foregroundStyle(.secondary)
                 }
 
-                if artifact == nil, prepared == nil, submittedJob == nil {
+                if artifact == nil, prepared == nil {
                     Section("Cited feedback") {
                         Text("Prepare a request to see exactly what will leave this iPad before paid processing is allowed.")
-                        Button("Review what leaves your Mac", systemImage: "doc.text.magnifyingglass") {
+                        Button("Review what leaves this iPad", systemImage: "doc.text.magnifyingglass") {
                             Task { await prepare() }
                         }
                         .disabled(isWorking)
@@ -594,6 +594,17 @@ private struct FreeResponseFeedbackReviewView: View {
                     Section("Review before sending") {
                         LabeledContent("Evidence records", value: prepared.evidenceCount.formatted())
                         LabeledContent("Approximate tokens", value: prepared.approximateTokens.formatted())
+                        if let disclosure {
+                            LabeledContent("Provider", value: disclosure.provider)
+                            LabeledContent("Model", value: disclosure.model)
+                            LabeledContent("Destination", value: disclosure.destination)
+                            LabeledContent(
+                                "Maximum estimated cost",
+                                value: disclosure.maximumEstimatedCostUsd.map {
+                                    $0.formatted(.currency(code: "USD"))
+                                } ?? "Not available"
+                            )
+                        }
                         DisclosureGroup("Exact data included") {
                             Text("The frozen question, grading guide, reference answer, your submitted response, confidence, and the readable Evidence linked to this question.")
                             ForEach(prepared.request.evidence, id: \.sourceId) { item in
@@ -602,21 +613,12 @@ private struct FreeResponseFeedbackReviewView: View {
                         }
                         Label("Paid provider processing requires this one-time approval", systemImage: "hand.raised")
                             .font(.subheadline)
-                        Button("Approve and queue", systemImage: "desktopcomputer") {
+                        Button("Approve and send", systemImage: "arrow.up.circle") {
                             Task { await submit() }
                         }
                         .buttonStyle(.borderedProminent)
                         .tint(EpistoriaDesign.ink)
-                        .disabled(isWorking)
-                    }
-                }
-
-                if let submittedJob, artifact == nil {
-                    Section("Queued") {
-                        LabeledContent("Status", value: submittedJob.status.capitalized)
-                        Text("Your trusted Mac processes the encrypted request. Sync after it finishes, then refresh this sheet.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                        .disabled(isWorking || disclosure == nil)
                     }
                 }
 
@@ -699,27 +701,38 @@ private struct FreeResponseFeedbackReviewView: View {
 
     private func prepare() async {
         guard let aiJobs = model.aiJobs else {
-            errorMessage = "Connect the private server and pair your trusted Mac in Settings first."
+            errorMessage = "Unlock the notebook before preparing feedback."
             return
         }
         isWorking = true
         defer { isWorking = false }
         do {
-            prepared = try await aiJobs.prepareFreeResponseFeedback(
+            let value = try await aiJobs.prepareFreeResponseFeedback(
                 attemptId: attemptId,
                 responseId: responseId
             )
+            disclosure = try model.directProviderDisclosure(
+                approximateInputTokens: value.approximateTokens,
+                maximumOutputTokens: 4_096
+            )
+            prepared = value
             errorMessage = nil
         } catch { errorMessage = error.localizedDescription }
     }
 
     private func submit() async {
-        guard let aiJobs = model.aiJobs, let prepared else { return }
+        guard let prepared, let disclosure else { return }
         isWorking = true
         defer { isWorking = false }
         do {
-            submittedJob = try await aiJobs.submitFreeResponseFeedback(prepared)
+            _ = try await model.generateFreeResponseFeedbackDirect(
+                prepared,
+                approvedRoute: disclosure.route
+            )
+            model.noteLocalMutation()
             self.prepared = nil
+            self.disclosure = nil
+            await loadArtifact()
             errorMessage = nil
         } catch { errorMessage = error.localizedDescription }
     }
@@ -792,7 +805,7 @@ private struct FreeResponseFeedbackReviewView: View {
     private func startAnotherReview() {
         artifact = nil
         prepared = nil
-        submittedJob = nil
+        disclosure = nil
         feedback = ""
         strengths = ""
         improvements = ""

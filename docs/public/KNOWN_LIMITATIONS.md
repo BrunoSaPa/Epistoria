@@ -72,10 +72,10 @@ Epistoria remains in personal beta. The following limits apply to the current pr
 
 ## Optional processing
 
-- A Mac is optional. Topic Studio sends reviewed synthesis, flashcard, test, Concept, and weekly
-  review requests directly from the iPad to the selected provider. Other typed generation screens
-  are moving to direct iPad execution in stages; a screen that still uses the encrypted Compute
-  Node queue identifies that route before approval.
+- A Mac is optional. Topic Studio, Tutor, note questions, math help, Source analysis, session
+  review, written-response feedback, and supported media transcription send reviewed requests
+  directly from the iPad. The Compute Node is used only when explicitly selected for a capability
+  that is not available on the iPad.
 - AI features require a separately configured provider account and can incur provider charges.
 - One provider is active for newly approved work. Each new request keeps the provider and model
   reviewed at approval. Editing or removing that connection before processing stops the request;
@@ -117,8 +117,8 @@ Epistoria remains in personal beta. The following limits apply to the current pr
 - Web capture stores one bounded HTML response and extracted text. It does not run JavaScript,
   sign in to websites, retain cookies, crawl linked pages, or copy linked images, stylesheets,
   downloads, or embedded media. Pages that require those features may be incomplete.
-- Local MP3, M4A, WAV, and MP4 Sources up to 25 MB can request a timestamped transcript through
-  the trusted Mac and configured AI provider. AAC, CAF, M4V, MOV, larger files, word-level timing,
+- Local MP3, M4A, WAV, and MP4 Sources up to 25 MB can request a timestamped transcript directly
+  from the configured provider on the iPad. AAC, CAF, M4V, MOV, larger files, word-level timing,
   speaker labels, automatic correction suggestions, waveform editing, playback speed, bookmarks,
   and background lock-screen controls are not supported in this stage.
 - Video Sources support local playback. Transcript segments and timestamped Evidence can open the
@@ -127,7 +127,7 @@ Epistoria remains in personal beta. The following limits apply to the current pr
   interruption, background locking, and cleanup remains open.
 - YouTube Sources are online references. Epistoria does not download or cache YouTube video,
   audio, captions, thumbnails, or metadata. Playback requires YouTube and a network connection.
-  YouTube references cannot be transcribed by the trusted Mac.
+  YouTube references cannot be transcribed. Import a local supported media file instead.
 - Source comparison shows the exact local content in two independent panes. It does not yet add
   automatic text-difference highlighting, synchronized scrolling, or a saved comparison record.
   It never refreshes online material in the background.

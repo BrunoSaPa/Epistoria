@@ -148,10 +148,39 @@ public struct TutorTurnArtifact: EntityPayload, Equatable {
     public var sourceIds: [UUID]
     public var sourceVersionIds: [UUID]
     public var trace: ProviderTrace
+    public var providerRoute: AIProviderRouteSnapshot? = nil
     public var response: TutorTurnResponse
 
     public var createdAt: Date { generatedAt }
     public var updatedAt: Date { generatedAt }
+
+    public init(
+        jobId: UUID,
+        tutorSessionId: UUID,
+        topicId: UUID,
+        sequence: Int,
+        generatedAt: Date,
+        sources: [TutorSourceExcerpt],
+        sourceExcerptIds: [UUID],
+        sourceIds: [UUID],
+        sourceVersionIds: [UUID],
+        trace: ProviderTrace,
+        providerRoute: AIProviderRouteSnapshot? = nil,
+        response: TutorTurnResponse
+    ) {
+        self.jobId = jobId
+        self.tutorSessionId = tutorSessionId
+        self.topicId = topicId
+        self.sequence = sequence
+        self.generatedAt = generatedAt
+        self.sources = sources
+        self.sourceExcerptIds = sourceExcerptIds
+        self.sourceIds = sourceIds
+        self.sourceVersionIds = sourceVersionIds
+        self.trace = trace
+        self.providerRoute = providerRoute
+        self.response = response
+    }
 }
 
 public struct PreparedTutorTurnRequest: Equatable, Sendable {

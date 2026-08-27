@@ -58,8 +58,8 @@ the current personal beta.
 - Load the privacy-enhanced YouTube player only after an explicit action. Unloading the player
   clears the temporary nonpersistent web view.
 - Request an optional timestamped transcript for a local MP3, M4A, WAV, or MP4 Source up to 25 MB.
-  The approval explains that the trusted Mac decrypts the Source and sends its media bytes to the
-  configured AI provider.
+  The approval shows the provider, transcription model, destination, and file size before the
+  iPad sends the media bytes directly.
 - Store transcript segments as encrypted derived records bound to the exact Source Version.
   Search, accept, reject, or correct the transcript without changing the original media or
   provider-generated text.
@@ -85,7 +85,7 @@ the current personal beta.
 - Edit a Source title, primary Topic, related Topics, and Lists. Archive and restore a Source
   without changing its immutable versions or citations.
 - Navigate directly to an annotated or searched page.
-- Optional: extract PDF text on a paired Mac without using an AI provider.
+- Extract PDF text on the iPad without using an AI provider.
 - Optional: create a PDF Source guide with a cited summary, translated summary, key topics,
   suggested questions, and notes about detected images or figures.
 - Ask a question about one PDF. Each answer statement links to the supporting page and highlighted
@@ -98,8 +98,11 @@ the current personal beta.
 - Choose the official Responses service, Anthropic, Gemini, or a compatible local or hosted AI
   provider from Settings.
 - Review the provider destination and model before approving generated work.
-- Send reviewed Topic Studio requests directly from the iPad. The review shows the provider,
-  model, destination, excerpt count, token estimate, and configured maximum cost estimate.
+- Send reviewed Topic Studio, Tutor, note question, math help, session review, written feedback,
+  Source guide, and Source question requests directly from the iPad. Each review shows the
+  provider, model, destination, bounded scope, and configured maximum cost estimate.
+- Send approved MP3, M4A, WAV, and MP4 transcription directly from the iPad to an official or
+  compatible transcription endpoint. The encrypted transcript stays bound to the Source Version.
 - Keep the approved provider connection and model attached to each request. Changing the active
   provider later does not reroute work that was already approved.
 - Stop an older queued request if its approved provider connection was edited or removed. Submit
@@ -168,7 +171,8 @@ the current personal beta.
 - Receive an answer with references to the selected notebook material.
 - Accept, edit, reject, or insert the answer as new note text.
 
-This feature requires a paired Mac and a configured AI provider. It is optional.
+This feature requires a configured vision-capable provider when the selection includes images. A
+Mac is not required. It is optional.
 
 ## AI provider choice
 
@@ -182,6 +186,8 @@ This feature requires a paired Mac and a configured AI provider. It is optional.
   transcription currently requires the official Responses or a compatible connection.
 - Keep provider connections and keys out of readable notebook exports.
 - Record the actual provider connection and model on each completed generated result.
+- Freeze the provider route inside recurring automation permissions. A provider change requires
+  review before automatic work continues.
 
 ## Learning
 
@@ -291,9 +297,10 @@ require representative device validation.
 - Keep the current Topic as the default AI scope. Include connected Topics only when selected.
 - Keep Study Next in local Suggest mode without provider processing.
 - Create an optional recurring automation permission for selected Topics and supported tasks.
-- Set a minimum interval for each Topic/task pair, an expiration date, and a USD spending limit.
-- Pause, resume, edit, or permanently revoke a permission. Nonterminal jobs are cancelled when the
-  private service is reachable. Completed drafts remain available for review.
+- Freeze the selected provider route when saving the permission. Set a minimum interval for each
+  Topic/task pair, an expiration date, and a USD spending limit.
+- Pause, resume, edit, or permanently revoke a permission. New automatic requests stop locally.
+  Completed drafts remain available for review.
 - Avoid another automatic request when the allowed input has not changed. Automatic results use
   the same cited draft review and acceptance flow as manual requests.
 

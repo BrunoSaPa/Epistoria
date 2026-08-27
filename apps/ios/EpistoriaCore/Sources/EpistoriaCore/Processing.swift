@@ -176,15 +176,32 @@ public protocol SourceExtractionEngine: Sendable {
     func extract(source: Data, mimeType: String) async throws -> Data
 }
 
+public struct ProviderImageInput: Codable, Equatable, Sendable {
+    public var mimeType: String
+    public var data: Data
+
+    public init(mimeType: String, data: Data) {
+        self.mimeType = mimeType
+        self.data = data
+    }
+}
+
 public struct ProviderTextRequest: Codable, Equatable, Sendable {
     public var prompt: String
     public var systemInstructions: String?
     public var maximumOutputTokens: Int
+    public var images: [ProviderImageInput]
 
-    public init(prompt: String, systemInstructions: String? = nil, maximumOutputTokens: Int = 2_048) {
-        self.prompt = String(prompt.prefix(500_000))
-        self.systemInstructions = systemInstructions.map { String($0.prefix(100_000)) }
+    public init(
+        prompt: String,
+        systemInstructions: String? = nil,
+        maximumOutputTokens: Int = 2_048,
+        images: [ProviderImageInput] = []
+    ) {
+        self.prompt = prompt
+        self.systemInstructions = systemInstructions
         self.maximumOutputTokens = min(max(maximumOutputTokens, 1), 32_768)
+        self.images = Array(images.prefix(12))
     }
 }
 
@@ -213,6 +230,50 @@ public protocol ProviderClient: Sendable {
         route: AIProviderRouteSnapshot,
         apiKey: String?
     ) async throws -> ProviderTextResponse
+}
+
+public struct ProviderTranscriptionRequest: Equatable, Sendable {
+    public var audio: Data
+    public var filename: String
+    public var mimeType: String
+    public var language: String?
+
+    public init(audio: Data, filename: String, mimeType: String, language: String? = nil) {
+        self.audio = audio
+        self.filename = String(filename.prefix(255))
+        self.mimeType = String(mimeType.prefix(128))
+        self.language = language.map { String($0.prefix(32)) }
+    }
+}
+
+public struct ProviderTranscriptionResponse: Codable, Equatable, Sendable {
+    public var text: String
+    public var language: String?
+    public var durationSeconds: Double
+    public var segments: [TranscriptSegment]
+    public var providerRequestId: String?
+
+    public init(
+        text: String,
+        language: String?,
+        durationSeconds: Double,
+        segments: [TranscriptSegment],
+        providerRequestId: String? = nil
+    ) {
+        self.text = text
+        self.language = language
+        self.durationSeconds = durationSeconds
+        self.segments = segments
+        self.providerRequestId = providerRequestId
+    }
+}
+
+public protocol ProviderTranscriptionClient: Sendable {
+    func performTranscription(
+        _ request: ProviderTranscriptionRequest,
+        route: AIProviderRouteSnapshot,
+        apiKey: String?
+    ) async throws -> ProviderTranscriptionResponse
 }
 
 public struct ComputeNodeDescriptor: Codable, Equatable, Identifiable, Sendable {

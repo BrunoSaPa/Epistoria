@@ -22,7 +22,7 @@ public enum AIProviderConfigurationOperation: String, Codable, Sendable {
 
 /// The non-secret provider route reviewed when an AI job is approved.
 ///
-/// This value is encrypted inside the job payload. The trusted Mac verifies it against the
+/// The executing iPad or explicitly selected Compute Node verifies this value against its
 /// matching Keychain profile before sending any content. API keys are never part of this value.
 public struct AIProviderRouteSnapshot: Codable, Equatable, Sendable {
     public var schemaVersion = "provider-route/v1"

@@ -677,13 +677,14 @@ public enum AutomationJobKind: String, Codable, CaseIterable, Sendable {
 
 public struct AutomationGrantPayload: EntityPayload, Equatable {
     public static let entityType = EntityType.automationGrant
-    public var schemaVersion = "automation-grant/v2"
+    public var schemaVersion = "automation-grant/v3"
     public var topicIds: [UUID]
     public var jobTypes: [AutomationJobKind]
     public var minimumIntervalHours: Int
     public var expiresAt: Date
     public var spendingLimitMinorUnits: Int
     public var currencyCode: String
+    public var providerRoute: AIProviderRouteSnapshot?
     public var pausedAt: Date?
     public var revokedAt: Date?
     public var lastQueuedAtByScope: [String: Date]?
@@ -700,6 +701,7 @@ public struct AutomationGrantPayload: EntityPayload, Equatable {
         expiresAt: Date,
         spendingLimitMinorUnits: Int,
         currencyCode: String = "USD",
+        providerRoute: AIProviderRouteSnapshot? = nil,
         now: Date = .now
     ) {
         self.topicIds = topicIds
@@ -708,6 +710,7 @@ public struct AutomationGrantPayload: EntityPayload, Equatable {
         self.expiresAt = expiresAt
         self.spendingLimitMinorUnits = max(spendingLimitMinorUnits, 0)
         self.currencyCode = currencyCode
+        self.providerRoute = providerRoute
         pausedAt = nil
         revokedAt = nil
         lastQueuedAtByScope = [:]

@@ -519,13 +519,12 @@ struct ResourceDetailView: View {
     @State private var pageCount = 0
     @State private var annotations: [IdentifiedPayload<AnnotationPayload>] = []
     @State private var extraction: IdentifiedPayload<PDFExtractionManifest>?
-    @State private var extractionJob: AIJobSummary?
     @State private var ocrArtifacts: [IdentifiedPayload<OCRArtifactPayload>] = []
     @State private var isShowingOCRReview = false
     @State private var sourceAnalysis: IdentifiedPayload<SourceAnalysisArtifact>?
-    @State private var sourceAnalysisJob: AIJobSummary?
     @State private var sourceQueries: [IdentifiedPayload<SourceQueryArtifact>] = []
-    @State private var sourceQueryJob: AIJobSummary?
+    @State private var sourcePreparation: DirectSourcePreparation?
+    @State private var sourceDisclosure: DirectProviderDisclosure?
     @State private var isApprovingSourceAnalysis = false
     @State private var isAskingSource = false
     @State private var sourceOutputLanguage = Locale.current.localizedString(
@@ -536,7 +535,7 @@ struct ResourceDetailView: View {
     @State private var citationRectangles: [AnnotationRectangle] = []
     @State private var transcription: IdentifiedPayload<MediaTranscriptionManifest>?
     @State private var transcriptSegments: [TranscriptSegment] = []
-    @State private var transcriptionJob: AIJobSummary?
+    @State private var transcriptionDisclosure: DirectProviderDisclosure?
     @State private var sourceAsset: AssetPayload?
     @State private var isApprovingTranscription = false
     @State private var isShowingTranscript = false
@@ -544,6 +543,7 @@ struct ResourceDetailView: View {
     @State private var annotationKind = AnnotationKind.comment
     @State private var comment = ""
     @State private var isLoading = true
+    @State private var isRecognizingSourcePages = false
     @State private var isInspectorPresented = true
     @State private var editingAnnotation: IdentifiedPayload<AnnotationPayload>?
     @State private var pendingDeletion: IdentifiedPayload<AnnotationPayload>?
@@ -720,6 +720,10 @@ struct ResourceDetailView: View {
                 .inspectorColumnWidth(min: 280, ideal: 340, max: 440)
         }
         .task { await load() }
+        .onChange(of: includeSourceImages) { _, _ in
+            guard isApprovingSourceAnalysis || isAskingSource else { return }
+            Task { await prepareSourceApproval(forQuestion: isAskingSource) }
+        }
         .fileImporter(
             isPresented: $isRefreshingSource,
             allowedContentTypes: EpistoriaSourceImportTypes.supported
@@ -744,6 +748,7 @@ struct ResourceDetailView: View {
             MediaTranscriptionApprovalSheet(
                 filename: sourceAsset?.originalFilename ?? resource?.payload.title ?? "Media Source",
                 byteCount: sourceAsset?.plaintextByteSize ?? Int64(sourceData?.count ?? 0),
+                disclosure: transcriptionDisclosure,
                 language: $transcriptionLanguage
             ) {
                 isApprovingTranscription = false
@@ -755,6 +760,9 @@ struct ResourceDetailView: View {
                 mode: .guide,
                 filename: sourceAsset?.originalFilename ?? resource?.payload.title ?? "PDF Source",
                 byteCount: sourceAsset?.plaintextByteSize ?? Int64(sourceData?.count ?? 0),
+                disclosure: sourceDisclosure,
+                pageCount: sourcePreparation?.pageCount ?? 0,
+                referenceCount: sourcePreparation?.references.count ?? 0,
                 outputLanguage: $sourceOutputLanguage,
                 question: $sourceQuestion,
                 includeImages: $includeSourceImages
@@ -768,6 +776,9 @@ struct ResourceDetailView: View {
                 mode: .question,
                 filename: sourceAsset?.originalFilename ?? resource?.payload.title ?? "PDF Source",
                 byteCount: sourceAsset?.plaintextByteSize ?? Int64(sourceData?.count ?? 0),
+                disclosure: sourceDisclosure,
+                pageCount: sourcePreparation?.pageCount ?? 0,
+                referenceCount: sourcePreparation?.references.count ?? 0,
                 outputLanguage: $sourceOutputLanguage,
                 question: $sourceQuestion,
                 includeImages: $includeSourceImages
@@ -929,7 +940,7 @@ struct ResourceDetailView: View {
                                     VStack(alignment: .leading, spacing: 5) {
                                         Button {
                                             sourceQuestion = item.question
-                                            isAskingSource = true
+                                            Task { await prepareSourceApproval(forQuestion: true) }
                                         } label: {
                                             Text(item.question)
                                                 .multilineTextAlignment(.leading)
@@ -951,28 +962,20 @@ struct ResourceDetailView: View {
                             }
                         }
                         Button("Refresh source guide…", systemImage: "arrow.clockwise") {
-                            isApprovingSourceAnalysis = true
+                            Task { await prepareSourceApproval(forQuestion: false) }
                         }
-                    } else if let sourceAnalysisJob {
-                        Label(
-                            "Trusted Mac job \(sourceAnalysisJob.status.lowercased())",
-                            systemImage: "desktopcomputer"
-                        )
-                        Text("Run the trusted worker, then sync this iPad to receive the encrypted guide.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
                     } else {
                         Button("Analyze this Source…", systemImage: "doc.text.magnifyingglass") {
-                            isApprovingSourceAnalysis = true
+                            Task { await prepareSourceApproval(forQuestion: false) }
                         }
                         Text("Creates a cited summary, translation, key topics, suggested questions, and figure notes for the current immutable Source Version.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
                     Button("Ask this Source…", systemImage: "questionmark.bubble") {
-                        isAskingSource = true
+                        Task { await prepareSourceApproval(forQuestion: true) }
                     }
-                    .disabled(sourceData == nil || model.aiJobs == nil)
+                    .disabled(sourceData == nil)
                 } }
 
                 if resource?.payload.resourceType == .pdf, !sourceQueries.isEmpty {
@@ -992,13 +995,6 @@ struct ResourceDetailView: View {
                                 }
                             }
                         }
-                    }
-                } else if resource?.payload.resourceType == .pdf, let sourceQueryJob {
-                    Section("Source answer") {
-                        Label(
-                            "Trusted Mac job \(sourceQueryJob.status.lowercased())",
-                            systemImage: "desktopcomputer"
-                        )
                     }
                 }
 
@@ -1020,17 +1016,11 @@ struct ResourceDetailView: View {
                                 isShowingOCRReview = true
                             }
                         }
-                    } else if let extractionJob {
-                        Label("Mac job \(extractionJob.status.lowercased())", systemImage: "desktopcomputer")
-                        Text("Run the trusted worker, then sync this iPad to index the result.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
                     } else {
-                        Button("Extract text on trusted Mac", systemImage: "text.viewfinder") {
+                        Button("Extract text on this iPad", systemImage: "text.viewfinder") {
                             Task { await queueExtraction() }
                         }
-                        .disabled(model.aiJobs == nil)
-                        Text("This is local processing and does not call an AI provider. The decrypted PDF exists only in Mac memory while text is extracted.")
+                        Text("This local operation does not call an AI provider. The decrypted PDF remains in iPad memory while text is extracted.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -1116,14 +1106,6 @@ struct ResourceDetailView: View {
                             Text("This encrypted transcript is bound to Source Version \(transcription.payload.sourceVersionId.uuidString).")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
-                        } else if let transcriptionJob {
-                            Label(
-                                "Trusted Mac job \(transcriptionJob.status.lowercased())",
-                                systemImage: "desktopcomputer"
-                            )
-                            Text("Run the trusted worker, then sync this iPad to receive the encrypted transcript.")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
                         } else if !canTranscribeCurrentMedia {
                             Label(
                                 "Transcription supports MP3, M4A, WAV, and MP4 in this stage.",
@@ -1131,11 +1113,11 @@ struct ResourceDetailView: View {
                             )
                             .foregroundStyle(.secondary)
                         } else {
-                            Button("Transcribe on trusted Mac…", systemImage: "waveform.badge.mic") {
-                                isApprovingTranscription = true
+                            Button("Transcribe…", systemImage: "waveform.badge.mic") {
+                                Task { await prepareTranscriptionApproval() }
                             }
-                            .disabled(model.aiJobs == nil || sourceData == nil)
-                            Text("Transcription is optional. Approval is required because the configured AI provider receives the media bytes from the trusted Mac.")
+                            .disabled(sourceData == nil)
+                            Text("Transcription is optional. Approval is required because the configured provider receives the media bytes directly from this iPad.")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
@@ -1426,6 +1408,21 @@ struct ResourceDetailView: View {
                         store: store
                     )
                 }
+                if loaded.payload.resourceType == .pdf,
+                   let selectedVersion,
+                   let extraction,
+                   !extraction.payload.pagesNeedingOcr.isEmpty,
+                   model.localProcessingSettings.automaticSourceOCR
+                {
+                    Task {
+                        await recognizeSourcePDFPagesIfNeeded(
+                            data: data,
+                            pageNumbers: extraction.payload.pagesNeedingOcr,
+                            version: selectedVersion,
+                            store: store
+                        )
+                    }
+                }
             }
             if (loaded.payload.resourceType == .audio || loaded.payload.resourceType == .video),
                let currentVersionId = resolvedSource.payload.currentVersionId,
@@ -1541,6 +1538,59 @@ struct ResourceDetailView: View {
         }
     }
 
+    private func recognizeSourcePDFPagesIfNeeded(
+        data: Data,
+        pageNumbers: [Int],
+        version: IdentifiedPayload<SourceVersionPayload>,
+        store: EpistoriaStore
+    ) async {
+        guard !isRecognizingSourcePages,
+              let accountId = model.configuration?.accountId,
+              let document = PDFDocument(data: data)
+        else { return }
+        isRecognizingSourcePages = true
+        defer { isRecognizingSourcePages = false }
+        var known = Set(ocrArtifacts.compactMap { artifact -> Int? in
+            guard artifact.payload.sourceVersionId == version.id,
+                  artifact.payload.inputRevision == version.revision,
+                  artifact.payload.response.engine == .appleVision,
+                  artifact.payload.state == .current
+            else { return nil }
+            return artifact.payload.pageNumber
+        })
+        for pageNumber in Array(Set(pageNumbers)).sorted() where !known.contains(pageNumber) {
+            guard !Task.isCancelled,
+                  pageNumber >= 1,
+                  let page = document.page(at: pageNumber - 1)
+            else { continue }
+            do {
+                let image = page.thumbnail(
+                    of: CGSize(width: 1_600, height: 2_200),
+                    for: .mediaBox
+                )
+                guard let imageData = image.jpegData(compressionQuality: 0.82) else { continue }
+                let capture = try await LocalTextOCRService.recognizeSourcePage(
+                    accountId: accountId,
+                    sourceId: resourceId,
+                    sourceVersionId: version.id,
+                    inputRevision: version.revision,
+                    pageNumber: pageNumber,
+                    imageData: imageData,
+                    preferredLanguages: model.localProcessingSettings.normalizedLanguages
+                )
+                _ = try await store.saveOCRArtifact(
+                    request: capture.request,
+                    response: capture.response
+                )
+                known.insert(pageNumber)
+            } catch {
+                // Keep the page available. Reopening the Source retries local recognition.
+            }
+        }
+        ocrArtifacts = (try? await store.ocrArtifacts(parentId: resourceId)) ?? ocrArtifacts
+        model.noteLocalMutation()
+    }
+
     private func refreshSource(_ result: Result<URL, Error>) async {
         guard let manager = model.assetManager else { return }
         do {
@@ -1613,88 +1663,93 @@ struct ResourceDetailView: View {
     }
 
     private func queueExtraction() async {
-        guard let coordinator = model.aiJobs else {
-            errorMessage = "Connect the private server and pair your trusted Mac first."
-            return
-        }
-        await model.synchronize()
-        if let syncError = model.syncError {
-            errorMessage = syncError
-            return
-        }
         do {
-            extractionJob = try await coordinator.submitPDFExtraction(
-                resourceId: resourceId,
-                automaticOCR: model.localProcessingSettings.automaticSourceOCR,
-                automaticFormulaOCR: model.localProcessingSettings.localMathOCR,
-                preferredOCRLanguages: model.localProcessingSettings.normalizedLanguages
-            )
+            _ = try await model.extractPDFOnDevice(sourceId: resourceId)
+            model.noteLocalMutation()
+            await load()
         }
         catch { errorMessage = error.localizedDescription }
     }
 
-    private func queueTranscription() async {
-        guard let coordinator = model.aiJobs else {
-            errorMessage = "Connect the private server and pair your trusted Mac first."
-            return
-        }
-        await model.synchronize()
-        if let syncError = model.syncError {
-            errorMessage = syncError
-            return
-        }
+    private func prepareTranscriptionApproval() async {
         do {
-            transcriptionJob = try await coordinator.submitMediaTranscription(
+            transcriptionDisclosure = try model.directTranscriptionDisclosure()
+            isApprovingTranscription = true
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func queueTranscription() async {
+        guard let transcriptionDisclosure else { return }
+        do {
+            _ = try await model.transcribeSourceDirect(
                 sourceId: resourceId,
                 language: transcriptionLanguage,
-                disclosureAcknowledged: true
+                approvedRoute: transcriptionDisclosure.route
             )
+            model.noteLocalMutation()
+            self.transcriptionDisclosure = nil
+            await load()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func prepareSourceApproval(forQuestion: Bool) async {
+        do {
+            let preparation = try await model.prepareDirectSource(
+                sourceId: resourceId,
+                includeImages: includeSourceImages
+            )
+            let disclosure = try model.directProviderDisclosure(
+                approximateInputTokens: preparation.approximateTokens,
+                maximumOutputTokens: forQuestion ? 6_000 : 8_000,
+                requiresVision: !preparation.images.isEmpty
+            )
+            sourcePreparation = preparation
+            sourceDisclosure = disclosure
+            if forQuestion {
+                isAskingSource = true
+            } else {
+                isApprovingSourceAnalysis = true
+            }
         } catch {
             errorMessage = error.localizedDescription
         }
     }
 
     private func queueSourceAnalysis() async {
-        guard let coordinator = model.aiJobs else {
-            errorMessage = "Connect the private server and pair your trusted Mac first."
-            return
-        }
-        await model.synchronize()
-        if let syncError = model.syncError {
-            errorMessage = syncError
-            return
-        }
+        guard let sourcePreparation, let sourceDisclosure else { return }
         do {
-            sourceAnalysisJob = try await coordinator.submitSourceAnalysis(
-                sourceId: resourceId,
+            _ = try await model.generateSourceAnalysisDirect(
+                preparation: sourcePreparation,
                 outputLanguage: sourceOutputLanguage,
-                includeImages: includeSourceImages,
-                disclosureAcknowledged: true
+                approvedRoute: sourceDisclosure.route
             )
+            model.noteLocalMutation()
+            self.sourcePreparation = nil
+            self.sourceDisclosure = nil
+            await load()
         } catch {
             errorMessage = error.localizedDescription
         }
     }
 
     private func queueSourceQuery() async {
-        guard let coordinator = model.aiJobs else {
-            errorMessage = "Connect the private server and pair your trusted Mac first."
-            return
-        }
-        await model.synchronize()
-        if let syncError = model.syncError {
-            errorMessage = syncError
-            return
-        }
+        guard let sourcePreparation, let sourceDisclosure else { return }
         do {
-            sourceQueryJob = try await coordinator.submitSourceQuery(
-                sourceId: resourceId,
+            _ = try await model.generateSourceQueryDirect(
+                preparation: sourcePreparation,
                 question: sourceQuestion,
                 outputLanguage: sourceOutputLanguage,
-                includeImages: includeSourceImages,
-                disclosureAcknowledged: true
+                approvedRoute: sourceDisclosure.route
             )
+            model.noteLocalMutation()
             sourceQuestion = ""
+            self.sourcePreparation = nil
+            self.sourceDisclosure = nil
+            await load()
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -1872,6 +1927,9 @@ private struct SourceAIApprovalSheet: View {
     let mode: Mode
     let filename: String
     let byteCount: Int64
+    let disclosure: DirectProviderDisclosure?
+    let pageCount: Int
+    let referenceCount: Int
     @Binding var outputLanguage: String
     @Binding var question: String
     @Binding var includeImages: Bool
@@ -1904,7 +1962,7 @@ private struct SourceAIApprovalSheet: View {
                         .foregroundStyle(.secondary)
                 }
                 Section("Figures") {
-                    Toggle("Include detected images and figures", isOn: $includeImages)
+                    Toggle("Include rendered pages with figures", isOn: $includeImages)
                     Text("Turn this off to reduce input cost or use a text-only provider. The guide or answer will not evaluate PDF images.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -1918,7 +1976,20 @@ private struct SourceAIApprovalSheet: View {
                         "Maximum figure input",
                         value: includeImages ? "8 images" : "None"
                     )
-                    Label("The trusted Mac decrypts and reads this PDF for this job.", systemImage: "desktopcomputer")
+                    LabeledContent("Pages", value: pageCount.formatted())
+                    LabeledContent("Citable regions", value: referenceCount.formatted())
+                    if let disclosure {
+                        LabeledContent("Provider", value: disclosure.provider)
+                        LabeledContent("Model", value: disclosure.model)
+                        LabeledContent("Destination", value: disclosure.destination)
+                        LabeledContent(
+                            "Maximum estimated cost",
+                            value: disclosure.maximumEstimatedCostUsd.map {
+                                $0.formatted(.currency(code: "USD"))
+                            } ?? "Not available"
+                        )
+                    }
+                    Label("This iPad decrypts and reads the PDF for this request.", systemImage: "ipad")
                     Label(
                         includeImages
                             ? "The active AI provider receives selected text and bounded figure images."
@@ -1946,6 +2017,7 @@ private struct SourceAIApprovalSheet: View {
                         .disabled(
                             byteCount <= 0
                                 || outputLanguage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                || disclosure == nil
                                 || (mode == .question
                                     && question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                         )
@@ -1959,6 +2031,7 @@ private struct SourceAIApprovalSheet: View {
 private struct MediaTranscriptionApprovalSheet: View {
     let filename: String
     let byteCount: Int64
+    let disclosure: DirectProviderDisclosure?
     @Binding var language: String
     let approve: () -> Void
 
@@ -1984,7 +2057,13 @@ private struct MediaTranscriptionApprovalSheet: View {
                         .foregroundStyle(.secondary)
                 }
                 Section("Before you approve") {
-                    Label("The trusted Mac decrypts this Source for this job.", systemImage: "desktopcomputer")
+                    if let disclosure {
+                        LabeledContent("Provider", value: disclosure.provider)
+                        LabeledContent("Model", value: disclosure.model)
+                        LabeledContent("Destination", value: disclosure.destination)
+                        LabeledContent("Maximum estimated cost", value: "Calculated from returned duration")
+                    }
+                    Label("This iPad decrypts the Source for this request.", systemImage: "ipad")
                     Label("The configured AI provider receives the media bytes.", systemImage: "network")
                     Label("The returned transcript is encrypted and bound to this Source Version.", systemImage: "lock.doc")
                     Text("The sync service does not receive plaintext media or transcript content. The original Source is not changed.")
@@ -2007,7 +2086,10 @@ private struct MediaTranscriptionApprovalSheet: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Approve and transcribe") { approve() }
                         .fontWeight(.semibold)
-                        .disabled(byteCount <= 0 || byteCount > 25 * 1_024 * 1_024)
+                        .disabled(
+                            byteCount <= 0 || byteCount > 25 * 1_024 * 1_024
+                                || disclosure == nil
+                        )
                 }
             }
         }

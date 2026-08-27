@@ -135,6 +135,7 @@ public struct MathAssistanceArtifact: EntityPayload, Equatable {
     public var generatedAt: Date
     public var sourceIds: [UUID]
     public var trace: ProviderTrace
+    public var providerRoute: AIProviderRouteSnapshot? = nil
     public var response: MathAssistanceResponse
     public var reviewState: AIArtifactReviewState?
     public var reviewedAt: Date?
@@ -152,6 +153,7 @@ public struct MathAssistanceArtifact: EntityPayload, Equatable {
         sourceIds: [UUID],
         trace: ProviderTrace,
         response: MathAssistanceResponse,
+        providerRoute: AIProviderRouteSnapshot? = nil,
         reviewState: AIArtifactReviewState? = nil,
         reviewedAt: Date? = nil,
         editedResponse: MathAssistanceResponse? = nil
@@ -163,6 +165,7 @@ public struct MathAssistanceArtifact: EntityPayload, Equatable {
         self.generatedAt = generatedAt
         self.sourceIds = sourceIds
         self.trace = trace
+        self.providerRoute = providerRoute
         self.response = response
         self.reviewState = reviewState
         self.reviewedAt = reviewedAt

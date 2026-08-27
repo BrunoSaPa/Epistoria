@@ -1430,6 +1430,7 @@ public actor EpistoriaStore {
         expiresAt: Date,
         spendingLimitMinorUnits: Int,
         currencyCode: String = "USD",
+        providerRoute: AIProviderRouteSnapshot? = nil,
         at date: Date = .now
     ) async throws -> UUID {
         let topics = Array(Set(topicIds))
@@ -1447,6 +1448,7 @@ public actor EpistoriaStore {
                 expiresAt: expiresAt,
                 spendingLimitMinorUnits: spendingLimitMinorUnits,
                 currencyCode: currencyCode,
+                providerRoute: providerRoute,
                 now: date
             ),
             relationIds: topics
@@ -1460,6 +1462,7 @@ public actor EpistoriaStore {
         minimumIntervalHours: Int,
         expiresAt: Date,
         spendingLimitMinorUnits: Int,
+        providerRoute: AIProviderRouteSnapshot? = nil,
         at date: Date = .now
     ) async throws {
         var grant = try await payload(AutomationGrantPayload.self, id: id)
@@ -1470,13 +1473,14 @@ public actor EpistoriaStore {
               jobs.allSatisfy({ $0.learningJobType != nil })
         else { throw StoreError.invalidAutomationGrant }
         for topicId in topics { _ = try await topic(id: topicId) }
-        grant.payload.schemaVersion = "automation-grant/v2"
+        grant.payload.schemaVersion = "automation-grant/v3"
         grant.payload.topicIds = topics
         grant.payload.jobTypes = jobs
         grant.payload.minimumIntervalHours = max(minimumIntervalHours, 1)
         grant.payload.expiresAt = expiresAt
         grant.payload.spendingLimitMinorUnits = spendingLimitMinorUnits
         grant.payload.currencyCode = "USD"
+        grant.payload.providerRoute = providerRoute
         grant.payload.updatedAt = date
         _ = try await save(id: id, payload: grant.payload, relationIds: topics)
     }
@@ -1488,7 +1492,7 @@ public actor EpistoriaStore {
     ) async throws -> [UUID] {
         var grant = try await payload(AutomationGrantPayload.self, id: id)
         guard grant.payload.revokedAt == nil else { throw StoreError.invalidAutomationGrant }
-        grant.payload.schemaVersion = "automation-grant/v2"
+        grant.payload.schemaVersion = "automation-grant/v3"
         grant.payload.pausedAt = paused ? (grant.payload.pausedAt ?? date) : nil
         grant.payload.updatedAt = date
         _ = try await save(id: id, payload: grant.payload, relationIds: grant.payload.topicIds)
@@ -1497,7 +1501,7 @@ public actor EpistoriaStore {
 
     public func revokeAutomationGrant(id: UUID, at date: Date = .now) async throws -> [UUID] {
         var grant = try await payload(AutomationGrantPayload.self, id: id)
-        grant.payload.schemaVersion = "automation-grant/v2"
+        grant.payload.schemaVersion = "automation-grant/v3"
         grant.payload.revokedAt = grant.payload.revokedAt ?? date
         grant.payload.pausedAt = grant.payload.pausedAt ?? date
         grant.payload.updatedAt = date
@@ -1517,7 +1521,7 @@ public actor EpistoriaStore {
         guard grant.payload.isActive(at: date), fingerprint.count == 64,
               !scopeKey.isEmpty, estimatedSpentMinorUnits < grant.payload.spendingLimitMinorUnits
         else { throw StoreError.invalidAutomationGrant }
-        grant.payload.schemaVersion = "automation-grant/v2"
+        grant.payload.schemaVersion = "automation-grant/v3"
         var queuedAt = grant.payload.lastQueuedAtByScope ?? [:]
         var fingerprints = grant.payload.lastInputFingerprintByScope ?? [:]
         var jobs = grant.payload.queuedJobIds ?? []

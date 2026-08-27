@@ -265,7 +265,7 @@ struct SessionDetailView: View {
     @State private var activityTitles: [UUID: String] = [:]
     @State private var digestArtifact: IdentifiedPayload<SessionDigestArtifact>?
     @State private var preparedDigest: PreparedDigestRequest?
-    @State private var submittedJob: AIJobSummary?
+    @State private var digestDisclosure: DirectProviderDisclosure?
     @State private var isImporting = false
     @State private var isWorking = false
     @State private var showDisclosure = false
@@ -505,22 +505,12 @@ struct SessionDetailView: View {
                     }
                     .disabled(artifact.reviewState == .rejected)
                 }
-            } else if let submittedJob {
-                VStack(alignment: .leading, spacing: 8) {
-                    Label("Job \(submittedJob.status.lowercased())", systemImage: "desktopcomputer")
-                    Text("The encrypted request waits for your paired Mac. Sync after the worker finishes.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Text(submittedJob.id.uuidString.lowercased())
-                        .font(.caption2.monospaced())
-                        .textSelection(.enabled)
-                }
             } else {
                 Button("Prepare cited digest", systemImage: "sparkles") {
                     Task { await prepareDigest() }
                 }
                 .disabled(isWorking)
-                Text("Epistoria first shows exactly which decrypted excerpts will be sent from your Mac. No request is automatic.")
+                Text("Epistoria first shows which excerpts will leave this iPad, the provider, model, destination, and maximum estimated cost. No request is automatic.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -531,17 +521,28 @@ struct SessionDetailView: View {
         NavigationStack {
             Form {
                 if let preview = preparedDigest?.preview {
-                    Section("What leaves your Mac") {
+                    Section("What leaves this iPad") {
                         LabeledContent("Sources", value: "\(preview.sourceCount)")
                         LabeledContent("Characters", value: preview.characterCount.formatted())
                         LabeledContent("Approximate tokens", value: preview.approximateTokens.formatted())
+                        if let digestDisclosure {
+                            LabeledContent("Provider", value: digestDisclosure.provider)
+                            LabeledContent("Model", value: digestDisclosure.model)
+                            LabeledContent("Destination", value: digestDisclosure.destination)
+                            LabeledContent(
+                                "Maximum estimated cost",
+                                value: digestDisclosure.maximumEstimatedCostUsd.map {
+                                    $0.formatted(.currency(code: "USD"))
+                                } ?? "Not available"
+                            )
+                        }
                     }
                     Section("Source titles") {
                         ForEach(preview.sourceTitles, id: \.self) { Text($0) }
                     }
                     Section {
                         Label("Sent only after you approve", systemImage: "hand.raised")
-                        Text("The paired Mac decrypts these excerpts and sends them to the configured AI provider. The sync server cannot read them.")
+                        Text("This iPad sends the approved excerpts directly to the provider shown above. The sync server and optional Compute Node are not used.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -553,8 +554,8 @@ struct SessionDetailView: View {
                     Button("Cancel") { showDisclosure = false }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Approve and queue") { Task { await submitDigest() } }
-                        .disabled(preparedDigest == nil || isWorking)
+                    Button("Approve and send") { Task { await submitDigest() } }
+                        .disabled(preparedDigest == nil || digestDisclosure == nil || isWorking)
                 }
             }
         }
@@ -684,25 +685,36 @@ struct SessionDetailView: View {
 
     private func prepareDigest() async {
         guard let coordinator = model.aiJobs else {
-            errorMessage = "Connect the private server and pair your Mac in Data Health first."
+            errorMessage = "Unlock the notebook before preparing a digest."
             return
         }
         isWorking = true
         defer { isWorking = false }
         do {
-            preparedDigest = try await coordinator.prepareSessionDigest(sessionId: sessionId)
+            let value = try await coordinator.prepareSessionDigest(sessionId: sessionId)
+            digestDisclosure = try model.directProviderDisclosure(
+                approximateInputTokens: value.preview.approximateTokens,
+                maximumOutputTokens: 4_096
+            )
+            preparedDigest = value
             showDisclosure = true
         } catch { errorMessage = error.localizedDescription }
     }
 
     private func submitDigest() async {
-        guard let coordinator = model.aiJobs, let preparedDigest else { return }
+        guard let preparedDigest, let digestDisclosure else { return }
         isWorking = true
         defer { isWorking = false }
         do {
-            submittedJob = try await coordinator.submitSessionDigest(preparedDigest)
+            _ = try await model.generateSessionDigestDirect(
+                preparedDigest,
+                approvedRoute: digestDisclosure.route
+            )
+            model.noteLocalMutation()
             self.preparedDigest = nil
+            self.digestDisclosure = nil
             showDisclosure = false
+            await load()
         } catch { errorMessage = error.localizedDescription }
     }
 

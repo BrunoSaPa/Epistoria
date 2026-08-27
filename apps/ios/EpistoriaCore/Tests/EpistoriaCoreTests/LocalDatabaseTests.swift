@@ -2323,7 +2323,7 @@ final class LocalDatabaseTests: XCTestCase {
             at: now
         )
         var grant = try await store.payload(AutomationGrantPayload.self, id: grantId)
-        XCTAssertEqual(grant.payload.schemaVersion, "automation-grant/v2")
+        XCTAssertEqual(grant.payload.schemaVersion, "automation-grant/v3")
         XCTAssertEqual(grant.payload.topicIds, [topicId])
         XCTAssertEqual(grant.payload.jobTypes, [.weeklyReview])
         XCTAssertTrue(grant.payload.isActive(at: now))

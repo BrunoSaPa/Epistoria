@@ -12,6 +12,7 @@ struct MathAssistanceSheetView: View {
     @State private var mode = MathAssistanceMode.recognize
     @State private var instructions = ""
     @State private var prepared: PreparedMathAssistanceRequest?
+    @State private var disclosure: DirectProviderDisclosure?
     @State private var isPreparing = false
     @State private var isSubmitting = false
     @State private var submitted = false
@@ -77,7 +78,7 @@ struct MathAssistanceSheetView: View {
                                         ? "Preparing…"
                                         : mode == .recognize
                                             ? "Prepare local recognition"
-                                            : "Preview what leaves your Mac"
+                                            : "Preview what leaves this iPad"
                                 )
                             }
                             .frame(maxWidth: .infinity)
@@ -88,13 +89,24 @@ struct MathAssistanceSheetView: View {
                 }
 
                 if let prepared, !submitted {
-                    Section(mode == .recognize ? "Local recognition" : "What leaves your Mac") {
+                    Section(mode == .recognize ? "Local recognition" : "What leaves this iPad") {
                         LabeledContent("Selected items", value: prepared.selectionCount.formatted())
                         LabeledContent(
                             "Nearby text items", value: prepared.contextCount.formatted())
                         LabeledContent("Visual crops", value: prepared.imageCount.formatted())
                         LabeledContent(
                             "Approximate tokens", value: prepared.approximateTokens.formatted())
+                        if let disclosure, mode != .recognize {
+                            LabeledContent("Provider", value: disclosure.provider)
+                            LabeledContent("Model", value: disclosure.model)
+                            LabeledContent("Destination", value: disclosure.destination)
+                            LabeledContent(
+                                "Maximum estimated cost",
+                                value: disclosure.maximumEstimatedCostUsd.map {
+                                    $0.formatted(.currency(code: "USD"))
+                                } ?? "Not available"
+                            )
+                        }
                     }
 
                     Section {
@@ -105,10 +117,10 @@ struct MathAssistanceSheetView: View {
                                 if isSubmitting { ProgressView().padding(.trailing, 6) }
                                 Text(
                                     isSubmitting
-                                        ? "Queuing…"
+                                        ? "Processing…"
                                         : mode == .recognize
-                                            ? "Queue on trusted Mac"
-                                            : "Approve and queue"
+                                            ? "Recognize on this iPad"
+                                            : "Approve and send"
                                 )
                                     .fontWeight(.semibold)
                             }
@@ -125,7 +137,7 @@ struct MathAssistanceSheetView: View {
 
                 if submitted {
                     Section {
-                        Label("Math request queued", systemImage: "checkmark.circle")
+                        Label("Math result ready", systemImage: "checkmark.circle")
                             .font(.subheadline.weight(.medium))
                         Text(
                             "You can keep writing. Review the result from Math results in the notebook actions menu."
@@ -166,8 +178,14 @@ struct MathAssistanceSheetView: View {
                     Button("Cancel") { onDismiss() }
                 }
             }
-            .onChange(of: mode) { _, _ in prepared = nil }
-            .onChange(of: instructions) { _, _ in prepared = nil }
+            .onChange(of: mode) { _, _ in
+                prepared = nil
+                disclosure = nil
+            }
+            .onChange(of: instructions) { _, _ in
+                prepared = nil
+                disclosure = nil
+            }
         }
     }
 
@@ -176,7 +194,7 @@ struct MathAssistanceSheetView: View {
         isPreparing = true
         errorMessage = nil
         do {
-            prepared = try await aiJobs.prepareMathAssistance(
+            let value = try await aiJobs.prepareMathAssistance(
                 noteId: noteId,
                 selectedBlockIds: selection.selectedBlockIds,
                 selectionImagesByBlockId: selection.drawingImagesByBlockId,
@@ -184,6 +202,14 @@ struct MathAssistanceSheetView: View {
                 mode: mode,
                 learnerInstructions: instructions
             )
+            if value.request.mode != .recognize {
+                disclosure = try model.directProviderDisclosure(
+                    approximateInputTokens: value.approximateTokens,
+                    maximumOutputTokens: 8_000,
+                    requiresVision: value.imageCount > 0
+                )
+            }
+            prepared = value
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -191,7 +217,6 @@ struct MathAssistanceSheetView: View {
     }
 
     private func submit(_ request: PreparedMathAssistanceRequest) async {
-        guard let aiJobs = model.aiJobs else { return }
         isSubmitting = true
         errorMessage = nil
         do {
@@ -201,13 +226,47 @@ struct MathAssistanceSheetView: View {
                     isSubmitting = false
                     return
                 }
-                _ = try await aiJobs.submitLocalMathRecognition(
-                    request,
-                    preferredLanguages: model.localProcessingSettings.normalizedLanguages
-                )
+                var recognized = 0
+                for source in request.request.selectionSources.prefix(8) {
+                    guard let encoded = source.imageContent,
+                          let image = Data(base64Encoded: encoded),
+                          let store = model.store,
+                          let block = try? await store.payload(
+                              NoteBlockPayload.self,
+                              id: source.sourceId
+                          ) else { continue }
+                    let localRequest = LocalOCRRequest(
+                        accountId: request.request.accountId,
+                        targetKind: .notebookRegion,
+                        targetId: source.sourceId,
+                        parentId: request.request.noteId,
+                        noteId: request.request.noteId,
+                        inputRevision: block.revision,
+                        locator: request.selectionLocatorsByBlockId[source.sourceId]
+                            ?? SourceLocator(
+                                kind: .image,
+                                rectangles: [AnnotationRectangle(x: 0, y: 0, width: 1, height: 1)]
+                            ),
+                        imageData: image,
+                        preferredLanguages: model.localProcessingSettings.normalizedLanguages,
+                        mode: .formula
+                    )
+                    let response = try await model.recognizeFormulaOnDevice(localRequest)
+                    _ = try await store.saveOCRArtifact(
+                        request: localRequest,
+                        response: response
+                    )
+                    recognized += 1
+                }
+                guard recognized > 0 else { throw DirectWorkflowError.invalidRequest }
             } else {
-                _ = try await aiJobs.submitMathAssistance(request)
+                guard let disclosure else { throw DirectWorkflowError.invalidRequest }
+                _ = try await model.generateMathAssistanceDirect(
+                    request,
+                    approvedRoute: disclosure.route
+                )
             }
+            model.noteLocalMutation()
             submitted = true
         } catch {
             errorMessage = error.localizedDescription
@@ -216,11 +275,11 @@ struct MathAssistanceSheetView: View {
     }
 
     private var localRecognitionDisclosure: String {
-        "The encrypted crop is sent only to your trusted Mac and processed by the verified local formula model. No AI provider or API is used. Your original Pencil strokes are not changed."
+        "The crop is processed by the verified formula model on this iPad. No AI provider or Compute Node is used. Your original Pencil strokes are not changed."
     }
 
     private var providerDisclosure: String {
-        "Only the confirmed expression and bounded nearby text go through your trusted Mac using the reviewed provider route. Your original Pencil strokes are not changed."
+        "Only the confirmed expression and bounded nearby text go directly from this iPad to the provider shown above. Your original Pencil strokes are not changed."
     }
 }
 

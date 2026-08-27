@@ -126,6 +126,47 @@ enum LocalTextOCRService {
         }.value
     }
 
+    static func recognizeSourcePage(
+        accountId: UUID,
+        sourceId: UUID,
+        sourceVersionId: UUID,
+        inputRevision: Int,
+        pageNumber: Int,
+        imageData: Data,
+        preferredLanguages: [String]
+    ) async throws -> LocalOCRCapture {
+        try await Task.detached(priority: .utility) {
+            guard let image = UIImage(data: imageData), image.size.width > 0, image.size.height > 0
+            else { throw LocalTextOCRError.renderingFailed }
+            let png = try boundedPNG(image)
+            let response = try recognize(
+                png: png,
+                region: CGRect(origin: .zero, size: image.size),
+                pageSize: image.size,
+                preferredLanguages: preferredLanguages
+            )
+            let locator = SourceLocator(
+                kind: .pdf,
+                page: pageNumber,
+                rectangles: [AnnotationRectangle(x: 0, y: 0, width: 1, height: 1)]
+            )
+            let request = LocalOCRRequest(
+                accountId: accountId,
+                targetKind: .sourcePage,
+                targetId: sourceVersionId,
+                parentId: sourceId,
+                sourceVersionId: sourceVersionId,
+                inputRevision: inputRevision,
+                pageNumber: pageNumber,
+                locator: locator,
+                imageData: png,
+                preferredLanguages: preferredLanguages,
+                mode: .text
+            )
+            return LocalOCRCapture(request: request, response: response, suggestsFormula: false)
+        }.value
+    }
+
     private static func clusteredBounds(
         strokes: ArraySlice<PKStroke>,
         pageSize: CGSize

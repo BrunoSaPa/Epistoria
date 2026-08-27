@@ -128,14 +128,19 @@ Completed:
    test blueprints and questions, Concept suggestions, and weekly-review drafts. Approval shows
    the provider, model, destination, bounded scope, and configured maximum estimate. The iPad
    validates the complete response and every citation before saving an encrypted draft.
+28. Tutor turns, note questions, Source guides and questions, session reviews, written-response
+   feedback, and provider-backed math help run directly from the iPad. PDF text extraction and
+   formula recognition use on-device processing. Approved local-media transcription also starts
+   from the iPad. The optional Compute Node remains available only when explicitly selected.
+29. Recurring automation permissions freeze the approved provider route and execute due work from
+   the iPad under the saved Topic, task, cadence, expiration, and spending limits.
 
 Next stages:
 
 1. Validate related-result quality, performance, battery use, VoiceOver, and direct Source
    navigation during representative daily use on a physical iPad.
-2. Move Tutor, note questions, Source analysis, session review, written-response feedback, and
-   other remaining typed generation screens to direct-provider execution. Each remaining Compute
-   Node route must remain explicit during the transition.
+2. Validate direct-provider retries, background interruption recovery, cancellation, cost
+   accounting, local-network endpoints, and provider compatibility on a physical iPad.
 
 ## Competitor-informed opportunities
 

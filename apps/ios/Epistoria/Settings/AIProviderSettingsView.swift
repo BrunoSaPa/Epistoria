@@ -336,7 +336,7 @@ private struct AIProviderEditorView: View {
             } header: {
                 Text("Routing")
             } footer: {
-                Text("An approved AI request freezes this connection and model. Changing the active provider later does not reroute queued work. The saved result records the provider and model used.")
+                Text("An approved AI request freezes this connection and model. Changing the active provider later does not reroute approved work. The saved result records the provider and model used.")
             }
 
             Section("Estimated pricing (optional)") {

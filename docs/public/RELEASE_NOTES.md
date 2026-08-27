@@ -1,5 +1,19 @@
 # Release notes
 
+## Direct iPad AI workflows
+
+- Moved Tutor turns, note questions, provider-backed math help, session reviews,
+  written-response feedback, PDF Source guides, PDF questions, and supported media transcription
+  from the Compute Node queue to direct iPad execution.
+- Moved PDF text extraction and formula recognition to on-device processing.
+- Added bounded image inputs for vision-capable Responses, compatible, Anthropic, and Gemini
+  connections. Added direct timestamped transcription for Responses and compatible connections.
+- Added strict local response and citation validation before an encrypted artifact can be saved.
+- Attached the reviewed provider route to every new generated artifact and recurring automation
+  permission.
+- Kept the Compute Node as an optional, explicitly selected route for larger local models and
+  conversion work.
+
 ## Direct Topic Studio processing
 
 - Moved manual Topic Studio synthesis, flashcard, test, Concept, and weekly-review generation from

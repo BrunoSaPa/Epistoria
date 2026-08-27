@@ -119,6 +119,7 @@ public struct AutomationAuthorization: Codable, Equatable, Sendable {
     public var minimumIntervalHours: Int
     public var expiresAt: Date
     public var spendingLimitMinorUnits: Int
+    public var estimatedSpentMinorUnits: Int?
     public var currencyCode: String
     public var authorizedAt: Date
     public var scopeKey: String
@@ -131,6 +132,7 @@ public struct AutomationAuthorization: Codable, Equatable, Sendable {
         minimumIntervalHours: Int,
         expiresAt: Date,
         spendingLimitMinorUnits: Int,
+        estimatedSpentMinorUnits: Int = 0,
         currencyCode: String,
         authorizedAt: Date,
         scopeKey: String,
@@ -142,6 +144,7 @@ public struct AutomationAuthorization: Codable, Equatable, Sendable {
         self.minimumIntervalHours = max(minimumIntervalHours, 1)
         self.expiresAt = expiresAt
         self.spendingLimitMinorUnits = max(spendingLimitMinorUnits, 0)
+        self.estimatedSpentMinorUnits = max(estimatedSpentMinorUnits, 0)
         self.currencyCode = currencyCode
         self.authorizedAt = authorizedAt
         self.scopeKey = scopeKey
@@ -385,6 +388,7 @@ public struct FreeResponseFeedbackArtifact: EntityPayload, Equatable {
     public var generatedAt: Date
     public var sourceIds: [UUID]
     public var trace: ProviderTrace
+    public var providerRoute: AIProviderRouteSnapshot? = nil
     public var response: FreeResponseFeedbackResponse
     public var reviewState: AIArtifactReviewState?
     public var reviewedAt: Date?
@@ -402,7 +406,8 @@ public struct FreeResponseFeedbackArtifact: EntityPayload, Equatable {
         generatedAt: Date,
         sourceIds: [UUID],
         trace: ProviderTrace,
-        response: FreeResponseFeedbackResponse
+        response: FreeResponseFeedbackResponse,
+        providerRoute: AIProviderRouteSnapshot? = nil
     ) {
         self.jobId = jobId
         self.attemptId = attemptId
@@ -412,6 +417,7 @@ public struct FreeResponseFeedbackArtifact: EntityPayload, Equatable {
         self.generatedAt = generatedAt
         self.sourceIds = sourceIds
         self.trace = trace
+        self.providerRoute = providerRoute
         self.response = response
         reviewState = nil
         reviewedAt = nil
@@ -503,6 +509,7 @@ public struct NoteQueryArtifact: EntityPayload, Equatable {
     public var generatedAt: Date
     public var sourceIds: [UUID]
     public var trace: ProviderTrace
+    public var providerRoute: AIProviderRouteSnapshot? = nil
     public var response: NoteQueryResponse
 
     // Review state — set by the owner on the iPad, never by the worker.
@@ -512,6 +519,34 @@ public struct NoteQueryArtifact: EntityPayload, Equatable {
 
     public var createdAt: Date { generatedAt }
     public var updatedAt: Date { reviewedAt ?? generatedAt }
+
+    public init(
+        schemaVersion: String = "ai-artifact/note-query/v1",
+        jobId: UUID,
+        noteId: UUID,
+        question: String,
+        generatedAt: Date,
+        sourceIds: [UUID],
+        trace: ProviderTrace,
+        providerRoute: AIProviderRouteSnapshot? = nil,
+        response: NoteQueryResponse,
+        reviewState: AIArtifactReviewState? = nil,
+        reviewedAt: Date? = nil,
+        editedResponse: NoteQueryResponse? = nil
+    ) {
+        self.schemaVersion = schemaVersion
+        self.jobId = jobId
+        self.noteId = noteId
+        self.question = question
+        self.generatedAt = generatedAt
+        self.sourceIds = sourceIds
+        self.trace = trace
+        self.providerRoute = providerRoute
+        self.response = response
+        self.reviewState = reviewState
+        self.reviewedAt = reviewedAt
+        self.editedResponse = editedResponse
+    }
 }
 
 public struct PreparedNoteQueryRequest: Equatable, Sendable {
@@ -602,6 +637,7 @@ public struct SessionDigestArtifact: EntityPayload, Equatable {
     public var generatedAt: Date
     public var sourceIds: [UUID]
     public var trace: ProviderTrace
+    public var providerRoute: AIProviderRouteSnapshot? = nil
     public var digest: SessionDigest
 
     // The trusted worker does not set review fields. They are added by the person using
@@ -612,6 +648,32 @@ public struct SessionDigestArtifact: EntityPayload, Equatable {
 
     public var createdAt: Date { generatedAt }
     public var updatedAt: Date { reviewedAt ?? generatedAt }
+
+    public init(
+        schemaVersion: String = "ai-artifact/session-digest/v1",
+        jobId: UUID,
+        sessionId: UUID,
+        generatedAt: Date,
+        sourceIds: [UUID],
+        trace: ProviderTrace,
+        providerRoute: AIProviderRouteSnapshot? = nil,
+        digest: SessionDigest,
+        reviewState: AIArtifactReviewState? = nil,
+        reviewedAt: Date? = nil,
+        editedDigest: SessionDigest? = nil
+    ) {
+        self.schemaVersion = schemaVersion
+        self.jobId = jobId
+        self.sessionId = sessionId
+        self.generatedAt = generatedAt
+        self.sourceIds = sourceIds
+        self.trace = trace
+        self.providerRoute = providerRoute
+        self.digest = digest
+        self.reviewState = reviewState
+        self.reviewedAt = reviewedAt
+        self.editedDigest = editedDigest
+    }
 }
 
 public struct DigestDisclosurePreview: Equatable, Sendable {
@@ -646,6 +708,13 @@ public struct ExtractedPDFPage: Codable, Equatable, Sendable {
     public var text: String
     public var characterCount: Int
     public var needsOcr: Bool
+
+    public init(pageNumber: Int, text: String, characterCount: Int, needsOcr: Bool) {
+        self.pageNumber = pageNumber
+        self.text = text
+        self.characterCount = characterCount
+        self.needsOcr = needsOcr
+    }
 }
 
 public struct PDFExtractionChunk: Codable, Equatable, Sendable {
@@ -654,6 +723,20 @@ public struct PDFExtractionChunk: Codable, Equatable, Sendable {
     public var resourceId: UUID
     public var chunkIndex: Int
     public var pages: [ExtractedPDFPage]
+
+    public init(
+        schemaVersion: String = "pdf-extraction-chunk/v1",
+        jobId: UUID,
+        resourceId: UUID,
+        chunkIndex: Int,
+        pages: [ExtractedPDFPage]
+    ) {
+        self.schemaVersion = schemaVersion
+        self.jobId = jobId
+        self.resourceId = resourceId
+        self.chunkIndex = chunkIndex
+        self.pages = pages
+    }
 }
 
 public struct PDFExtractionManifest: EntityPayload, Equatable {
@@ -669,6 +752,26 @@ public struct PDFExtractionManifest: EntityPayload, Equatable {
 
     public var createdAt: Date { generatedAt }
     public var updatedAt: Date { generatedAt }
+
+    public init(
+        schemaVersion: String = "ai-artifact/pdf-extraction/v2",
+        jobId: UUID,
+        resourceId: UUID,
+        generatedAt: Date,
+        pageCount: Int,
+        characterCount: Int,
+        pagesNeedingOcr: [Int],
+        chunkEntityIds: [UUID]
+    ) {
+        self.schemaVersion = schemaVersion
+        self.jobId = jobId
+        self.resourceId = resourceId
+        self.generatedAt = generatedAt
+        self.pageCount = pageCount
+        self.characterCount = characterCount
+        self.pagesNeedingOcr = pagesNeedingOcr
+        self.chunkEntityIds = chunkEntityIds
+    }
 }
 
 public enum SourceAnalysisMaterialKind: String, Codable, Sendable {
@@ -686,6 +789,20 @@ public struct SourceCitationReference: Codable, Equatable, Sendable, Identifiabl
 
     public var locator: SourceLocator {
         SourceLocator(kind: .pdf, page: pageNumber, rectangles: rectangles)
+    }
+
+    public init(
+        sourceId: UUID,
+        kind: SourceAnalysisMaterialKind,
+        pageNumber: Int,
+        rectangles: [AnnotationRectangle],
+        excerpt: String
+    ) {
+        self.sourceId = sourceId
+        self.kind = kind
+        self.pageNumber = pageNumber
+        self.rectangles = rectangles
+        self.excerpt = excerpt
     }
 }
 
@@ -771,9 +888,36 @@ public struct SourceAnalysisArtifact: EntityPayload, Equatable {
     public var analyzedPageCount: Int
     public var references: [SourceCitationReference]
     public var trace: ProviderTrace
+    public var providerRoute: AIProviderRouteSnapshot? = nil
     public var guide: SourceGuideResponse
     public var createdAt: Date { generatedAt }
     public var updatedAt: Date { generatedAt }
+
+    public init(
+        schemaVersion: String = "ai-artifact/source-analysis/v1",
+        jobId: UUID,
+        sourceId: UUID,
+        sourceVersionId: UUID,
+        generatedAt: Date,
+        pageCount: Int,
+        analyzedPageCount: Int,
+        references: [SourceCitationReference],
+        trace: ProviderTrace,
+        providerRoute: AIProviderRouteSnapshot? = nil,
+        guide: SourceGuideResponse
+    ) {
+        self.schemaVersion = schemaVersion
+        self.jobId = jobId
+        self.sourceId = sourceId
+        self.sourceVersionId = sourceVersionId
+        self.generatedAt = generatedAt
+        self.pageCount = pageCount
+        self.analyzedPageCount = analyzedPageCount
+        self.references = references
+        self.trace = trace
+        self.providerRoute = providerRoute
+        self.guide = guide
+    }
 }
 
 public struct SourceQueryArtifact: EntityPayload, Equatable {
@@ -786,9 +930,34 @@ public struct SourceQueryArtifact: EntityPayload, Equatable {
     public var generatedAt: Date
     public var references: [SourceCitationReference]
     public var trace: ProviderTrace
+    public var providerRoute: AIProviderRouteSnapshot? = nil
     public var response: SourceQueryResponse
     public var createdAt: Date { generatedAt }
     public var updatedAt: Date { generatedAt }
+
+    public init(
+        schemaVersion: String = "ai-artifact/source-query/v1",
+        jobId: UUID,
+        sourceId: UUID,
+        sourceVersionId: UUID,
+        question: String,
+        generatedAt: Date,
+        references: [SourceCitationReference],
+        trace: ProviderTrace,
+        providerRoute: AIProviderRouteSnapshot? = nil,
+        response: SourceQueryResponse
+    ) {
+        self.schemaVersion = schemaVersion
+        self.jobId = jobId
+        self.sourceId = sourceId
+        self.sourceVersionId = sourceVersionId
+        self.question = question
+        self.generatedAt = generatedAt
+        self.references = references
+        self.trace = trace
+        self.providerRoute = providerRoute
+        self.response = response
+    }
 }
 
 public struct MediaTranscriptionRequest: Codable, Equatable, Sendable {
@@ -923,6 +1092,7 @@ public struct MediaTranscriptionManifest: EntityPayload, Equatable {
     public var characterCount: Int
     public var segmentCount: Int
     public var trace: ProviderTrace
+    public var providerRoute: AIProviderRouteSnapshot? = nil
     public var chunkEntityIds: [UUID]
     public var reviewState: AIArtifactReviewState?
     public var reviewedAt: Date?
@@ -940,6 +1110,7 @@ public struct MediaTranscriptionManifest: EntityPayload, Equatable {
         segmentCount: Int,
         trace: ProviderTrace,
         chunkEntityIds: [UUID],
+        providerRoute: AIProviderRouteSnapshot? = nil,
         reviewState: AIArtifactReviewState? = nil,
         reviewedAt: Date? = nil
     ) {
@@ -952,6 +1123,7 @@ public struct MediaTranscriptionManifest: EntityPayload, Equatable {
         self.characterCount = characterCount
         self.segmentCount = segmentCount
         self.trace = trace
+        self.providerRoute = providerRoute
         self.chunkEntityIds = chunkEntityIds
         self.reviewState = reviewState
         self.reviewedAt = reviewedAt
@@ -986,9 +1158,9 @@ extension AIJobCoordinatorError: LocalizedError {
         case .sessionNotEnded: "End the session before requesting its review."
         case .noReadableSources: "This scope does not contain readable note text or Evidence yet."
         case .disclosureNotAcknowledged:
-            "Review and approve the disclosure before queueing this request."
+            "Review and approve the disclosure before sending this request."
         case .resourceHasNoPDF:
-            "This Source does not contain a PDF that the trusted Mac can extract."
+            "This Source does not contain a locally available PDF that this iPad can extract."
         case .sourceAnalysisRequiresPDF:
             "Exact Source analysis currently requires a locally available PDF Source Version."
         case .sourceQuestionEmpty: "Enter a question about this Source."
@@ -2200,7 +2372,10 @@ public actor AIJobCoordinator {
         return try await api.createAIJob(id: request.jobId, type: type, envelope: envelope)
     }
 
-    public func runDueAutomations(at date: Date = .now) async throws -> [AutomationQueueOutcome] {
+    public func runDueAutomations(
+        at date: Date = .now,
+        directSubmit: (@Sendable (PreparedLearningGenerationRequest) async throws -> Int)? = nil
+    ) async throws -> [AutomationQueueOutcome] {
         let grants = try await store.list(AutomationGrantPayload.self)
             .sorted { $0.payload.createdAt < $1.payload.createdAt }
         let artifacts = try await database.entities(type: .aiArtifact).compactMap { entity in
@@ -2211,7 +2386,7 @@ public actor AIJobCoordinator {
         for identified in grants where identified.payload.revokedAt == nil {
             var grant = identified.payload
             let queuedIds = Set(grant.queuedJobIds ?? [])
-            let estimatedSpent = artifacts.reduce(0) { total, artifact in
+            var estimatedSpent = artifacts.reduce(0) { total, artifact in
                 guard queuedIds.contains(artifact.jobId),
                     let dollars = artifact.trace.estimatedCostUsd
                 else { return total }
@@ -2267,12 +2442,22 @@ public actor AIJobCoordinator {
                             minimumIntervalHours: grant.minimumIntervalHours,
                             expiresAt: grant.expiresAt,
                             spendingLimitMinorUnits: grant.spendingLimitMinorUnits,
+                            estimatedSpentMinorUnits: estimatedSpent,
                             currencyCode: grant.currencyCode,
                             authorizedAt: date,
                             scopeKey: scopeKey,
                             inputFingerprint: fingerprint
                         )
-                        _ = try await submitTopicGeneration(prepared)
+                        prepared.request.providerRoute = grant.providerRoute
+                        if let directSubmit {
+                            guard grant.providerRoute != nil else {
+                                throw AIJobCoordinatorError.providerRouteUnavailable
+                            }
+                            let reservedMinorUnits = try await directSubmit(prepared)
+                            estimatedSpent += max(reservedMinorUnits, 0)
+                        } else {
+                            _ = try await submitTopicGeneration(prepared)
+                        }
                         try await store.recordAutomationQueue(
                             grantId: identified.id,
                             scopeKey: scopeKey,
@@ -2540,10 +2725,10 @@ public actor AIJobCoordinator {
         )
     }
 
-    public func submitTutorTurn(
+    public func stageTutorTurn(
         _ prepared: PreparedTutorTurnRequest,
         now: Date = .now
-    ) async throws -> AIJobSummary {
+    ) async throws -> TutorTurnRequest {
         var request = prepared.request
         var session = try await store.payload(TutorSessionPayload.self, id: request.tutorSessionId)
         guard session.payload.topicId == request.topicId else {
@@ -2593,6 +2778,14 @@ public actor AIJobCoordinator {
             ),
         ])
 
+        return request
+    }
+
+    public func submitTutorTurn(
+        _ prepared: PreparedTutorTurnRequest,
+        now: Date = .now
+    ) async throws -> AIJobSummary {
+        let request = try await stageTutorTurn(prepared, now: now)
         let envelope = try crypto.encryptJob(
             CanonicalJSON.encode(request),
             accountKey: accountKey,

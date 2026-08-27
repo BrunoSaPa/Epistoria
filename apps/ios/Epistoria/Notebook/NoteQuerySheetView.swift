@@ -11,6 +11,7 @@ struct NoteQuerySheetView: View {
 
     @State private var question = ""
     @State private var prepared: PreparedNoteQueryRequest?
+    @State private var disclosure: DirectProviderDisclosure?
     @State private var isPreparing = false
     @State private var isSubmitting = false
     @State private var submitted = false
@@ -101,7 +102,7 @@ struct NoteQuerySheetView: View {
                     if isPreparing {
                         ProgressView().padding(.trailing, 6)
                     }
-                    Text(isPreparing ? "Preparing…" : "Preview what leaves your Mac")
+                    Text(isPreparing ? "Preparing…" : "Preview what leaves this iPad")
                 }
                 .frame(maxWidth: .infinity)
             }
@@ -116,13 +117,24 @@ struct NoteQuerySheetView: View {
 
     @ViewBuilder
     private func disclosureSection(_ prep: PreparedNoteQueryRequest) -> some View {
-        Section("What leaves your Mac") {
+        Section("What leaves this iPad") {
             LabeledContent("Selected items", value: "\(prep.selectionCount)")
             LabeledContent("Context items", value: "\(prep.contextCount)")
             if prep.hasImages {
                 LabeledContent("Includes images", value: "Yes — selected visuals sent as PNG")
             }
             LabeledContent("Approximate tokens", value: prep.approximateTokens.formatted())
+            if let disclosure {
+                LabeledContent("Provider", value: disclosure.provider)
+                LabeledContent("Model", value: disclosure.model)
+                LabeledContent("Destination", value: disclosure.destination)
+                LabeledContent(
+                    "Maximum estimated cost",
+                    value: disclosure.maximumEstimatedCostUsd.map {
+                        $0.formatted(.currency(code: "USD"))
+                    } ?? "Not available"
+                )
+            }
         }
     }
 
@@ -137,7 +149,7 @@ struct NoteQuerySheetView: View {
                         ProgressView()
                             .padding(.trailing, 6)
                     }
-                    Text(isSubmitting ? "Queuing…" : "Approve and queue")
+                    Text(isSubmitting ? "Generating…" : "Approve and send")
                         .fontWeight(.semibold)
                 }
                 .frame(maxWidth: .infinity)
@@ -147,7 +159,7 @@ struct NoteQuerySheetView: View {
             .disabled(isSubmitting)
             .accessibilityIdentifier("note-query.submit")
         } footer: {
-            Text("The answer will appear in the note's AI answers panel after the approved processing route completes.")
+            Text("The request goes directly from this iPad to the provider shown above. Only a validated, encrypted answer is saved.")
                 .font(.caption)
         }
     }
@@ -158,9 +170,9 @@ struct NoteQuerySheetView: View {
                 Image(systemName: "checkmark.circle.fill")
                     .foregroundStyle(EpistoriaDesign.positive)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("Question queued")
+                    Text("Answer ready")
                         .font(.subheadline.weight(.medium))
-                    Text("The approved route will process it when available. Check AI answers in the note toolbar.")
+                    Text("Open AI answers in the note toolbar to review the cited result.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -180,12 +192,18 @@ struct NoteQuerySheetView: View {
         isPreparing = true
         errorMessage = nil
         do {
-            prepared = try await aiJobs.prepareNoteQuery(
+            let value = try await aiJobs.prepareNoteQuery(
                 noteId: noteId,
                 selectedBlockIds: selection.selectedBlockIds,
                 selectionImagesByBlockId: selection.drawingImagesByBlockId,
                 question: question.trimmingCharacters(in: .whitespacesAndNewlines)
             )
+            disclosure = try model.directProviderDisclosure(
+                approximateInputTokens: value.approximateTokens,
+                maximumOutputTokens: 4_096,
+                requiresVision: value.hasImages
+            )
+            prepared = value
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -193,11 +211,12 @@ struct NoteQuerySheetView: View {
     }
 
     private func submit(_ prep: PreparedNoteQueryRequest) async {
-        guard let aiJobs = model.aiJobs else { return }
+        guard let disclosure else { return }
         isSubmitting = true
         errorMessage = nil
         do {
-            _ = try await aiJobs.submitNoteQuery(prep)
+            _ = try await model.generateNoteQueryDirect(prep, approvedRoute: disclosure.route)
+            model.noteLocalMutation()
             submitted = true
         } catch {
             errorMessage = error.localizedDescription

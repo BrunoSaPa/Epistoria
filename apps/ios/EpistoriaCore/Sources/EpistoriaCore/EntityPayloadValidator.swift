@@ -136,7 +136,7 @@ public enum EntityPayloadValidator {
         case .testResponse: ["test-response/v1", "test-response/v2"]
         case .studyRecommendation: ["study-recommendation/v1"]
         case .recommendationResponse: ["recommendation-response/v1", "recommendation-response/v2"]
-        case .automationGrant: ["automation-grant/v1", "automation-grant/v2"]
+        case .automationGrant: ["automation-grant/v1", "automation-grant/v2", "automation-grant/v3"]
         case .tutorSession: ["tutor-session/v1"]
         case .tutorTurn: ["tutor-turn/v1"]
         case .learningSignal: ["learning-signal/v1"]

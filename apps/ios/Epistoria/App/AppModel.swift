@@ -3,6 +3,8 @@ import CryptoKit
 import Foundation
 import Network
 import Observation
+import PDFKit
+import UIKit
 
 private enum AppModelOperationError: Error, LocalizedError {
     case accountSetupRollbackFailed
@@ -16,6 +18,8 @@ private enum AppModelOperationError: Error, LocalizedError {
     case aiProviderSecretRequired
     case aiProviderURLInvalid
     case aiProviderRouteChanged
+    case automationCostUnavailable
+    case automationBudgetExceeded
 
     var errorDescription: String? {
         switch self {
@@ -41,6 +45,10 @@ private enum AppModelOperationError: Error, LocalizedError {
             "Use HTTPS for a remote provider. Plain HTTP is allowed only for a local or private-network address."
         case .aiProviderRouteChanged:
             "The active provider changed after this request was reviewed. Review the request again before sending it."
+        case .automationCostUnavailable:
+            "Automatic provider work requires configured input and output rates so Epistoria can enforce the spending limit."
+        case .automationBudgetExceeded:
+            "This automatic request could exceed the approved spending limit. Increase the limit or run the request manually."
         }
     }
 }
@@ -66,6 +74,16 @@ struct DirectProviderDisclosure: Equatable {
     var destination: String
     var maximumEstimatedCostUsd: Double?
     var route: AIProviderRouteSnapshot
+}
+
+struct DirectSourcePreparation: Equatable {
+    var sourceId: UUID
+    var sourceVersionId: UUID
+    var title: String
+    var pageCount: Int
+    var references: [SourceCitationReference]
+    var images: [ProviderImageInput]
+    var approximateTokens: Int
 }
 
 @MainActor
@@ -110,6 +128,7 @@ final class AppModel {
     private let aiProviderProfileStore: AIProviderProfileStore
     private let aiProviderSecretStore: AIProviderSecretStore
     private let directProviderClient: any ProviderClient
+    private let directTranscriptionClient: any ProviderTranscriptionClient
     private let crypto: EntityCrypto
     private let applicationSupportOverride: URL?
     private var isOpening = false
@@ -138,6 +157,7 @@ final class AppModel {
         aiProviderProfileStore: AIProviderProfileStore = AIProviderProfileStore(),
         aiProviderSecretStore: AIProviderSecretStore = AIProviderSecretStore(),
         directProviderClient: any ProviderClient = DirectProviderClient(),
+        directTranscriptionClient: any ProviderTranscriptionClient = DirectProviderClient(),
         localProcessingSettings: LocalProcessingSettings = LocalProcessingSettings(),
         formulaModelManager: OnDeviceFormulaModelManager = OnDeviceFormulaModelManager(),
         crypto: EntityCrypto = EntityCrypto(),
@@ -149,6 +169,7 @@ final class AppModel {
         self.aiProviderProfileStore = aiProviderProfileStore
         self.aiProviderSecretStore = aiProviderSecretStore
         self.directProviderClient = directProviderClient
+        self.directTranscriptionClient = directTranscriptionClient
         self.localProcessingSettings = localProcessingSettings
         self.formulaModelManager = formulaModelManager
         formulaRecognitionEngine = CoreMLFormulaRecognitionEngine(modelManager: formulaModelManager)
@@ -684,11 +705,30 @@ final class AppModel {
         approximateInputTokens: Int,
         jobType: LearningAIJobType
     ) throws -> DirectProviderDisclosure {
+        try directProviderDisclosure(
+            approximateInputTokens: approximateInputTokens,
+            maximumOutputTokens: DirectLearningGeneration.maximumOutputTokens(for: jobType)
+        )
+    }
+
+    func directProviderDisclosure(
+        approximateInputTokens: Int,
+        maximumOutputTokens: Int,
+        requiresVision: Bool = false,
+        requiresTranscription: Bool = false
+    ) throws -> DirectProviderDisclosure {
         guard let accountId = configuration?.accountId else {
             throw AppModelOperationError.aiProviderUnavailable
         }
         let profile = try activeDirectProviderProfile(accountId: accountId)
-        let maximumOutputTokens = DirectLearningGeneration.maximumOutputTokens(for: jobType)
+        if requiresVision, !profile.capabilities.contains(.vision) {
+            throw DirectWorkflowError.visionUnavailable
+        }
+        if requiresTranscription,
+           (!profile.capabilities.contains(.transcription)
+               || profile.transcriptionModel?.isEmpty != false) {
+            throw AppModelOperationError.aiProviderUnavailable
+        }
         let maximumEstimatedCostUsd: Double?
         if let inputRate = profile.inputUSDPerMillion,
            let outputRate = profile.outputUSDPerMillion {
@@ -705,6 +745,866 @@ final class AppModel {
             maximumEstimatedCostUsd: maximumEstimatedCostUsd,
             route: profile.routeSnapshot
         )
+    }
+
+    @discardableResult
+    private func generateDirectArtifact<Result>(
+        jobId: UUID,
+        kind: String,
+        inputEntityId: UUID,
+        sourceIds: [UUID],
+        approximateInputTokens: Int,
+        approvedRoute: AIProviderRouteSnapshot,
+        providerRequest: ProviderTextRequest,
+        validate: (String) throws -> Result,
+        persist: (Result, ProviderTrace, AIProviderRouteSnapshot) async throws -> UUID
+    ) async throws -> UUID {
+        guard let accountId = configuration?.accountId, let database else {
+            throw AppModelOperationError.aiProviderUnavailable
+        }
+        let profile = try activeDirectProviderProfile(accountId: accountId)
+        guard profile.routeSnapshot == approvedRoute else {
+            throw AppModelOperationError.aiProviderRouteChanged
+        }
+        let disclosure = try directProviderDisclosure(
+            approximateInputTokens: approximateInputTokens,
+            maximumOutputTokens: providerRequest.maximumOutputTokens,
+            requiresVision: !providerRequest.images.isEmpty
+        )
+        let approval = ProcessingApproval(
+            providerProfileId: profile.id,
+            sourceIds: sourceIds,
+            maximumCostMinorUnits: disclosure.maximumEstimatedCostUsd.map {
+                Int(ceil(max($0, 0) * 100))
+            },
+            currencyCode: disclosure.maximumEstimatedCostUsd == nil ? nil : "USD",
+            expiresAt: Date().addingTimeInterval(30 * 60)
+        )
+        var fingerprintData = Data(providerRequest.prompt.utf8)
+        for image in providerRequest.images {
+            fingerprintData.append(contentsOf: SHA256.hash(data: image.data))
+        }
+        let fingerprint = SHA256.hash(data: fingerprintData)
+            .map { String(format: "%02x", $0) }.joined()
+        let job = ProcessingJob(
+            id: jobId,
+            kind: kind,
+            inputEntityId: inputEntityId,
+            inputFingerprint: fingerprint,
+            requiredCapabilities: [.hostedProvider],
+            selectedRoute: .directProvider,
+            approval: approval
+        )
+        _ = try await database.saveProcessingJob(job)
+        _ = try await database.transitionProcessingJob(
+            id: job.id,
+            to: .running,
+            route: .directProvider
+        )
+        do {
+            let secret = try aiProviderSecretStore.secret(
+                accountId: accountId,
+                profileId: profile.id
+            )
+            let providerResponse = try await directProviderClient.performText(
+                providerRequest,
+                route: approvedRoute,
+                apiKey: secret
+            )
+            let result = try validate(providerResponse.text)
+            let trace = providerTrace(
+                profile: profile,
+                response: providerResponse,
+                promptVersion: DirectWorkflowGeneration.promptVersion
+            )
+            let artifactId = try await persist(result, trace, approvedRoute)
+            _ = try await database.transitionProcessingJob(id: job.id, to: .completed, progress: 1)
+            return artifactId
+        } catch DirectProviderError.transport {
+            _ = try? await database.transitionProcessingJob(
+                id: job.id,
+                to: .waitingForNetwork,
+                errorCode: "PROVIDER_UNREACHABLE"
+            )
+            throw DirectProviderError.transport
+        } catch is CancellationError {
+            _ = try? await database.transitionProcessingJob(id: job.id, to: .cancelled)
+            throw CancellationError()
+        } catch let error as DirectWorkflowError {
+            _ = try? await database.transitionProcessingJob(
+                id: job.id,
+                to: .failed,
+                errorCode: "PROVIDER_SCHEMA_INVALID"
+            )
+            throw error
+        } catch {
+            _ = try? await database.transitionProcessingJob(
+                id: job.id,
+                to: .failed,
+                errorCode: "PROVIDER_REQUEST_FAILED"
+            )
+            throw error
+        }
+    }
+
+    private func providerTrace(
+        profile: AIProviderProfile,
+        response: ProviderTextResponse,
+        promptVersion: String
+    ) -> ProviderTrace {
+        let cost: Double?
+        if let inputTokens = response.inputTokens,
+           let outputTokens = response.outputTokens,
+           let inputRate = profile.inputUSDPerMillion,
+           let outputRate = profile.outputUSDPerMillion {
+            cost = Double(inputTokens) / 1_000_000 * max(inputRate, 0)
+                + Double(outputTokens) / 1_000_000 * max(outputRate, 0)
+        } else {
+            cost = nil
+        }
+        return ProviderTrace(
+            provider: profile.displayName,
+            model: profile.textModel,
+            promptVersion: promptVersion,
+            inputTokens: response.inputTokens,
+            outputTokens: response.outputTokens,
+            estimatedCostUsd: cost,
+            providerRequestId: response.providerRequestId
+        )
+    }
+
+    func generateSessionDigestDirect(
+        _ prepared: PreparedDigestRequest,
+        approvedRoute: AIProviderRouteSnapshot
+    ) async throws -> UUID {
+        guard let store else { throw AppModelOperationError.unlockedSessionUnavailable }
+        var request = prepared.request
+        request.disclosureAcknowledged = true
+        request.providerRoute = approvedRoute
+        let providerRequest = try DirectWorkflowGeneration.sessionDigestRequest(request)
+        return try await generateDirectArtifact(
+            jobId: request.jobId,
+            kind: "SESSION_DIGEST",
+            inputEntityId: request.sessionId,
+            sourceIds: request.sources.map(\.sourceId),
+            approximateInputTokens: prepared.preview.approximateTokens,
+            approvedRoute: approvedRoute,
+            providerRequest: providerRequest,
+            validate: { try DirectWorkflowGeneration.validateSessionDigest($0, request: request) },
+            persist: { digest, trace, route in
+                let artifact = SessionDigestArtifact(
+                    schemaVersion: "ai-artifact/session-digest/v1",
+                    jobId: request.jobId,
+                    sessionId: request.sessionId,
+                    generatedAt: .now,
+                    sourceIds: digest.keyPoints.flatMap(\.sourceIds)
+                        + digest.possibleMisconceptions.flatMap(\.sourceIds),
+                    trace: trace,
+                    providerRoute: route,
+                    digest: digest,
+                    reviewState: nil,
+                    reviewedAt: nil,
+                    editedDigest: nil
+                )
+                let id = DirectWorkflowGeneration.artifactId(jobId: request.jobId, kind: "session")
+                _ = try await store.save(
+                    id: id,
+                    payload: artifact,
+                    parentId: request.sessionId,
+                    relationIds: [request.sessionId] + artifact.sourceIds
+                )
+                return id
+            }
+        )
+    }
+
+    func generateNoteQueryDirect(
+        _ prepared: PreparedNoteQueryRequest,
+        approvedRoute: AIProviderRouteSnapshot
+    ) async throws -> UUID {
+        guard let store else { throw AppModelOperationError.unlockedSessionUnavailable }
+        var request = prepared.request
+        request.disclosureAcknowledged = true
+        request.providerRoute = approvedRoute
+        let providerRequest = try DirectWorkflowGeneration.noteQueryRequest(request, route: approvedRoute)
+        return try await generateDirectArtifact(
+            jobId: request.jobId,
+            kind: "NOTE_QUERY",
+            inputEntityId: request.noteId,
+            sourceIds: (request.selectionSources + request.contextSources).map(\.sourceId),
+            approximateInputTokens: prepared.approximateTokens,
+            approvedRoute: approvedRoute,
+            providerRequest: providerRequest,
+            validate: { try DirectWorkflowGeneration.validateNoteQuery($0, request: request) },
+            persist: { response, trace, route in
+                let artifact = NoteQueryArtifact(
+                    schemaVersion: "ai-artifact/note-query/v1",
+                    jobId: request.jobId,
+                    noteId: request.noteId,
+                    question: request.question,
+                    generatedAt: .now,
+                    sourceIds: response.citedSourceIds,
+                    trace: trace,
+                    providerRoute: route,
+                    response: response,
+                    reviewState: nil,
+                    reviewedAt: nil,
+                    editedResponse: nil
+                )
+                let id = DirectWorkflowGeneration.artifactId(jobId: request.jobId, kind: "note-query")
+                _ = try await store.save(
+                    id: id,
+                    payload: artifact,
+                    parentId: request.noteId,
+                    relationIds: [request.noteId] + artifact.sourceIds
+                )
+                return id
+            }
+        )
+    }
+
+    func generateMathAssistanceDirect(
+        _ prepared: PreparedMathAssistanceRequest,
+        approvedRoute: AIProviderRouteSnapshot
+    ) async throws -> UUID {
+        guard let store else { throw AppModelOperationError.unlockedSessionUnavailable }
+        var request = prepared.request
+        request.disclosureAcknowledged = true
+        request.providerRoute = approvedRoute
+        let providerRequest = try DirectWorkflowGeneration.mathRequest(request, route: approvedRoute)
+        return try await generateDirectArtifact(
+            jobId: request.jobId,
+            kind: "MATH_ASSISTANCE",
+            inputEntityId: request.noteId,
+            sourceIds: (request.selectionSources + request.contextSources).map(\.sourceId),
+            approximateInputTokens: prepared.approximateTokens,
+            approvedRoute: approvedRoute,
+            providerRequest: providerRequest,
+            validate: { try DirectWorkflowGeneration.validateMath($0, request: request) },
+            persist: { response, trace, route in
+                let artifact = MathAssistanceArtifact(
+                    jobId: request.jobId,
+                    noteId: request.noteId,
+                    mode: request.mode,
+                    learnerInstructions: request.learnerInstructions,
+                    generatedAt: .now,
+                    sourceIds: response.citedSourceIds,
+                    trace: trace,
+                    response: response,
+                    providerRoute: route
+                )
+                let id = DirectWorkflowGeneration.artifactId(jobId: request.jobId, kind: "math")
+                _ = try await store.save(
+                    id: id,
+                    payload: artifact,
+                    parentId: request.noteId,
+                    relationIds: [request.noteId] + artifact.sourceIds
+                )
+                return id
+            }
+        )
+    }
+
+    func generateFreeResponseFeedbackDirect(
+        _ prepared: PreparedFreeResponseFeedbackRequest,
+        approvedRoute: AIProviderRouteSnapshot
+    ) async throws -> UUID {
+        guard let store else { throw AppModelOperationError.unlockedSessionUnavailable }
+        var request = prepared.request
+        request.disclosureAcknowledged = true
+        request.providerRoute = approvedRoute
+        let providerRequest = try DirectWorkflowGeneration.feedbackRequest(request)
+        return try await generateDirectArtifact(
+            jobId: request.jobId,
+            kind: "FREE_RESPONSE_FEEDBACK",
+            inputEntityId: request.responseId,
+            sourceIds: request.evidence.map(\.sourceId),
+            approximateInputTokens: prepared.approximateTokens,
+            approvedRoute: approvedRoute,
+            providerRequest: providerRequest,
+            validate: { try DirectWorkflowGeneration.validateFeedback($0, request: request) },
+            persist: { response, trace, route in
+                let artifact = FreeResponseFeedbackArtifact(
+                    jobId: request.jobId,
+                    attemptId: request.attemptId,
+                    responseId: request.responseId,
+                    questionId: request.questionId,
+                    topicId: request.topicId,
+                    generatedAt: .now,
+                    sourceIds: response.citedSourceIds,
+                    trace: trace,
+                    response: response,
+                    providerRoute: route
+                )
+                let id = DirectWorkflowGeneration.artifactId(jobId: request.jobId, kind: "feedback")
+                _ = try await store.save(
+                    id: id,
+                    payload: artifact,
+                    parentId: request.attemptId,
+                    relationIds: [request.attemptId, request.responseId, request.topicId]
+                        + artifact.sourceIds
+                )
+                return id
+            }
+        )
+    }
+
+    /// Extracts a PDF locally. The original encrypted Asset remains authoritative; chunks and the
+    /// manifest are derived encrypted records that can be regenerated.
+    @discardableResult
+    func extractPDFOnDevice(sourceId: UUID) async throws -> UUID {
+        guard let database, let store, let assetManager else {
+            throw AppModelOperationError.unlockedSessionUnavailable
+        }
+        let resource = try await store.payload(ResourcePayload.self, id: sourceId).payload
+        let source = try await store.payload(SourcePayload.self, id: sourceId).payload
+        guard resource.resourceType == .pdf,
+              let versionId = source.currentVersionId,
+              let version = try? await store.payload(SourceVersionPayload.self, id: versionId).payload,
+              let assetId = version.originalAssetId
+        else { throw AIJobCoordinatorError.resourceHasNoPDF }
+        let data = try await assetManager.decryptedData(assetId: assetId)
+        guard let document = PDFDocument(data: data), document.pageCount > 0 else {
+            throw AIJobCoordinatorError.resourceHasNoPDF
+        }
+        let jobId = UUID()
+        let fingerprint = SHA256.hash(data: data)
+            .map { String(format: "%02x", $0) }.joined()
+        let job = ProcessingJob(
+            id: jobId,
+            kind: "PDF_EXTRACTION",
+            inputEntityId: versionId,
+            inputFingerprint: fingerprint,
+            requiredCapabilities: [.sourceExtraction],
+            selectedRoute: .onDevice
+        )
+        _ = try await database.saveProcessingJob(job)
+        _ = try await database.transitionProcessingJob(id: jobId, to: .running, route: .onDevice)
+        do {
+            var pages: [ExtractedPDFPage] = []
+            for index in 0 ..< document.pageCount {
+                try Task.checkCancellation()
+                let raw = document.page(at: index)?.string ?? ""
+                let text = String(raw.prefix(100_000))
+                let count = text.count
+                pages.append(
+                    ExtractedPDFPage(
+                        pageNumber: index + 1,
+                        text: text,
+                        characterCount: count,
+                        needsOcr: text.trimmingCharacters(in: .whitespacesAndNewlines).count < 24
+                    )
+                )
+            }
+            var chunkIds: [UUID] = []
+            for (index, start) in stride(from: 0, to: pages.count, by: 10).enumerated() {
+                let id = DirectWorkflowGeneration.artifactId(
+                    jobId: jobId,
+                    kind: "pdf-chunk-\(index)"
+                )
+                let chunk = PDFExtractionChunk(
+                    schemaVersion: "pdf-extraction-chunk/v1",
+                    jobId: jobId,
+                    resourceId: sourceId,
+                    chunkIndex: index,
+                    pages: Array(pages[start ..< min(start + 10, pages.count)])
+                )
+                _ = try await database.saveLocal(
+                    id: id,
+                    entityType: .aiArtifact,
+                    parentId: sourceId,
+                    relationIds: [sourceId, versionId],
+                    content: CanonicalJSON.encode(chunk)
+                )
+                chunkIds.append(id)
+            }
+            let manifest = PDFExtractionManifest(
+                schemaVersion: "ai-artifact/pdf-extraction/v2",
+                jobId: jobId,
+                resourceId: sourceId,
+                generatedAt: .now,
+                pageCount: pages.count,
+                characterCount: pages.reduce(0) { $0 + $1.characterCount },
+                pagesNeedingOcr: pages.filter(\.needsOcr).map(\.pageNumber),
+                chunkEntityIds: chunkIds
+            )
+            let manifestId = DirectWorkflowGeneration.artifactId(jobId: jobId, kind: "pdf")
+            _ = try await store.save(
+                id: manifestId,
+                payload: manifest,
+                parentId: sourceId,
+                relationIds: [sourceId, versionId] + chunkIds
+            )
+            _ = try await database.transitionProcessingJob(id: jobId, to: .completed, progress: 1)
+            return manifestId
+        } catch is CancellationError {
+            _ = try? await database.transitionProcessingJob(id: jobId, to: .cancelled)
+            throw CancellationError()
+        } catch {
+            _ = try? await database.transitionProcessingJob(
+                id: jobId,
+                to: .failed,
+                errorCode: "PDF_EXTRACTION_FAILED"
+            )
+            throw error
+        }
+    }
+
+    func prepareDirectSource(
+        sourceId: UUID,
+        includeImages: Bool
+    ) async throws -> DirectSourcePreparation {
+        guard let store, let assetManager else {
+            throw AppModelOperationError.unlockedSessionUnavailable
+        }
+        let source = try await store.payload(SourcePayload.self, id: sourceId).payload
+        guard source.sourceType == .pdf,
+              let versionId = source.currentVersionId,
+              let version = try? await store.payload(SourceVersionPayload.self, id: versionId).payload,
+              let assetId = version.originalAssetId
+        else { throw AIJobCoordinatorError.sourceAnalysisRequiresPDF }
+        let data = try await assetManager.decryptedData(assetId: assetId)
+        guard let document = PDFDocument(data: data), document.pageCount > 0 else {
+            throw AIJobCoordinatorError.sourceAnalysisRequiresPDF
+        }
+        var references: [SourceCitationReference] = []
+        var images: [ProviderImageInput] = []
+        var characterCount = 0
+        for pageIndex in 0 ..< document.pageCount where references.count < 80 {
+            try Task.checkCancellation()
+            guard let page = document.page(at: pageIndex) else { continue }
+            let pageText = page.string ?? ""
+            let text = pageText.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !text.isEmpty, characterCount < 320_000 {
+                for (part, start) in stride(from: 0, to: text.count, by: 8_000).enumerated() {
+                    guard references.count < 80, characterCount < 320_000 else { break }
+                    let lower = text.index(text.startIndex, offsetBy: start)
+                    let upper = text.index(lower, offsetBy: min(8_000, text.count - start))
+                    let excerpt = String(text[lower ..< upper])
+                    let referenceId = DirectWorkflowGeneration.artifactId(
+                        jobId: versionId,
+                        kind: "page-\(pageIndex + 1)-text-\(part)"
+                    )
+                    references.append(
+                        SourceCitationReference(
+                            sourceId: referenceId,
+                            kind: .text,
+                            pageNumber: pageIndex + 1,
+                            rectangles: Self.pdfSelectionRectangles(
+                                page: page,
+                                pageText: pageText,
+                                excerpt: excerpt
+                            ),
+                            excerpt: excerpt
+                        )
+                    )
+                    characterCount += excerpt.count
+                }
+            }
+            if includeImages, images.count < 8 {
+                let thumbnail = page.thumbnail(of: CGSize(width: 1_200, height: 1_600), for: .mediaBox)
+                if let image = thumbnail.jpegData(compressionQuality: 0.72), image.count <= 2_000_000 {
+                    let referenceId = DirectWorkflowGeneration.artifactId(
+                        jobId: versionId,
+                        kind: "page-\(pageIndex + 1)-image"
+                    )
+                    references.append(
+                        SourceCitationReference(
+                            sourceId: referenceId,
+                            kind: .image,
+                            pageNumber: pageIndex + 1,
+                            rectangles: [AnnotationRectangle(x: 0, y: 0, width: 1, height: 1)],
+                            excerpt: "Rendered page \(pageIndex + 1)"
+                        )
+                    )
+                    images.append(ProviderImageInput(mimeType: "image/jpeg", data: image))
+                }
+            }
+        }
+        guard !references.isEmpty else { throw AIJobCoordinatorError.noReadableSources }
+        return DirectSourcePreparation(
+            sourceId: sourceId,
+            sourceVersionId: versionId,
+            title: source.title,
+            pageCount: document.pageCount,
+            references: references,
+            images: images,
+            approximateTokens: max(1, characterCount / 4 + images.count * 700)
+        )
+    }
+
+    private static func pdfSelectionRectangles(
+        page: PDFPage,
+        pageText: String,
+        excerpt: String
+    ) -> [AnnotationRectangle] {
+        guard let range = pageText.range(of: excerpt) else {
+            return [AnnotationRectangle(x: 0, y: 0, width: 1, height: 1)]
+        }
+        let nsRange = NSRange(range, in: pageText)
+        guard let selection = page.selection(for: nsRange) else {
+            return [AnnotationRectangle(x: 0, y: 0, width: 1, height: 1)]
+        }
+        let pageBounds = page.bounds(for: .mediaBox)
+        let bounds = selection.bounds(for: page)
+        guard pageBounds.width > 0, pageBounds.height > 0,
+              !bounds.isNull, !bounds.isEmpty
+        else { return [AnnotationRectangle(x: 0, y: 0, width: 1, height: 1)] }
+        return [AnnotationRectangle(
+            x: min(max((bounds.minX - pageBounds.minX) / pageBounds.width, 0), 1),
+            y: min(max((pageBounds.maxY - bounds.maxY) / pageBounds.height, 0), 1),
+            width: min(max(bounds.width / pageBounds.width, 0.000_001), 1),
+            height: min(max(bounds.height / pageBounds.height, 0.000_001), 1)
+        )]
+    }
+
+    func generateSourceAnalysisDirect(
+        preparation: DirectSourcePreparation,
+        outputLanguage: String,
+        approvedRoute: AIProviderRouteSnapshot
+    ) async throws -> UUID {
+        guard let store else { throw AppModelOperationError.unlockedSessionUnavailable }
+        let jobId = UUID()
+        let providerRequest = try DirectWorkflowGeneration.sourceGuideRequest(
+            title: preparation.title,
+            outputLanguage: outputLanguage,
+            references: preparation.references,
+            images: preparation.images
+        )
+        return try await generateDirectArtifact(
+            jobId: jobId,
+            kind: "SOURCE_ANALYSIS",
+            inputEntityId: preparation.sourceVersionId,
+            sourceIds: [preparation.sourceId, preparation.sourceVersionId],
+            approximateInputTokens: preparation.approximateTokens,
+            approvedRoute: approvedRoute,
+            providerRequest: providerRequest,
+            validate: {
+                try DirectWorkflowGeneration.validateSourceGuide(
+                    $0,
+                    references: preparation.references
+                )
+            },
+            persist: { guide, trace, route in
+                let artifact = SourceAnalysisArtifact(
+                    schemaVersion: "ai-artifact/source-analysis/v1",
+                    jobId: jobId,
+                    sourceId: preparation.sourceId,
+                    sourceVersionId: preparation.sourceVersionId,
+                    generatedAt: .now,
+                    pageCount: preparation.pageCount,
+                    analyzedPageCount: Set(preparation.references.map(\.pageNumber)).count,
+                    references: preparation.references,
+                    trace: trace,
+                    providerRoute: route,
+                    guide: guide
+                )
+                let id = DirectWorkflowGeneration.artifactId(jobId: jobId, kind: "source-analysis")
+                _ = try await store.save(
+                    id: id,
+                    payload: artifact,
+                    parentId: preparation.sourceId,
+                    relationIds: [preparation.sourceId, preparation.sourceVersionId]
+                )
+                return id
+            }
+        )
+    }
+
+    func generateSourceQueryDirect(
+        preparation: DirectSourcePreparation,
+        question: String,
+        outputLanguage: String,
+        approvedRoute: AIProviderRouteSnapshot
+    ) async throws -> UUID {
+        guard let store else { throw AppModelOperationError.unlockedSessionUnavailable }
+        let jobId = UUID()
+        let providerRequest = try DirectWorkflowGeneration.sourceQueryRequest(
+            title: preparation.title,
+            question: question,
+            outputLanguage: outputLanguage,
+            references: preparation.references,
+            images: preparation.images
+        )
+        return try await generateDirectArtifact(
+            jobId: jobId,
+            kind: "SOURCE_QUERY",
+            inputEntityId: preparation.sourceVersionId,
+            sourceIds: [preparation.sourceId, preparation.sourceVersionId],
+            approximateInputTokens: preparation.approximateTokens,
+            approvedRoute: approvedRoute,
+            providerRequest: providerRequest,
+            validate: {
+                try DirectWorkflowGeneration.validateSourceQuery(
+                    $0,
+                    references: preparation.references
+                )
+            },
+            persist: { response, trace, route in
+                let artifact = SourceQueryArtifact(
+                    schemaVersion: "ai-artifact/source-query/v1",
+                    jobId: jobId,
+                    sourceId: preparation.sourceId,
+                    sourceVersionId: preparation.sourceVersionId,
+                    question: question,
+                    generatedAt: .now,
+                    references: preparation.references,
+                    trace: trace,
+                    providerRoute: route,
+                    response: response
+                )
+                let id = DirectWorkflowGeneration.artifactId(jobId: jobId, kind: "source-query")
+                _ = try await store.save(
+                    id: id,
+                    payload: artifact,
+                    parentId: preparation.sourceId,
+                    relationIds: [preparation.sourceId, preparation.sourceVersionId]
+                )
+                return id
+            }
+        )
+    }
+
+    func directTranscriptionDisclosure() throws -> DirectProviderDisclosure {
+        guard let accountId = configuration?.accountId else {
+            throw AppModelOperationError.aiProviderUnavailable
+        }
+        let profile = try activeDirectProviderProfile(accountId: accountId)
+        guard profile.capabilities.contains(.transcription),
+              let model = profile.transcriptionModel, !model.isEmpty
+        else { throw AppModelOperationError.aiProviderUnavailable }
+        return DirectProviderDisclosure(
+            provider: profile.displayName,
+            model: model,
+            destination: profile.destinationHost,
+            maximumEstimatedCostUsd: nil,
+            route: profile.routeSnapshot
+        )
+    }
+
+    @discardableResult
+    func transcribeSourceDirect(
+        sourceId: UUID,
+        language: String?,
+        approvedRoute: AIProviderRouteSnapshot
+    ) async throws -> UUID {
+        guard let accountId = configuration?.accountId,
+              let database, let store, let assetManager
+        else { throw AppModelOperationError.unlockedSessionUnavailable }
+        let profile = try activeDirectProviderProfile(accountId: accountId)
+        guard profile.routeSnapshot == approvedRoute,
+              profile.capabilities.contains(.transcription),
+              let transcriptionModel = profile.transcriptionModel,
+              !transcriptionModel.isEmpty
+        else { throw AppModelOperationError.aiProviderRouteChanged }
+        let source = try await store.payload(SourcePayload.self, id: sourceId).payload
+        guard [.audio, .video].contains(source.sourceType),
+              let versionId = source.currentVersionId,
+              let version = try? await store.payload(SourceVersionPayload.self, id: versionId).payload,
+              let assetId = version.originalAssetId
+        else { throw AIJobCoordinatorError.sourceHasNoTranscribableMedia }
+        let asset = try await store.payload(AssetPayload.self, id: assetId).payload
+        guard asset.plaintextByteSize <= 25 * 1_024 * 1_024 else {
+            throw AIJobCoordinatorError.transcriptionMediaTooLarge
+        }
+        let media = try await assetManager.decryptedData(assetId: assetId)
+        let jobId = UUID()
+        let approval = ProcessingApproval(
+            providerProfileId: profile.id,
+            sourceIds: [sourceId, versionId],
+            expiresAt: Date().addingTimeInterval(30 * 60)
+        )
+        let fingerprint = SHA256.hash(data: media)
+            .map { String(format: "%02x", $0) }.joined()
+        let job = ProcessingJob(
+            id: jobId,
+            kind: "TRANSCRIPTION",
+            inputEntityId: versionId,
+            inputFingerprint: fingerprint,
+            requiredCapabilities: [.transcription, .hostedProvider],
+            selectedRoute: .directProvider,
+            approval: approval
+        )
+        _ = try await database.saveProcessingJob(job)
+        _ = try await database.transitionProcessingJob(id: jobId, to: .running, route: .directProvider)
+        do {
+            let secret = try aiProviderSecretStore.secret(accountId: accountId, profileId: profile.id)
+            let response = try await directTranscriptionClient.performTranscription(
+                ProviderTranscriptionRequest(
+                    audio: media,
+                    filename: asset.originalFilename,
+                    mimeType: asset.mimeType,
+                    language: language
+                ),
+                route: approvedRoute,
+                apiKey: secret
+            )
+            guard response.segments.count <= 20_000,
+                  response.segments.reduce(0, { $0 + $1.text.count }) <= 5_000_000
+            else { throw DirectProviderError.invalidResponse }
+            var groups: [[TranscriptSegment]] = []
+            var current: [TranscriptSegment] = []
+            var currentCharacters = 0
+            for segment in response.segments {
+                if current.count == 500 || currentCharacters + segment.text.count > 200_000 {
+                    groups.append(current)
+                    current = []
+                    currentCharacters = 0
+                }
+                current.append(segment)
+                currentCharacters += segment.text.count
+            }
+            if !current.isEmpty { groups.append(current) }
+            guard groups.count <= 64 else { throw DirectProviderError.invalidResponse }
+            var chunkIds: [UUID] = []
+            for (index, segments) in groups.enumerated() {
+                let id = DirectWorkflowGeneration.artifactId(
+                    jobId: jobId,
+                    kind: "transcript-chunk-\(index)"
+                )
+                let chunk = MediaTranscriptionChunk(
+                    jobId: jobId,
+                    sourceId: sourceId,
+                    sourceVersionId: versionId,
+                    chunkIndex: index,
+                    segments: segments
+                )
+                _ = try await database.saveLocal(
+                    id: id,
+                    entityType: .aiArtifact,
+                    parentId: sourceId,
+                    relationIds: [sourceId, versionId],
+                    content: CanonicalJSON.encode(chunk)
+                )
+                chunkIds.append(id)
+            }
+            let estimatedCost = profile.transcriptionUSDPerMinute.map {
+                max($0, 0) * response.durationSeconds / 60
+            }
+            let trace = ProviderTrace(
+                provider: profile.displayName,
+                model: transcriptionModel,
+                promptVersion: "media-transcription/v1",
+                estimatedCostUsd: estimatedCost,
+                providerRequestId: response.providerRequestId
+            )
+            let manifest = MediaTranscriptionManifest(
+                jobId: jobId,
+                sourceId: sourceId,
+                sourceVersionId: versionId,
+                generatedAt: .now,
+                language: response.language ?? language,
+                durationSeconds: response.durationSeconds,
+                characterCount: response.segments.reduce(0) { $0 + $1.text.count },
+                segmentCount: response.segments.count,
+                trace: trace,
+                chunkEntityIds: chunkIds,
+                providerRoute: approvedRoute
+            )
+            let manifestId = DirectWorkflowGeneration.artifactId(jobId: jobId, kind: "transcription")
+            _ = try await store.save(
+                id: manifestId,
+                payload: manifest,
+                parentId: sourceId,
+                relationIds: [sourceId, versionId] + chunkIds
+            )
+            _ = try await database.transitionProcessingJob(id: jobId, to: .completed, progress: 1)
+            return manifestId
+        } catch DirectProviderError.transport {
+            _ = try? await database.transitionProcessingJob(
+                id: jobId,
+                to: .waitingForNetwork,
+                errorCode: "PROVIDER_UNREACHABLE"
+            )
+            throw DirectProviderError.transport
+        } catch is CancellationError {
+            _ = try? await database.transitionProcessingJob(id: jobId, to: .cancelled)
+            throw CancellationError()
+        } catch {
+            _ = try? await database.transitionProcessingJob(
+                id: jobId,
+                to: .failed,
+                errorCode: "TRANSCRIPTION_FAILED"
+            )
+            throw error
+        }
+    }
+
+    @discardableResult
+    func generateTutorTurnDirect(
+        _ prepared: PreparedTutorTurnRequest
+    ) async throws -> UUID {
+        guard let coordinator = aiJobs, let store else {
+            throw AppModelOperationError.unlockedSessionUnavailable
+        }
+        let request = try await coordinator.stageTutorTurn(prepared)
+        guard let route = request.providerRoute else {
+            throw AppModelOperationError.aiProviderUnavailable
+        }
+        let providerRequest = try DirectWorkflowGeneration.tutorRequest(request)
+        let artifactId = try await generateDirectArtifact(
+            jobId: request.jobId,
+            kind: "TUTOR_TURN",
+            inputEntityId: request.tutorSessionId,
+            sourceIds: request.sources.map(\.sourceId),
+            approximateInputTokens: prepared.approximateTokens,
+            approvedRoute: route,
+            providerRequest: providerRequest,
+            validate: { try DirectWorkflowGeneration.validateTutor($0, request: request) },
+            persist: { response, trace, providerRoute in
+                let artifact = TutorTurnArtifact(
+                    jobId: request.jobId,
+                    tutorSessionId: request.tutorSessionId,
+                    topicId: request.topicId,
+                    sequence: request.sequence,
+                    generatedAt: .now,
+                    sources: request.sources,
+                    sourceExcerptIds: response.citedExcerptIds,
+                    sourceIds: Array(Set(request.sources.map(\.sourceId))),
+                    sourceVersionIds: Array(Set(request.sources.map(\.sourceVersionId))),
+                    trace: trace,
+                    providerRoute: providerRoute,
+                    response: response
+                )
+                let id = DirectWorkflowGeneration.artifactId(jobId: request.jobId, kind: "tutor")
+                _ = try await store.save(
+                    id: id,
+                    payload: artifact,
+                    parentId: request.tutorSessionId,
+                    relationIds: [request.tutorSessionId, request.topicId]
+                        + artifact.sourceIds + artifact.sourceVersionIds
+                )
+                return id
+            }
+        )
+        _ = try await coordinator.importTutorTurnArtifact(artifactId: artifactId)
+        noteLocalMutation()
+        return artifactId
+    }
+
+    func runDueAutomationsDirect(at date: Date = .now) async throws -> [AutomationQueueOutcome] {
+        guard let aiJobs else { throw AppModelOperationError.unlockedSessionUnavailable }
+        return try await aiJobs.runDueAutomations(at: date) { [weak self] prepared in
+            guard let self, let route = prepared.request.providerRoute else {
+                throw AppModelOperationError.aiProviderUnavailable
+            }
+            guard let authorization = prepared.request.automationAuthorization else {
+                throw AppModelOperationError.aiProviderUnavailable
+            }
+            let disclosure = try await self.directTopicStudioDisclosure(
+                approximateInputTokens: prepared.approximateTokens,
+                jobType: prepared.request.jobType
+            )
+            guard let maximumCost = disclosure.maximumEstimatedCostUsd else {
+                throw AppModelOperationError.automationCostUnavailable
+            }
+            let maximumMinorUnits = Int(ceil(max(maximumCost, 0) * 100))
+            guard (authorization.estimatedSpentMinorUnits ?? 0) + maximumMinorUnits
+                    <= authorization.spendingLimitMinorUnits
+            else { throw AppModelOperationError.automationBudgetExceeded }
+            _ = try await self.generateTopicStudioDirect(prepared, approvedRoute: route)
+            return maximumMinorUnits
+        }
     }
 
     /// Runs a reviewed Topic Studio request directly from the iPad. Provider text is decoded and
@@ -1486,9 +2386,9 @@ final class AppModel {
     }
 
     private func runProactiveAutomation(reportErrors: Bool) async {
-        guard !isLocking, case .ready = phase, let aiJobs else { return }
+        guard !isLocking, case .ready = phase, aiJobs != nil else { return }
         do {
-            let outcomes = try await aiJobs.runDueAutomations()
+            let outcomes = try await runDueAutomationsDirect()
             if outcomes.contains(where: {
                 if case .queued = $0 { return true }
                 return false

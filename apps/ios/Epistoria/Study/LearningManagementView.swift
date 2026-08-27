@@ -271,12 +271,12 @@ struct LearningManagementView: View {
     }
 
     private func runDueAutomations() async {
-        guard let aiJobs = model.aiJobs else {
-            errorMessage = "Connect the private server and pair your trusted Mac first."
+        guard model.aiJobs != nil else {
+            errorMessage = "Unlock the notebook before running automatic work."
             return
         }
         do {
-            let outcomes = try await aiJobs.runDueAutomations()
+            let outcomes = try await model.runDueAutomationsDirect()
             let queued = outcomes.filter {
                 if case .queued = $0 { return true }
                 return false
@@ -286,8 +286,8 @@ struct LearningManagementView: View {
                 return false
             }.count
             automationMessage = queued > 0
-                ? "Queued \(queued) reviewed draft\(queued == 1 ? "" : "s")."
-                : unchanged > 0 ? "Nothing queued because the allowed material is unchanged." : "No permission is due."
+                ? "Generated \(queued) reviewable draft\(queued == 1 ? "" : "s")."
+                : unchanged > 0 ? "Nothing generated because the allowed material is unchanged." : "No permission is due."
             model.noteLocalMutation()
             await load()
         } catch { errorMessage = error.localizedDescription }
@@ -978,9 +978,13 @@ private struct AutomationGrantEditorView: View {
                             value: (Double(payload.estimatedSpentMinorUnits ?? 0) / 100)
                                 .formatted(.currency(code: "USD"))
                         )
-                        LabeledContent("Queued jobs", value: (payload.queuedJobIds?.count ?? 0).formatted())
+                        LabeledContent("Generated jobs", value: (payload.queuedJobIds?.count ?? 0).formatted())
+                        if let route = payload.providerRoute {
+                            LabeledContent("Provider", value: route.displayName)
+                            LabeledContent("Model", value: route.textModel)
+                        }
                         if let history = payload.lastQueuedAtByScope, !history.isEmpty {
-                            DisclosureGroup("Queue history") {
+                            DisclosureGroup("Run history") {
                                 ForEach(history.keys.sorted(), id: \.self) { key in
                                     LabeledContent(
                                         automationScopeLabel(key),
@@ -990,7 +994,7 @@ private struct AutomationGrantEditorView: View {
                             }
                         }
                     }
-                    Text("The trusted Mac stops new automatic work when the recorded provider estimate reaches this limit. It also enforces the Topic, task, cadence, and expiration fields.")
+                    Text("This iPad stops new automatic work when the recorded provider estimate reaches this limit. It also enforces the approved provider route, Topic, task, cadence, and expiration fields.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -1066,6 +1070,10 @@ private struct AutomationGrantEditorView: View {
         isWorking = true
         defer { isWorking = false }
         do {
+            let providerRoute = try model.directProviderDisclosure(
+                approximateInputTokens: 0,
+                maximumOutputTokens: 12_000
+            ).route
             if let grant {
                 try await store.updateAutomationGrant(
                     id: grant.id,
@@ -1073,7 +1081,8 @@ private struct AutomationGrantEditorView: View {
                     jobTypes: Array(selectedJobs),
                     minimumIntervalHours: intervalHours,
                     expiresAt: expiresAt,
-                    spendingLimitMinorUnits: budgetDollars * 100
+                    spendingLimitMinorUnits: budgetDollars * 100,
+                    providerRoute: providerRoute
                 )
             } else {
                 _ = try await store.createAutomationGrant(
@@ -1081,7 +1090,8 @@ private struct AutomationGrantEditorView: View {
                     jobTypes: Array(selectedJobs),
                     minimumIntervalHours: intervalHours,
                     expiresAt: expiresAt,
-                    spendingLimitMinorUnits: budgetDollars * 100
+                    spendingLimitMinorUnits: budgetDollars * 100,
+                    providerRoute: providerRoute
                 )
             }
             model.noteLocalMutation()

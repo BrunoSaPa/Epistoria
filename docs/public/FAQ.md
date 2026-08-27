@@ -14,8 +14,9 @@ current plan to sell it.
 Yes. You can create and edit notes, use downloaded PDFs, organize material, and search local
 content without a network connection.
 
-Optional synchronization, first-time restored-file downloads, trusted Mac processing, and AI
-requests require the applicable service and connection.
+Optional synchronization, first-time restored-file downloads, and AI requests require the
+applicable service and connection. The optional Compute Node is needed only for work explicitly
+routed to it.
 
 ## Does related search use my AI provider?
 
@@ -69,8 +70,9 @@ remain drafts until you review and accept them. Opening the app does not create 
 ## Can I use a local AI model?
 
 Yes, when the model server provides the compatible connection supported by Epistoria. Add its
-address and model in **Settings → AI Providers**. The address is reached from the trusted Mac, so
-a loopback address refers to the Mac. Local model quality and supported features vary. Confirm
+address and model in **Settings → AI Providers**. The address is reached directly from the iPad,
+so use the private-network address of a model hosted on another computer. A loopback address
+refers to the iPad. Local model quality and supported features vary. Confirm
 text, vision, and transcription support before enabling them.
 
 Epistoria also supports native Anthropic and Google Gemini connections for text and optional
@@ -155,9 +157,9 @@ No. Supported audio files are validated, encrypted, decrypted for local playback
 the iPad. Playback does not create a provider request.
 
 Transcription is separate and optional. For a supported local MP3, M4A, WAV, or MP4 Source up to
-25 MB, Epistoria shows a disclosure before the trusted Mac decrypts the media and sends its bytes
-to the configured AI provider. The timestamped result is encrypted and bound to the current
-Source Version.
+25 MB, Epistoria shows the provider, model, destination, and file size before the iPad decrypts
+the media and sends its bytes directly to the configured provider. The timestamped result is
+encrypted and bound to the current Source Version.
 
 ## Does watching an imported video upload it?
 
@@ -171,8 +173,8 @@ You can add one YouTube video as a link. Epistoria loads YouTube's privacy-enhan
 only after you select **Load video**. It does not download or cache the video, captions,
 thumbnail, or metadata.
 
-A YouTube reference cannot be transcribed by the trusted Mac. Import a local media file that you
-own or are permitted to process when a transcript is needed.
+A YouTube reference cannot be transcribed. Import a local media file that you own or are
+permitted to process when a transcript is needed.
 
 ## Can I save a webpage for offline study?
 

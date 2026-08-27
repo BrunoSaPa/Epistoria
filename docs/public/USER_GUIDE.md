@@ -265,10 +265,10 @@ Study contains Tutor, Study Next, Week, Sessions, Flashcards, Tests, and History
 7. Review the maximum turns and spending limit. The approval expires after four hours.
 8. Select **Start Learning Guide**, then select **Begin** for the first diagnostic.
 9. Enter an answer and set confidence from 1 to 5. Select **Send**. The answer is saved locally
-   before provider processing completes.
+   before the iPad contacts the approved provider.
 10. Use **Hint**, **Explain directly**, **Another example**, or **Why this next?** when needed.
-11. Select **Check response** after the trusted Mac completes the encrypted job. Each Source button
-    opens the exact frozen Source Version and locator used by the response.
+11. Wait for the response in the open Tutor panel. You can cancel the request without removing the
+    saved learner message. Each Source button opens the exact frozen Source Version and locator.
 12. Review each proposed learning signal. Select **Accept** only when the assessment is accurate.
     A proposed or rejected signal does not affect the mastery explanation.
 13. Pause, end, or abandon the session from its menu. The transcript remains available in
@@ -278,9 +278,8 @@ The notebook Tutor appears over the right edge. It does not resize the page, blo
 the visible canvas, or add a blocking background. Close it from the same edge. Reduce Motion uses
 a cross-fade instead of a slide.
 
-If no provider or private sync connection is available, Epistoria still saves your session and
-messages locally. Provider answers remain pending. Manual cards, tests, notes, and local Study Next
-continue to work.
+If no provider or network connection is available, Epistoria still saves the session and messages
+locally. Manual cards, tests, notes, and local Study Next continue to work.
 
 - Study Next runs on the iPad and explains why an item is recommended.
 - Select a Study Next row to open the recommended due card, paused session, unfinished attempt,
@@ -363,21 +362,20 @@ Importing or watching does not send the video to a provider.
 To transcribe a supported local recording or video:
 
 1. Open an MP3, M4A, WAV, or MP4 Source no larger than 25 MB.
-2. Open **Source details** and select **Transcribe on trusted Mac…**.
-3. Review the filename, size, optional language, and provider disclosure.
-4. Select **Approve and transcribe**.
-5. Run the trusted Mac worker and synchronize the iPad.
-6. Open **Read timestamped transcript**. Compare it with the original media.
-7. Select the play button on a segment to return to the local player at that timestamp.
-8. Select the pencil button to correct a segment. Enter the corrected text and an optional reason,
+2. Open **Source details** and select **Transcribe…**.
+3. Review the filename, size, optional language, provider, model, and destination.
+4. Select **Approve and transcribe**. The iPad sends the media directly to that provider.
+5. Open **Read timestamped transcript**. Compare it with the original media.
+6. Select the play button on a segment to return to the local player at that timestamp.
+7. Select the pencil button to correct a segment. Enter the corrected text and an optional reason,
    then select **Save**. The generated text remains visible and unchanged.
-9. Select one segment. Select a second segment to extend the selection to a continuous range.
-10. Select **Create timestamped Evidence**, review the frozen excerpt, add an optional note, and
+8. Select one segment. Select a second segment to extend the selection to a continuous range.
+9. Select **Create timestamped Evidence**, review the frozen excerpt, add an optional note, and
     select **Create**.
-11. Accept or reject the transcript if you did not already correct it.
+10. Accept or reject the transcript if you did not already correct it.
 
-The trusted Mac decrypts the selected Source only for the approved job. The configured AI
-provider receives the media bytes. Transcript segments are encrypted, searchable in the
+The iPad decrypts the selected Source in memory for the approved request. The disclosed provider
+receives the media bytes. Transcript segments are encrypted, searchable in the
 transcript reader, and bound to the exact Source Version. Accepting a transcript allows it to
 appear when derived AI records are included in a readable export. Rejecting it keeps it out of
 that export. Neither action changes the original media.
@@ -466,23 +464,23 @@ To create a PDF Source guide:
 
 1. Open a PDF Source and show its inspector.
 2. Select **Analyze this Source…**.
-3. Enter the output language. Leave figure input on, or turn it off for a text-only provider or
-   lower input cost. Review the file, size, input limits, and provider disclosure.
+3. Enter the output language. Leave rendered page input on, or turn it off for a text-only provider
+   or lower input cost. Review the page count, reference count, provider, model, destination, and
+   maximum estimated cost.
 4. Select **Approve and analyze**.
-5. Run the trusted Mac worker and synchronize the iPad.
-6. Read the summary, translation, key topics, image notes, and coverage limits under
+5. Read the summary, translation, key topics, image notes, and coverage limits under
    **Source guide**.
-7. Select a numbered citation to open and highlight the supporting PDF region.
+6. Select a numbered citation to open and highlight the supporting PDF region.
 
 To ask about one PDF, select **Ask this Source…**, enter the question and output language, review
 the same disclosure, and select **Approve and ask**. The saved answer appears under **Source
 answers**. Each answer statement has its own citation. The answer remains bound to the Source
 Version used for that request. Refreshing the Source does not rewrite an earlier answer.
 
-Source analysis sends selected PDF text and detected figure regions to the provider shown in the
-approval. That provider and model stay attached to the queued request even if you activate a
-different provider later. It
-does not run when the approval sheet is cancelled. A provider profile must support image input
+Source analysis sends bounded PDF text and up to eight approved rendered pages to the provider
+shown in the approval. The iPad calls that provider directly. The provider and model stay attached
+to the saved result. Analysis does not run when the approval sheet is cancelled. A provider profile
+must support image input
 when detected figures are included. Large, scanned, or unusually structured PDFs can show
 coverage limits.
 
