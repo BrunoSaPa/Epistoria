@@ -24,27 +24,25 @@ enum ContinuousNotebookPageSelection {
 /// Presents fixed paper as one continuous document. Page canvases remain independent persistence
 /// units, while one outer scroll view owns finger, pointer, and momentum navigation.
 struct ContinuousNotebookPages<PageContent: View>: View {
-    let configuration: NoteCanvasConfiguration
-    let pageCount: Int
+    let pageConfigurations: [NoteCanvasConfiguration]
     @Binding var currentPageIndex: Int
     @Binding var requestedPageIndex: Int?
     let onPageVisible: (Int) -> Void
-    @ViewBuilder let pageContent: (Int) -> PageContent
+    @ViewBuilder let pageContent: (Int, NoteCanvasConfiguration) -> PageContent
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         GeometryReader { viewport in
-            let pageWidth = min(max(viewport.size.width - 56, 320), 920)
-            let ratio = CGFloat(configuration.pageHeight ?? 842)
-                / CGFloat(configuration.pageWidth ?? 595)
-            let pageHeight = pageWidth * ratio
-
             ScrollViewReader { reader in
                 ScrollView(.vertical) {
                     LazyVStack(spacing: 24) {
-                        ForEach(0 ..< pageCount, id: \.self) { pageIndex in
-                            pageContent(pageIndex)
+                        ForEach(Array(pageConfigurations.enumerated()), id: \.offset) { pageIndex, configuration in
+                            let pageWidth = min(max(viewport.size.width - 56, 320), 920)
+                            let ratio = CGFloat(configuration.pageHeight ?? 842)
+                                / CGFloat(configuration.pageWidth ?? 595)
+                            let pageHeight = pageWidth * ratio
+                            pageContent(pageIndex, configuration)
                                 .frame(width: pageWidth, height: pageHeight)
                                 .background(configuration.paperColor.swiftUIColor)
                                 .overlay {

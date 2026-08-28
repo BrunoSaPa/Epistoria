@@ -131,8 +131,10 @@ struct CollectionDetailView: View {
     private func load() async {
         guard let store = model.store else { return }
         do {
+            let trashedIds = try await store.trashedTargetIds()
             collection = try await store.payload(CollectionPayload.self, id: collectionId)
             allCollections = try await store.list(CollectionPayload.self)
+                .filter { !trashedIds.contains($0.id) }
             childCollections = allCollections.filter { $0.payload.parentCollectionId == collectionId }
             let links = try await store.list(
                 RelationPayload.self,
@@ -148,8 +150,10 @@ struct CollectionDetailView: View {
                     loadedResources.append(resource)
                 }
             }
-            notes = loadedNotes.sorted { $0.payload.updatedAt > $1.payload.updatedAt }
-            resources = loadedResources
+            notes = loadedNotes
+                .filter { !trashedIds.contains($0.id) }
+                .sorted { $0.payload.updatedAt > $1.payload.updatedAt }
+            resources = loadedResources.filter { !trashedIds.contains($0.id) }
         } catch { errorMessage = error.localizedDescription }
     }
 

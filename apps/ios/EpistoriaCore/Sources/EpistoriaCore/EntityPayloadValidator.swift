@@ -19,7 +19,9 @@ public enum EntityPayloadValidator {
         case .course: _ = try CanonicalJSON.decode(TopicPayload.self, from: content)
         case .studySession: _ = try CanonicalJSON.decode(StudySessionPayload.self, from: content)
         case .note: _ = try CanonicalJSON.decode(NotePayload.self, from: content)
+        case .notePage: _ = try CanonicalJSON.decode(NotePagePayload.self, from: content)
         case .noteBlock: _ = try CanonicalJSON.decode(NoteBlockPayload.self, from: content)
+        case .trashEntry: _ = try CanonicalJSON.decode(TrashEntryPayload.self, from: content)
         case .resource: _ = try CanonicalJSON.decode(SourcePayload.self, from: content)
         case .asset: _ = try CanonicalJSON.decode(AssetPayload.self, from: content)
         case .annotation: _ = try CanonicalJSON.decode(AnnotationPayload.self, from: content)
@@ -90,8 +92,10 @@ public enum EntityPayloadValidator {
         case .academicTerm: ["academic-term/v1"]
         case .course: ["course/v1", "topic/v1"]
         case .studySession: ["study-session/v1"]
-        case .note: ["note/v1", "note/v2", "note/v3"]
-        case .noteBlock: ["note-block/v1", "note-block/v2", "note-block/v3", "note-block/v4", "note-block/v5"]
+        case .note: ["note/v1", "note/v2", "note/v3", "note/v4"]
+        case .notePage: ["note-page/v1"]
+        case .noteBlock: ["note-block/v1", "note-block/v2", "note-block/v3", "note-block/v4", "note-block/v5", "note-block/v6"]
+        case .trashEntry: ["trash-entry/v1"]
         case .resource: ["resource/v1", "source/v1"]
         case .asset: ["asset/v1"]
         case .annotation: ["annotation/v1"]

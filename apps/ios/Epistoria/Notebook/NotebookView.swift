@@ -26,6 +26,8 @@ struct NotebookView: View {
     @State private var destination: Destination?
     @State private var createdNotePendingNavigation: UUID?
     @State private var pendingArchive: IdentifiedPayload<NotePayload>?
+    @State private var pendingTrashNote: IdentifiedPayload<NotePayload>?
+    @State private var pendingTrashList: IdentifiedPayload<CollectionPayload>?
     @State private var errorMessage: String?
 
     var body: some View {
@@ -58,7 +60,16 @@ struct NotebookView: View {
                             )
                         }
                         .accessibilityIdentifier("notebook.note.\(note.id.uuidString)")
+                        .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                            Button(note.payload.pinnedAt == nil ? "Pin" : "Unpin", systemImage: note.payload.pinnedAt == nil ? "pin" : "pin.slash") {
+                                Task { await setPinned(note, pinned: note.payload.pinnedAt == nil) }
+                            }
+                            .tint(EpistoriaDesign.ink)
+                        }
                         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                            Button("Trash", systemImage: "trash", role: .destructive) {
+                                pendingTrashNote = note
+                            }
                             Button("Archive", systemImage: "archivebox") {
                                 pendingArchive = note
                             }
@@ -88,6 +99,9 @@ struct NotebookView: View {
                         }
                         .accessibilityIdentifier("notebook.archived-note.\(note.id.uuidString)")
                         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                            Button("Trash", systemImage: "trash", role: .destructive) {
+                                pendingTrashNote = note
+                            }
                             Button("Restore", systemImage: "arrow.uturn.backward") {
                                 Task { await setArchived(note, archived: false) }
                             }
@@ -119,6 +133,9 @@ struct NotebookView: View {
                                     Label(collection.payload.name, systemImage: "folder")
                                 }
                                 .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                    Button("Trash", systemImage: "trash", role: .destructive) {
+                                        pendingTrashList = collection
+                                    }
                                     Button("Archive", systemImage: "archivebox") {
                                         Task { await setListArchived(collection, archived: true) }
                                     }
@@ -141,6 +158,9 @@ struct NotebookView: View {
                             Label(collection.payload.name, systemImage: "folder")
                         }
                         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                            Button("Trash", systemImage: "trash", role: .destructive) {
+                                pendingTrashList = collection
+                            }
                             Button("Restore", systemImage: "arrow.uturn.backward") {
                                 Task { await setListArchived(collection, archived: false) }
                             }
@@ -203,6 +223,40 @@ struct NotebookView: View {
             } message: {
                 Text("The note stays encrypted and can be restored from the Archived tab.")
             }
+            .confirmationDialog(
+                "Move this note to Trash?",
+                isPresented: Binding(
+                    get: { pendingTrashNote != nil },
+                    set: { if !$0 { pendingTrashNote = nil } }
+                ),
+                titleVisibility: .visible
+            ) {
+                Button("Move to Trash", role: .destructive) {
+                    guard let note = pendingTrashNote else { return }
+                    Task { await moveNoteToTrash(note) }
+                    pendingTrashNote = nil
+                }
+                Button("Cancel", role: .cancel) { pendingTrashNote = nil }
+            } message: {
+                Text("The note and its pages stay encrypted until you empty Trash manually.")
+            }
+            .confirmationDialog(
+                "Move this List to Trash?",
+                isPresented: Binding(
+                    get: { pendingTrashList != nil },
+                    set: { if !$0 { pendingTrashList = nil } }
+                ),
+                titleVisibility: .visible
+            ) {
+                Button("Move to Trash", role: .destructive) {
+                    guard let list = pendingTrashList else { return }
+                    Task { await moveListToTrash(list) }
+                    pendingTrashList = nil
+                }
+                Button("Cancel", role: .cancel) { pendingTrashList = nil }
+            } message: {
+                Text("The List and its links stay encrypted until you empty Trash manually.")
+            }
             .alert("Notebook error", isPresented: .constant(errorMessage != nil)) {
                 Button("Try again") { Task { await load() } }
                 Button("Dismiss", role: .cancel) { errorMessage = nil }
@@ -216,14 +270,17 @@ struct NotebookView: View {
             async let loadedNotes = store.list(NotePayload.self)
             async let loadedCollections = store.list(CollectionPayload.self)
             async let loadedSessions = store.list(StudySessionPayload.self)
-            let result = try await (loadedNotes, loadedCollections, loadedSessions)
+            async let loadedTrash = store.trashedTargetIds()
+            let result = try await (loadedNotes, loadedCollections, loadedSessions, loadedTrash)
             notes = result.0
-                .filter { $0.payload.archivedAt == nil }
-                .sorted { $0.payload.updatedAt > $1.payload.updatedAt }
+                .filter { $0.payload.archivedAt == nil && !result.3.contains($0.id) }
+                .sorted(by: noteSort)
             archivedNotes = result.0
-                .filter { $0.payload.archivedAt != nil }
+                .filter { $0.payload.archivedAt != nil && !result.3.contains($0.id) }
                 .sorted { ($0.payload.archivedAt ?? .distantPast) > ($1.payload.archivedAt ?? .distantPast) }
-            collections = result.1.sorted { $0.payload.name.localizedCaseInsensitiveCompare($1.payload.name) == .orderedAscending }
+            collections = result.1
+                .filter { !result.3.contains($0.id) }
+                .sorted { $0.payload.name.localizedCaseInsensitiveCompare($1.payload.name) == .orderedAscending }
             sessions = result.2.sorted { $0.payload.startedAt > $1.payload.startedAt }
             organizationByNoteId = try await NoteOrganizationIndex.load(
                 store: store,
@@ -233,6 +290,62 @@ struct NotebookView: View {
             )
         }
         catch { errorMessage = error.localizedDescription }
+    }
+
+    private func noteSort(
+        _ left: IdentifiedPayload<NotePayload>,
+        _ right: IdentifiedPayload<NotePayload>
+    ) -> Bool {
+        switch (left.payload.pinnedAt, right.payload.pinnedAt) {
+        case let (leftDate?, rightDate?): return leftDate > rightDate
+        case (_?, nil): return true
+        case (nil, _?): return false
+        case (nil, nil): return left.payload.updatedAt > right.payload.updatedAt
+        }
+    }
+
+    private func setPinned(_ note: IdentifiedPayload<NotePayload>, pinned: Bool) async {
+        guard let store = model.store else { return }
+        var changed = note.payload
+        changed.schemaVersion = "note/v4"
+        changed.pinnedAt = pinned ? .now : nil
+        changed.updatedAt = .now
+        do {
+            _ = try await store.save(
+                id: note.id,
+                payload: changed,
+                parentId: changed.courseId ?? changed.studySessionId,
+                relationIds: [changed.courseId, changed.studySessionId].compactMap(\.self)
+            )
+            model.noteLocalMutation()
+            await load()
+        } catch { errorMessage = error.localizedDescription }
+    }
+
+    private func moveNoteToTrash(_ note: IdentifiedPayload<NotePayload>) async {
+        guard let store = model.store else { return }
+        do {
+            _ = try await store.moveToTrash(
+                targetId: note.id,
+                targetType: .note,
+                displayName: note.payload.title
+            )
+            model.noteLocalMutation()
+            await load()
+        } catch { errorMessage = error.localizedDescription }
+    }
+
+    private func moveListToTrash(_ list: IdentifiedPayload<CollectionPayload>) async {
+        guard let store = model.store else { return }
+        do {
+            _ = try await store.moveToTrash(
+                targetId: list.id,
+                targetType: .collection,
+                displayName: list.payload.name
+            )
+            model.noteLocalMutation()
+            await load()
+        } catch { errorMessage = error.localizedDescription }
     }
 
     private func setArchived(_ note: IdentifiedPayload<NotePayload>, archived: Bool) async {
@@ -326,7 +439,13 @@ struct NewNoteView: View {
                                 guard let store = model.store else { return }
                                 let id = try await store.createNote(
                                     title: title.trimmingCharacters(in: .whitespacesAndNewlines),
-                                    courseId: courseId
+                                    courseId: courseId,
+                                    canvas: NoteCanvasConfiguration(
+                                        pageFormat: model.workspacePreferences.defaultPageFormat,
+                                        orientation: model.workspacePreferences.defaultPageOrientation,
+                                        paperStyle: model.workspacePreferences.defaultPaperStyle,
+                                        paperColor: model.workspacePreferences.defaultPaperColor
+                                    )
                                 )
                                 model.noteLocalMutation()
                                 onCreated(id)

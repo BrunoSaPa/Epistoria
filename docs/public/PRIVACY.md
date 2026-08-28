@@ -99,7 +99,7 @@ A readable export is decrypted. After you save or share it, its protection depen
 destination. Store exports on an encrypted device or another trusted location. Do not attach them
 to issues, support requests, public messages, or test reports.
 
-The app can import a version 5 export into an empty notebook. Import copies the readable package
+The app can import a version 5 or 6 export into an empty notebook. Import copies the readable package
 into protected temporary storage, validates it, and re-encrypts original files for the target
 notebook. Delete the readable package from temporary and shared locations after verification.
 

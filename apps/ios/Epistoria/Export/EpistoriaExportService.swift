@@ -51,7 +51,7 @@ actor EpistoriaExportService {
     }
 
     private struct Metadata: Codable {
-        var formatVersion = "epistoria-export/5"
+        var formatVersion = "epistoria-export/6"
         var exportedAt: Date
         var accountId: UUID
         var mode = "DECRYPTED"
@@ -122,6 +122,7 @@ actor EpistoriaExportService {
     private struct NoteRecord: Codable {
         var id: UUID
         var note: NotePayload
+        var pages: [Record<NotePagePayload>]
         var blocks: [Record<NoteBlockPayload>]
     }
 
@@ -398,11 +399,13 @@ actor EpistoriaExportService {
         var canvasAssets: [CanvasAssetRecord] = []
         let notes = try await store.list(NotePayload.self)
         for note in notes {
+            let pages = try await store.ensureNotePages(noteId: note.id)
             let blocks = try await store.list(NoteBlockPayload.self, parentId: note.id)
                 .sorted { $0.payload.orderKey < $1.payload.orderKey }
             let record = NoteRecord(
                 id: note.id,
                 note: note.payload,
+                pages: pages.map { Record(id: $0.id, payload: $0.payload) },
                 blocks: blocks.map { Record(id: $0.id, payload: $0.payload) }
             )
             try write(
@@ -876,7 +879,7 @@ actor EpistoriaExportService {
         let metadata = try decoder.decode(Metadata.self, from: metadataData)
         guard [
             "epistoria-export/1", "epistoria-export/2", "epistoria-export/3",
-            "epistoria-export/4", "epistoria-export/5",
+            "epistoria-export/4", "epistoria-export/5", "epistoria-export/6",
         ].contains(metadata.formatVersion),
               metadata.mode == "DECRYPTED",
               (!requireMatchingAccount || metadata.accountId == accountId)
@@ -885,15 +888,15 @@ actor EpistoriaExportService {
         }
         if [
             "epistoria-export/2", "epistoria-export/3", "epistoria-export/4",
-            "epistoria-export/5",
+            "epistoria-export/5", "epistoria-export/6",
         ].contains(metadata.formatVersion) {
             required.append("notes/canvas-assets.json")
         }
-        if ["epistoria-export/3", "epistoria-export/4", "epistoria-export/5"]
+        if ["epistoria-export/3", "epistoria-export/4", "epistoria-export/5", "epistoria-export/6"]
             .contains(metadata.formatVersion) {
             required.append(contentsOf: ["taxonomy.json", "knowledge.json", "learning.json"])
         }
-        if metadata.formatVersion == "epistoria-export/5" {
+        if ["epistoria-export/5", "epistoria-export/6"].contains(metadata.formatVersion) {
             required.append("entities.json")
         }
         for path in required where !fileManager.fileExists(

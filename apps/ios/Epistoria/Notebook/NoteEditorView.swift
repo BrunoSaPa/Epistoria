@@ -1,6 +1,7 @@
 import EpistoriaCore
 import ImageIO
 import PencilKit
+import PhotosUI
 import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
@@ -84,6 +85,7 @@ struct NoteEditorView: View {
     var onLifecycleChanged: (() -> Void)?
 
     @State private var note: IdentifiedPayload<NotePayload>?
+    @State private var pages: [IdentifiedPayload<NotePagePayload>] = []
     @State private var title = ""
     @State private var blocks: [IdentifiedPayload<NoteBlockPayload>] = []
     @State private var evidence: [IdentifiedPayload<EvidencePayload>] = []
@@ -127,9 +129,11 @@ struct NoteEditorView: View {
     @State private var errorMessage: String?
     @State private var pendingDeletion: IdentifiedPayload<NoteBlockPayload>?
     @State private var recentlyDeleted: IdentifiedPayload<NoteBlockPayload>?
+    @State private var recentlyDeletedTrashEntryId: UUID?
     @State private var showArchiveConfirmation = false
     @State private var showClearInkConfirmation = false
     @State private var showPDFExportConfirmation = false
+    @State private var pdfExportOptions = NotePDFExportOptions.allPages
     @State private var isExportingPDF = false
     @State private var pdfExportResult: NotePDFExportResult?
     @State private var pdfExportTask: Task<Void, Never>?
@@ -146,6 +150,13 @@ struct NoteEditorView: View {
     @State private var showOrganization = false
     @State private var showEvidenceShelf = false
     @State private var showTutor = false
+    @State private var showPageManager = false
+    @State private var showMoreTools = false
+    @State private var showFindInNote = false
+    @State private var selectedPhotoItem: PhotosPickerItem?
+    @State private var activeFocusedBlockId: UUID?
+    @State private var activeHighlightText: String?
+    @State private var activeFocusRectangles: [AnnotationRectangle]
     @State private var openedEvidenceId: UUID?
     @State private var inspectedEvidenceId: UUID?
     @State private var inspectedEvidenceBacklinks: [EvidenceBacklink] = []
@@ -165,6 +176,9 @@ struct NoteEditorView: View {
         self.highlightText = highlightText
         self.focusRectangles = focusRectangles
         self.onLifecycleChanged = onLifecycleChanged
+        _activeFocusedBlockId = State(initialValue: focusedBlockId)
+        _activeHighlightText = State(initialValue: highlightText)
+        _activeFocusRectangles = State(initialValue: focusRectangles)
     }
 
     var body: some View {
@@ -183,6 +197,10 @@ struct NoteEditorView: View {
             ) { result in
                 Task { await importImage(result) }
             }
+            .onChange(of: selectedPhotoItem) { _, item in
+                guard let item else { return }
+                Task { await importPhoto(item) }
+            }
             .overlay(alignment: .topLeading) { statusOverlay }
             .safeAreaInset(edge: .leading, spacing: 0) { notebookToolRail }
             .safeAreaInset(edge: .trailing, spacing: 0) {
@@ -193,7 +211,12 @@ struct NoteEditorView: View {
             }
             .safeAreaInset(edge: .bottom, spacing: 0) { transientBottomMessage }
             .sensoryFeedback(.selection, trigger: currentPageIndex)
-            .onChange(of: currentPageIndex) { oldPage, _ in
+            .onChange(of: currentPageIndex) { oldPage, newPage in
+                if configuration.pageFormat != .infinite,
+                   let pageConfiguration = pageConfiguration(at: newPage)
+                {
+                    configuration = pageConfiguration
+                }
                 Task {
                     await recognizePageAfterExit(oldPage)
                     await currentPageDidChange()
@@ -286,6 +309,30 @@ struct NoteEditorView: View {
                     onLifecycleChanged?()
                 }
             }
+            .sheet(isPresented: $showPageManager, onDismiss: {
+                Task { await load() }
+            }) {
+                NotePageManagerView(
+                    model: model,
+                    noteId: noteId,
+                    pages: $pages,
+                    currentPageIndex: $currentPageIndex,
+                    blocks: blocks
+                )
+            }
+            .sheet(isPresented: $showFindInNote) {
+                NoteFindInNoteView(
+                    pages: pages,
+                    blocks: blocks,
+                    artifacts: ocrArtifacts
+                ) { match in
+                    activeFocusedBlockId = match.blockId
+                    activeHighlightText = match.text
+                    activeFocusRectangles = match.rectangles
+                    currentPageIndex = match.pageIndex
+                    requestedPageIndex = match.pageIndex
+                }
+            }
             .sheet(
                 isPresented: Binding(
                     get: { openedEvidenceId != nil },
@@ -327,7 +374,7 @@ struct NoteEditorView: View {
                 Button("Cancel", role: .cancel) { pendingDeletion = nil }
             } message: {
                 Text(
-                    "The item can be restored while this notebook remains open. Original image bytes are not erased."
+                    "The item remains encrypted and can be restored from Settings → Trash. Original image bytes are not erased."
                 )
             }
             .confirmationDialog(
@@ -356,17 +403,15 @@ struct NoteEditorView: View {
 
     private var editorExportDialogs: some View {
         editorDestructiveDialogs
-            .confirmationDialog(
-                "Export this note as a readable PDF?",
-                isPresented: $showPDFExportConfirmation,
-                titleVisibility: .visible
-            ) {
-                Button("Create readable PDF") { startPDFExport() }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text(
-                    "The PDF contains readable personal content. Save it only to a location you trust. The encrypted note is not changed."
-                )
+            .sheet(isPresented: $showPDFExportConfirmation) {
+                NotePDFExportOptionsView(
+                    pageCount: finitePageCount,
+                    currentPageIndex: currentPageIndex
+                ) { options in
+                    showPDFExportConfirmation = false
+                    pdfExportOptions = options
+                    startPDFExport(options: options)
+                }
             }
             .sheet(item: $pdfExportResult) { result in
                 NotePDFExportReadyView(result: result) {
@@ -413,28 +458,36 @@ struct NoteEditorView: View {
     @ViewBuilder
     private var notebookSurface: some View {
         if configuration.pageFormat == .infinite {
-            notebookCanvas(pageIndex: 0, allowsViewportNavigation: true)
+            notebookCanvas(
+                pageIndex: 0,
+                pageConfiguration: configuration,
+                allowsViewportNavigation: true
+            )
         } else {
             ContinuousNotebookPages(
-                configuration: configuration,
-                pageCount: finitePageCount,
+                pageConfigurations: pageConfigurations,
                 currentPageIndex: $currentPageIndex,
                 requestedPageIndex: $requestedPageIndex,
                 onPageVisible: { pageIndex in
                     Task { await prepareVisiblePage(pageIndex) }
                 }
-            ) { pageIndex in
-                notebookCanvas(pageIndex: pageIndex, allowsViewportNavigation: false)
+            ) { pageIndex, pageConfiguration in
+                notebookCanvas(
+                    pageIndex: pageIndex,
+                    pageConfiguration: pageConfiguration,
+                    allowsViewportNavigation: false
+                )
             }
         }
     }
 
     private func notebookCanvas(
         pageIndex: Int,
+        pageConfiguration: NoteCanvasConfiguration,
         allowsViewportNavigation: Bool
     ) -> some View {
         SpatialNotebookCanvas(
-            configuration: configuration,
+            configuration: pageConfiguration,
             pageIndex: pageIndex,
             items: canvasItems(on: pageIndex),
             inkData: inkDataByPage[pageIndex] ?? Data(),
@@ -499,6 +552,11 @@ struct NoteEditorView: View {
             Task { await addEvidence(evidenceId, pageIndex: pageIndex) }
             return true
         }
+        .dropDestination(for: Data.self) { values, _ in
+            guard let data = values.first else { return false }
+            Task { await importImageData(data, filename: "Dropped image") }
+            return true
+        }
     }
 
     private func canvasMode(on pageIndex: Int) -> SpatialNotebookMode {
@@ -517,14 +575,14 @@ struct NoteEditorView: View {
     }
 
     private func focus(on pageIndex: Int) -> SpatialNotebookFocus? {
-        guard let focusedBlockId,
-            let block = blocks.first(where: { $0.id == focusedBlockId }),
+        guard let activeFocusedBlockId,
+            let block = blocks.first(where: { $0.id == activeFocusedBlockId }),
             blockPageIndex(block.payload) == pageIndex
         else { return nil }
         return SpatialNotebookFocus(
-            blockId: focusedBlockId,
-            highlightedText: highlightText,
-            normalizedRectangles: focusRectangles
+            blockId: activeFocusedBlockId,
+            highlightedText: activeHighlightText,
+            normalizedRectangles: activeFocusRectangles
         )
     }
 
@@ -726,6 +784,268 @@ struct NoteEditorView: View {
     }
 
     private var notebookToolRail: some View {
+        VStack(spacing: 2) {
+            ForEach(model.workspacePreferences.visibleNotebookTools) { tool in
+                notebookRailTool(tool)
+            }
+
+            Button {
+                showMoreTools = true
+            } label: {
+                VStack(spacing: 2) {
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 17, weight: .medium))
+                    Text("More")
+                        .font(.system(size: 9.5, weight: .medium))
+                }
+                .frame(width: 66, height: railButtonHeight)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(EpistoriaPressButtonStyle())
+            .popover(isPresented: $showMoreTools, arrowEdge: .leading) {
+                moreToolsPanel
+                    .presentationCompactAdaptation(.popover)
+            }
+            .accessibilityIdentifier("note.tool.more")
+        }
+        .foregroundStyle(EpistoriaDesign.ink)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 6)
+        .frame(width: 82)
+        .frame(maxHeight: .infinity, alignment: .top)
+        .background(.regularMaterial)
+        .overlay(alignment: .trailing) { Divider() }
+        .accessibilityElement(children: .contain)
+    }
+
+    private var railButtonHeight: CGFloat {
+        model.workspacePreferences.visibleNotebookTools.count > 13 ? 34 : 42
+    }
+
+    @ViewBuilder
+    private func notebookRailTool(_ tool: NotebookToolID) -> some View {
+        switch tool {
+        case .select:
+            compactRailToolButton(tool, selected: mode == .select) {
+                mode = .select
+                lassoSelection = LassoSelection()
+            }
+        case .pen:
+            compactRailToolButton(tool, selected: mode == .ink && inkTool == .pen) {
+                handleInkToolTap(.pen)
+            }
+            .disabled(isArchived)
+            .popover(isPresented: $showPenOptions, arrowEdge: .leading) {
+                inkOptions(title: "Pen", widths: [2, 4, 8]).presentationCompactAdaptation(.popover)
+            }
+        case .marker:
+            compactRailToolButton(tool, selected: mode == .ink && inkTool == .marker) {
+                handleInkToolTap(.marker)
+            }
+            .disabled(isArchived)
+            .popover(isPresented: $showMarkerOptions, arrowEdge: .leading) {
+                inkOptions(title: "Marker", widths: [12, 18, 28]).presentationCompactAdaptation(.popover)
+            }
+        case .eraser:
+            compactRailToolButton(tool, selected: mode == .ink && inkTool == .eraser) {
+                handleInkToolTap(.eraser)
+            }
+            .disabled(isArchived)
+            .popover(isPresented: $showEraserOptions, arrowEdge: .leading) {
+                eraserOptions.presentationCompactAdaptation(.popover)
+            }
+        case .text:
+            compactRailToolButton(tool) { Task { await addText() } }
+                .disabled(isArchived)
+        case .image:
+            compactRailToolButton(tool) { isImportingImage = true }
+                .disabled(isArchived)
+        case .shape:
+            compactRailToolButton(tool, selected: mode == .shape) { handleShapeToolTap() }
+                .disabled(isArchived)
+                .popover(isPresented: $showShapeOptions, arrowEdge: .leading) {
+                    shapeOptions.presentationCompactAdaptation(.popover)
+                }
+        case .pages:
+            compactRailToolButton(tool, selected: showPageManager) { showPageManager = true }
+                .disabled(configuration.pageFormat == .infinite)
+        case .undo:
+            compactRailToolButton(tool) { sendCanvasCommand(.undo) }
+                .disabled(isArchived)
+        case .redo:
+            compactRailToolButton(tool) { sendCanvasCommand(.redo) }
+                .disabled(isArchived)
+        case .symbol:
+            compactRailToolButton(tool, selected: mode == .symbol) { handleSymbolToolTap() }
+                .disabled(isArchived)
+                .popover(isPresented: $showSymbolOptions, arrowEdge: .leading) {
+                    symbolOptions.presentationCompactAdaptation(.popover)
+                }
+        case .evidence:
+            compactRailToolButton(tool, selected: showEvidenceShelf) { toggleEvidenceShelf() }
+        case .ocr:
+            compactRailToolButton(tool, selected: showOCRReview) { showOCRReview = true }
+                .disabled(ocrArtifacts.isEmpty)
+        case .learn:
+            compactRailToolButton(tool) { openLearningHub() }
+        case .ask:
+            compactRailToolButton(
+                tool,
+                selected: mode == .lasso && lassoPurpose == .question
+            ) { activateLasso(.question) }
+            .disabled(model.aiJobs == nil)
+        case .math:
+            compactRailToolButton(
+                tool,
+                selected: mode == .lasso && lassoPurpose == .mathematics
+            ) { activateLasso(.mathematics) }
+            .disabled(model.aiJobs == nil)
+        }
+    }
+
+    private func compactRailToolButton(
+        _ tool: NotebookToolID,
+        selected: Bool = false,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            VStack(spacing: 2) {
+                Image(systemName: tool.symbol)
+                    .font(.system(size: 17, weight: selected ? .semibold : .regular))
+                Text(tool.title)
+                    .font(.system(size: 9.5, weight: .medium))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
+            }
+            .frame(width: 66, height: railButtonHeight)
+            .background(
+                selected ? EpistoriaDesign.subtleFill : Color.clear,
+                in: RoundedRectangle(cornerRadius: EpistoriaDesign.compactRadius, style: .continuous)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(EpistoriaPressButtonStyle())
+        .accessibilityLabel(tool.title)
+        .accessibilityIdentifier("note.tool.\(tool.rawValue)")
+    }
+
+    private var moreToolsPanel: some View {
+        NavigationStack {
+            List {
+                Section("Tools") {
+                    ForEach(NotebookToolID.optional) { tool in
+                        Button {
+                            showMoreTools = false
+                            runOptionalTool(tool)
+                        } label: {
+                            Label(tool.title, systemImage: tool.symbol)
+                        }
+                        .disabled(optionalToolDisabled(tool))
+                    }
+                }
+                Section("Note") {
+                    Button("Find in Note", systemImage: "doc.text.magnifyingglass") {
+                        showMoreTools = false
+                        showFindInNote = true
+                    }
+                    Button("Organize", systemImage: "folder.badge.plus") {
+                        showMoreTools = false
+                        showOrganization = true
+                    }
+                    Button("Export PDF", systemImage: "doc.richtext") {
+                        showMoreTools = false
+                        showPDFExportConfirmation = true
+                    }
+                    .disabled(isExportingPDF)
+                    Button("Page and paper", systemImage: "doc.badge.gearshape") {
+                        showMoreTools = false
+                        showPageManager = configuration.pageFormat != .infinite
+                    }
+                    .disabled(configuration.pageFormat == .infinite)
+                }
+                Section("Add image") {
+                    PhotosPicker(selection: $selectedPhotoItem, matching: .images) {
+                        Label("Photo Library", systemImage: "photo.on.rectangle")
+                    }
+                    Button("Files", systemImage: "folder") {
+                        showMoreTools = false
+                        isImportingImage = true
+                    }
+                    Button("Paste Image", systemImage: "doc.on.clipboard") {
+                        showMoreTools = false
+                        Task { await pasteImage() }
+                    }
+                    .disabled(UIPasteboard.general.image == nil)
+                }
+                Section("Customize") {
+                    ForEach(NotebookToolID.optional) { tool in
+                        Toggle(
+                            "Pin \(tool.title)",
+                            isOn: Binding(
+                                get: { model.workspacePreferences.pinnedOptionalTools.contains(tool) },
+                                set: { isPinned in
+                                    if isPinned { model.workspacePreferences.pinnedOptionalTools.insert(tool) }
+                                    else { model.workspacePreferences.pinnedOptionalTools.remove(tool) }
+                                }
+                            )
+                        )
+                    }
+                }
+            }
+            .navigationTitle("More")
+            .frame(minWidth: 330, minHeight: 520)
+        }
+    }
+
+    private func optionalToolDisabled(_ tool: NotebookToolID) -> Bool {
+        switch tool {
+        case .ocr: ocrArtifacts.isEmpty
+        case .ask, .math: model.aiJobs == nil
+        default: false
+        }
+    }
+
+    private func runOptionalTool(_ tool: NotebookToolID) {
+        switch tool {
+        case .symbol: handleSymbolToolTap()
+        case .evidence: toggleEvidenceShelf()
+        case .ocr: showOCRReview = true
+        case .learn: openLearningHub()
+        case .ask: activateLasso(.question)
+        case .math: activateLasso(.mathematics)
+        default: break
+        }
+    }
+
+    private func toggleEvidenceShelf() {
+        withAnimation(reduceMotion ? .easeOut(duration: 0.12) : .snappy(duration: 0.24, extraBounce: 0)) {
+            showEvidenceShelf.toggle()
+        }
+    }
+
+    private func activateLasso(_ purpose: NotebookLassoPurpose) {
+        if mode == .lasso, lassoPurpose == purpose, !lassoSelection.isEmpty {
+            if purpose == .question { showNoteQuerySheet = true }
+            else { showMathAssistanceSheet = true }
+        } else {
+            selectedItemId = nil
+            lassoSelection = LassoSelection()
+            lassoPurpose = purpose
+            mode = .lasso
+        }
+    }
+
+    private func openLearningHub() {
+        model.learningLaunchContext = LearningLaunchContext(
+            topicId: note?.payload.courseId,
+            noteId: noteId,
+            selectedObjectIds: lassoSelection.selectedBlockIds,
+            destination: .overview
+        )
+        model.selectedSection = .learning
+    }
+
+    private var legacyNotebookToolRail: some View {
         VStack(spacing: 4) {
             railToolButton(
                 "Select",
@@ -1660,10 +1980,31 @@ struct NoteEditorView: View {
 
     private var isArchived: Bool { note?.payload.archivedAt != nil }
 
-    private var finitePageCount: Int { configuration.effectivePageCount }
+    private var pageConfigurations: [NoteCanvasConfiguration] {
+        if pages.isEmpty { return Array(repeating: configuration, count: configuration.effectivePageCount) }
+        return pages.map(\.payload.configuration)
+    }
+
+    private var finitePageCount: Int {
+        configuration.pageFormat == .infinite ? 1 : max(pages.count, 1)
+    }
+
+    private func pageId(at pageIndex: Int) -> UUID? {
+        pages.indices.contains(pageIndex) ? pages[pageIndex].id : nil
+    }
+
+    private func pageConfiguration(at pageIndex: Int) -> NoteCanvasConfiguration? {
+        pages.indices.contains(pageIndex) ? pages[pageIndex].payload.configuration : nil
+    }
 
     private func blockPageIndex(_ payload: NoteBlockPayload) -> Int {
-        configuration.pageFormat == .infinite ? 0 : max(payload.canvasPageIndex ?? 0, 0)
+        guard configuration.pageFormat != .infinite else { return 0 }
+        if let pageId = payload.canvasPageId,
+           let index = pages.firstIndex(where: { $0.id == pageId })
+        {
+            return index
+        }
+        return max(payload.canvasPageIndex ?? 0, 0)
     }
 
     private var pageLabel: String {
@@ -1700,6 +2041,7 @@ struct NoteEditorView: View {
         guard let store = model.store else { return }
         let isInitialLoad = isLoading
         do {
+            let loadedPages = try await store.ensureNotePages(noteId: noteId)
             async let loadedNote = store.payload(NotePayload.self, id: noteId)
             async let loadedBlocks = store.list(NoteBlockPayload.self, parentId: noteId)
             async let loadedEvidence = store.list(EvidencePayload.self)
@@ -1710,7 +2052,10 @@ struct NoteEditorView: View {
                 loadedNote, loadedBlocks, loadedEvidence, loadedSources, loadedVersions, loadedOCR
             )
             note = result.0
-            configuration = result.0.payload.canvas ?? NoteCanvasConfiguration()
+            pages = loadedPages
+            configuration = loadedPages.first?.payload.configuration
+                ?? result.0.payload.canvas
+                ?? NoteCanvasConfiguration()
             if title != result.0.payload.title {
                 suppressNextTitleChange = true
                 title = result.0.payload.title
@@ -1744,15 +2089,17 @@ struct NoteEditorView: View {
             if configuration.pageFormat == .infinite {
                 currentPageIndex = 0
             } else if isInitialLoad,
-                let focusedBlockId,
-                let focused = blocks.first(where: { $0.id == focusedBlockId })
+                let activeFocusedBlockId,
+                let focused = blocks.first(where: { $0.id == activeFocusedBlockId })
             {
-                currentPageIndex = min(
-                    max(focused.payload.canvasPageIndex ?? 0, 0),
-                    finitePageCount - 1
-                )
+                currentPageIndex = min(max(blockPageIndex(focused.payload), 0), finitePageCount - 1)
             } else {
                 currentPageIndex = min(max(currentPageIndex, 0), finitePageCount - 1)
+            }
+            if let currentConfiguration = pageConfiguration(at: currentPageIndex),
+               configuration.pageFormat != .infinite
+            {
+                configuration = currentConfiguration
             }
             var loadedInk: [Int: Data] = [:]
             for block in blocks
@@ -1857,7 +2204,11 @@ struct NoteEditorView: View {
         }
         creatingInkPages.insert(pageIndex)
         defer { creatingInkPages.remove(pageIndex) }
-        let id = try await store.appendCanvasInkLayer(noteId: noteId, pageIndex: pageIndex)
+        let id = try await store.appendCanvasInkLayer(
+            noteId: noteId,
+            pageIndex: pageIndex,
+            pageId: pageId(at: pageIndex)
+        )
         let block = try await store.payload(NoteBlockPayload.self, id: id)
         blocks.append(block)
         blocks.sort { $0.payload.orderKey < $1.payload.orderKey }
@@ -1878,7 +2229,8 @@ struct NoteEditorView: View {
                 noteId: noteId,
                 text: content,
                 placement: placement,
-                pageIndex: currentPageIndex
+                pageIndex: currentPageIndex,
+                pageId: pageId(at: currentPageIndex)
             )
             model.noteLocalMutation()
             try await refreshBlock(id)
@@ -1901,7 +2253,8 @@ struct NoteEditorView: View {
                 noteId: noteId,
                 evidenceId: evidenceId,
                 placement: placement,
-                pageIndex: pageIndex
+                pageIndex: pageIndex,
+                pageId: pageId(at: pageIndex)
             )
             model.noteLocalMutation()
             try await refreshBlock(id)
@@ -1957,7 +2310,8 @@ struct NoteEditorView: View {
                 noteId: noteId,
                 shape: shape,
                 placement: placement,
-                pageIndex: pageIndex
+                pageIndex: pageIndex,
+                pageId: pageId(at: pageIndex)
             )
             model.noteLocalMutation()
             try await refreshBlock(id)
@@ -1982,7 +2336,8 @@ struct NoteEditorView: View {
                 noteId: noteId,
                 symbol: selectedMathSymbol,
                 placement: placement,
-                pageIndex: pageIndex
+                pageIndex: pageIndex,
+                pageId: pageId(at: pageIndex)
             )
             model.noteLocalMutation()
             try await refreshBlock(id)
@@ -2005,7 +2360,8 @@ struct NoteEditorView: View {
                 noteId: noteId,
                 symbol: value,
                 placement: placement,
-                pageIndex: currentPageIndex
+                pageIndex: currentPageIndex,
+                pageId: pageId(at: currentPageIndex)
             )
             model.noteLocalMutation()
             try await refreshBlock(id)
@@ -2024,27 +2380,7 @@ struct NoteEditorView: View {
             importProgress = "Encrypting original image…"
             try await flushTitle()
             let imported = try await assetManager.importImage(from: url)
-            let ratio = CGFloat(imported.pixelWidth) / CGFloat(imported.pixelHeight)
-            let width: CGFloat = min(420, max(180, ratio >= 1 ? 420 : 320 * ratio))
-            let height: CGFloat = min(520, max(140, width / max(ratio, 0.01)))
-            let placement = placementCentered(
-                width: Double(width),
-                height: Double(height),
-                zIndex: nextZIndex
-            )
-            let id = try await store.appendCanvasImage(
-                noteId: noteId,
-                assetId: imported.assetId,
-                filename: imported.filename,
-                placement: placement,
-                pageIndex: currentPageIndex
-            )
-            model.noteLocalMutation()
-            importProgress = nil
-            try await refreshBlock(id)
-            await loadImagePreviews(around: currentPageIndex)
-            selectedItemId = id
-            mode = .select
+            try await placeImportedImage(imported, store: store)
         } catch is CancellationError {
             importProgress = nil
         } catch {
@@ -2053,9 +2389,66 @@ struct NoteEditorView: View {
         }
     }
 
+    private func importPhoto(_ item: PhotosPickerItem) async {
+        defer { selectedPhotoItem = nil }
+        do {
+            guard let data = try await item.loadTransferable(type: Data.self) else {
+                throw NoteEditorSaveError.imagePreviewUnavailable
+            }
+            await importImageData(data, filename: "Photo")
+        } catch { report(error) }
+    }
+
+    private func pasteImage() async {
+        guard let image = UIPasteboard.general.image,
+              let data = image.pngData()
+        else { return }
+        await importImageData(data, filename: "Pasted image.png")
+    }
+
+    private func importImageData(_ data: Data, filename: String) async {
+        guard !isArchived, let assetManager = model.assetManager, let store = model.store else {
+            return
+        }
+        do {
+            importProgress = "Encrypting original image…"
+            try await flushTitle()
+            let imported = try await assetManager.importImage(data: data, filename: filename)
+            try await placeImportedImage(imported, store: store)
+        } catch {
+            importProgress = nil
+            report(error)
+        }
+    }
+
+    private func placeImportedImage(_ imported: ImportedImage, store: EpistoriaStore) async throws {
+        let ratio = CGFloat(imported.pixelWidth) / CGFloat(imported.pixelHeight)
+        let width: CGFloat = min(420, max(180, ratio >= 1 ? 420 : 320 * ratio))
+        let height: CGFloat = min(520, max(140, width / max(ratio, 0.01)))
+        let placement = placementCentered(
+            width: Double(width),
+            height: Double(height),
+            zIndex: nextZIndex
+        )
+        let id = try await store.appendCanvasImage(
+            noteId: noteId,
+            assetId: imported.assetId,
+            filename: imported.filename,
+            placement: placement,
+            pageIndex: currentPageIndex,
+            pageId: pageId(at: currentPageIndex)
+        )
+        model.noteLocalMutation()
+        importProgress = nil
+        try await refreshBlock(id)
+        await loadImagePreviews(around: currentPageIndex)
+        selectedItemId = id
+        mode = .select
+    }
+
     private func savePlacement(id: UUID, placement: NoteCanvasPlacement) {
         guard !isArchived, var block = blocks.first(where: { $0.id == id }) else { return }
-        block.payload.schemaVersion = "note-block/v5"
+        block.payload.schemaVersion = "note-block/v6"
         block.payload.canvasPlacement = placement
         block.payload.updatedAt = .now
         replaceLocalBlock(block)
@@ -2074,7 +2467,7 @@ struct NoteEditorView: View {
                 from: NSRange(location: 0, length: attributedText.length),
                 documentAttributes: [.documentType: NSAttributedString.DocumentType.rtf]
             )
-            block.payload.schemaVersion = "note-block/v5"
+            block.payload.schemaVersion = "note-block/v6"
             block.payload.plainText = attributedText.string
             block.payload.richTextRtf = rtf
             block.payload.canvasPlacement = placement
@@ -2095,7 +2488,7 @@ struct NoteEditorView: View {
                 id: block.id,
                 payload: snapshot,
                 parentId: snapshot.noteId,
-                relationIds: [snapshot.noteId, snapshot.assetId, snapshot.evidenceId].compactMap(
+                relationIds: [snapshot.noteId, snapshot.canvasPageId, snapshot.assetId, snapshot.evidenceId].compactMap(
                     \.self)
             )
             model.noteLocalMutation()
@@ -2130,7 +2523,7 @@ struct NoteEditorView: View {
         if pageIndex == currentPageIndex { inkSaveState = .saving }
         let previousDrawingData = inkBlock.payload.drawingData
         var snapshot = inkBlock.payload
-        snapshot.schemaVersion = "note-block/v5"
+        snapshot.schemaVersion = "note-block/v6"
         snapshot.drawingData = value
         snapshot.updatedAt = .now
         var localBlock = inkBlock
@@ -2144,7 +2537,7 @@ struct NoteEditorView: View {
                 id: inkBlock.id,
                 payload: snapshot,
                 parentId: snapshot.noteId,
-                relationIds: [snapshot.noteId]
+                relationIds: [snapshot.noteId, snapshot.canvasPageId].compactMap(\.self)
             )
             if inkSaveBuffer.isCurrent(generation, for: inkBlock.id),
                 pageIndex == currentPageIndex
@@ -2334,16 +2727,24 @@ struct NoteEditorView: View {
     private func addPage() async {
         guard !isArchived, configuration.pageFormat != .infinite else { return }
         do {
-            let newPageIndex = finitePageCount
             let continueInking = mode == .ink
-            var changed = configuration
-            changed.schemaVersion = "note-canvas/v3"
-            changed.pageCount = newPageIndex + 1
-            try await persistCanvasConfiguration(changed)
+            guard let store = model.store else {
+                throw NoteEditorSaveError.encryptedStoreUnavailable
+            }
+            try await flushPendingChanges()
+            let created = try await store.insertNotePage(
+                noteId: noteId,
+                after: pageId(at: currentPageIndex),
+                configuration: configuration
+            )
+            pages = try await store.notePages(noteId: noteId)
+            let newPageIndex = pages.firstIndex(where: { $0.id == created }) ?? max(pages.count - 1, 0)
+            currentPageIndex = newPageIndex
             requestedPageIndex = newPageIndex
             if continueInking {
                 try await ensureInkLayer(on: newPageIndex)
             }
+            model.noteLocalMutation()
         } catch { report(error) }
     }
 
@@ -2365,19 +2766,14 @@ struct NoteEditorView: View {
             throw NoteEditorSaveError.encryptedStoreUnavailable
         }
         try await flushPendingChanges()
-        guard var note = self.note else {
-            throw NoteEditorSaveError.encryptedStoreUnavailable
+        if let currentPageId = pageId(at: currentPageIndex) {
+            try await store.updateNotePageConfiguration(
+                noteId: noteId,
+                pageId: currentPageId,
+                configuration: changed
+            )
+            pages = try await store.notePages(noteId: noteId)
         }
-        note.payload.schemaVersion = "note/v3"
-        note.payload.canvas = changed
-        note.payload.updatedAt = .now
-        _ = try await store.save(
-            id: note.id,
-            payload: note.payload,
-            parentId: note.payload.courseId ?? note.payload.studySessionId,
-            relationIds: [note.payload.courseId, note.payload.studySessionId].compactMap(\.self)
-        )
-        self.note = note
         configuration = changed
         model.noteLocalMutation()
     }
@@ -2396,11 +2792,15 @@ struct NoteEditorView: View {
     }
 
     private func deleteBlock(_ block: IdentifiedPayload<NoteBlockPayload>) async {
-        guard !isArchived, let database = model.database else { return }
+        guard !isArchived, let store = model.store else { return }
         do {
             try await model.pendingSaves.flush(id: block.id)
-            try await database.deleteLocal(id: block.id)
+            let trashId = try await store.moveNoteBlockToTrash(
+                id: block.id,
+                displayName: block.payload.plainText.isEmpty ? "Canvas item" : String(block.payload.plainText.prefix(80))
+            )
             recentlyDeleted = block
+            recentlyDeletedTrashEntryId = trashId
             selectedItemId = nil
             imagePreviews[block.id] = nil
             blocks.removeAll { $0.id == block.id }
@@ -2409,17 +2809,11 @@ struct NoteEditorView: View {
     }
 
     private func undoDelete(_ deleted: IdentifiedPayload<NoteBlockPayload>) async {
-        guard let store = model.store else { return }
+        guard let store = model.store, let trashId = recentlyDeletedTrashEntryId else { return }
         do {
-            _ = try await store.save(
-                id: deleted.id,
-                payload: deleted.payload,
-                parentId: noteId,
-                relationIds: [noteId, deleted.payload.assetId, deleted.payload.evidenceId]
-                    .compactMap(
-                        \.self)
-            )
+            try await store.restoreTrashEntry(id: trashId)
             recentlyDeleted = nil
+            recentlyDeletedTrashEntryId = nil
             selectedItemId = deleted.id
             model.noteLocalMutation()
             try await refreshBlock(deleted.id)
@@ -2437,7 +2831,7 @@ struct NoteEditorView: View {
         }
         guard let store = model.store, var note else { return }
         guard (note.payload.archivedAt != nil) != archived else { return }
-        note.payload.schemaVersion = "note/v3"
+        note.payload.schemaVersion = "note/v4"
         note.payload.archivedAt = archived ? .now : nil
         note.payload.updatedAt = .now
         do {
@@ -2454,7 +2848,7 @@ struct NoteEditorView: View {
         } catch { report(error) }
     }
 
-    private func exportPDF() async {
+    private func exportPDF(options: NotePDFExportOptions) async {
         guard !isExportingPDF else { return }
         isExportingPDF = true
         defer {
@@ -2462,7 +2856,7 @@ struct NoteEditorView: View {
             pdfExportTask = nil
         }
         do {
-            pdfExportResult = try await model.createNotePDF(noteId: noteId)
+            pdfExportResult = try await model.createNotePDF(noteId: noteId, options: options)
         } catch is CancellationError {
             // Leaving the editor cancels the readable export and removes its partial file.
         } catch {
@@ -2470,9 +2864,9 @@ struct NoteEditorView: View {
         }
     }
 
-    private func startPDFExport() {
+    private func startPDFExport(options: NotePDFExportOptions) {
         guard pdfExportTask == nil else { return }
-        pdfExportTask = Task { await exportPDF() }
+        pdfExportTask = Task { await exportPDF(options: options) }
     }
 
     private func removePDFExport(_ result: NotePDFExportResult) {
@@ -2527,7 +2921,7 @@ struct NoteEditorView: View {
                 throw NoteEditorSaveError.encryptedStoreUnavailable
             }
             guard clean != note.payload.title else { return }
-            note.payload.schemaVersion = "note/v3"
+            note.payload.schemaVersion = "note/v4"
             note.payload.title = clean
             note.payload.updatedAt = .now
             _ = try await store.save(
@@ -2763,6 +3157,109 @@ extension EvidenceBacklinkKind {
     }
 }
 
+private struct NotePDFExportOptionsView: View {
+    private enum PageSelection: String, CaseIterable, Identifiable {
+        case all = "All pages"
+        case current = "Current page"
+        case range = "Page range"
+        var id: Self { self }
+    }
+
+    private enum OrientationChoice: String, CaseIterable, Identifiable {
+        case preserve = "Preserve each page"
+        case portrait = "Portrait"
+        case landscape = "Landscape"
+        var id: Self { self }
+    }
+
+    let pageCount: Int
+    let currentPageIndex: Int
+    let onExport: (NotePDFExportOptions) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var pageSelection = PageSelection.all
+    @State private var firstPage = 1
+    @State private var lastPage: Int
+    @State private var paperSize = NotePDFPaperSize.original
+    @State private var orientation = OrientationChoice.preserve
+
+    init(
+        pageCount: Int,
+        currentPageIndex: Int,
+        onExport: @escaping (NotePDFExportOptions) -> Void
+    ) {
+        self.pageCount = max(pageCount, 1)
+        self.currentPageIndex = min(max(currentPageIndex, 0), max(pageCount - 1, 0))
+        self.onExport = onExport
+        _lastPage = State(initialValue: max(pageCount, 1))
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Pages") {
+                    Picker("Export", selection: $pageSelection) {
+                        ForEach(PageSelection.allCases) { Text($0.rawValue).tag($0) }
+                    }
+                    if pageSelection == .range {
+                        Stepper("First page: \(firstPage)", value: $firstPage, in: 1 ... pageCount)
+                        Stepper("Last page: \(lastPage)", value: $lastPage, in: 1 ... pageCount)
+                    }
+                }
+
+                Section {
+                    Picker("Paper size", selection: $paperSize) {
+                        ForEach(NotePDFPaperSize.allCases) { Text($0.rawValue).tag($0) }
+                    }
+                    Picker("Orientation", selection: $orientation) {
+                        ForEach(OrientationChoice.allCases) { Text($0.rawValue).tag($0) }
+                    }
+                } header: {
+                    Text("Output")
+                } footer: {
+                    Text("Original page size keeps each notebook page's own format. A4 or US Letter scales and centers the page without changing the note.")
+                }
+
+                Section {
+                    Label(
+                        "The PDF contains readable personal data. Save or print it only in a location you trust.",
+                        systemImage: "exclamationmark.shield"
+                    )
+                    .foregroundStyle(EpistoriaDesign.attention)
+                }
+            }
+            .navigationTitle("Export PDF")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Create PDF") { onExport(options) }
+                        .disabled(pageSelection == .range && firstPage > lastPage)
+                }
+            }
+        }
+    }
+
+    private var options: NotePDFExportOptions {
+        let range: ClosedRange<Int>? = switch pageSelection {
+        case .all: nil
+        case .current: currentPageIndex ... currentPageIndex
+        case .range: (firstPage - 1) ... (lastPage - 1)
+        }
+        let resolvedOrientation: NotePageOrientation? = switch orientation {
+        case .preserve: nil
+        case .portrait: .portrait
+        case .landscape: .landscape
+        }
+        return NotePDFExportOptions(
+            pageRange: range,
+            paperSize: paperSize,
+            orientation: resolvedOrientation
+        )
+    }
+}
+
 private struct NotePDFExportReadyView: View {
     let result: NotePDFExportResult
     let onDone: () -> Void
@@ -2791,6 +3288,15 @@ private struct NotePDFExportReadyView: View {
                 }
                 .buttonStyle(EpistoriaPrimaryButtonStyle())
                 .accessibilityIdentifier("note.export-pdf.share")
+                Button {
+                    printPDF()
+                } label: {
+                    Label("Print PDF", systemImage: "printer")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.large)
+                .accessibilityIdentifier("note.export-pdf.print")
                 Spacer()
             }
             .padding(30)
@@ -2798,5 +3304,16 @@ private struct NotePDFExportReadyView: View {
             .toolbar { Button("Done") { onDone() } }
         }
         .interactiveDismissDisabled()
+    }
+
+    private func printPDF() {
+        let controller = UIPrintInteractionController.shared
+        let info = UIPrintInfo(dictionary: nil)
+        info.jobName = result.title
+        info.outputType = .general
+        controller.printInfo = info
+        controller.printingItem = result.fileURL
+        controller.showsNumberOfCopies = true
+        controller.present(animated: true)
     }
 }

@@ -106,8 +106,11 @@ public enum EntitySearchIndexer {
             case .note:
                 let value = try CanonicalJSON.decode(NotePayload.self, from: content)
                 return SearchDocument(title: value.title, body: "")
+            case .notePage, .trashEntry:
+                return nil
             case .noteBlock:
                 let value = try CanonicalJSON.decode(NoteBlockPayload.self, from: content)
+                guard !value.tombstone else { return nil }
                 return SearchDocument(
                     title: "",
                     body: [value.plainText, value.transcription].compactMap(\ .self)
@@ -520,6 +523,19 @@ public actor EpistoriaStore {
             parentId: courseId ?? sessionId,
             relationIds: [courseId, sessionId].compactMap(\ .self)
         )]
+        for pageIndex in 0 ..< canvas.effectivePageCount {
+            let page = NotePagePayload(
+                noteId: noteId,
+                orderKey: Self.notePageOrderKey(pageIndex),
+                configuration: canvas
+            )
+            writes.append(try localWrite(
+                id: UUID(),
+                payload: page,
+                parentId: noteId,
+                relationIds: [noteId]
+            ))
+        }
         if let sessionId {
             let relation = RelationPayload(kind: .sessionNote, leftId: sessionId, rightId: noteId)
             writes.append(try localWrite(
@@ -537,6 +553,544 @@ public actor EpistoriaStore {
         }
         try await database.saveLocalBatch(writes)
         return noteId
+    }
+
+    /// Returns stable pages in visual order. Legacy notes are upgraded atomically on first open;
+    /// their block IDs, content, and zero-based order remain unchanged.
+    public func ensureNotePages(noteId: UUID) async throws -> [IdentifiedPayload<NotePagePayload>] {
+        let existing = try await notePages(noteId: noteId, includeTrashed: true)
+        guard existing.isEmpty else { return existing.filter { $0.payload.trashedAt == nil } }
+
+        let note = try await payload(NotePayload.self, id: noteId)
+        let configuration = note.payload.canvas ?? NoteCanvasConfiguration()
+        let count = configuration.effectivePageCount
+        let pageIds = (0 ..< count).map { _ in UUID() }
+        let blocks = try await list(NoteBlockPayload.self, parentId: noteId)
+        var writes: [LocalEntityWrite] = []
+
+        for index in 0 ..< count {
+            writes.append(try localWrite(
+                id: pageIds[index],
+                payload: NotePagePayload(
+                    noteId: noteId,
+                    orderKey: Self.notePageOrderKey(index),
+                    configuration: configuration
+                ),
+                parentId: noteId,
+                relationIds: [noteId]
+            ))
+        }
+        for identified in blocks {
+            var block = identified.payload
+            let index = min(max(block.canvasPageIndex ?? 0, 0), count - 1)
+            block.schemaVersion = "note-block/v6"
+            block.canvasPageId = pageIds[index]
+            block.updatedAt = .now
+            writes.append(try localWrite(
+                id: identified.id,
+                payload: block,
+                parentId: noteId,
+                relationIds: noteBlockRelationIds(block, pageId: pageIds[index])
+            ))
+        }
+        let backup = try await database.entity(id: noteId)?.content ?? CanonicalJSON.encode(note.payload)
+        try await database.saveLocalBatch(
+            writes,
+            migration: LocalMigrationBatch(
+                name: "indexed-pages-to-stable-pages/v1",
+                backupEntityId: noteId,
+                backupContent: backup
+            )
+        )
+        return try await notePages(noteId: noteId)
+    }
+
+    public func notePages(
+        noteId: UUID,
+        includeTrashed: Bool = false
+    ) async throws -> [IdentifiedPayload<NotePagePayload>] {
+        try await list(NotePagePayload.self, parentId: noteId)
+            .filter { includeTrashed || $0.payload.trashedAt == nil }
+            .sorted {
+                if $0.payload.orderKey == $1.payload.orderKey {
+                    return $0.id.uuidString < $1.id.uuidString
+                }
+                return $0.payload.orderKey < $1.payload.orderKey
+            }
+    }
+
+    @discardableResult
+    public func insertNotePage(
+        noteId: UUID,
+        after pageId: UUID?,
+        configuration: NoteCanvasConfiguration? = nil,
+        at date: Date = .now
+    ) async throws -> UUID {
+        var pages = try await ensureNotePages(noteId: noteId)
+        let note = try await payload(NotePayload.self, id: noteId)
+        let insertionIndex = pageId.flatMap { id in pages.firstIndex { $0.id == id }.map { $0 + 1 } }
+            ?? pages.count
+        let newId = UUID()
+        let inherited = configuration ?? (
+            pages.indices.contains(max(insertionIndex - 1, 0))
+                ? pages[max(insertionIndex - 1, 0)].payload.configuration
+                : (note.payload.canvas ?? NoteCanvasConfiguration())
+        )
+        let page = IdentifiedPayload(
+            id: newId,
+            payload: NotePagePayload(
+                noteId: noteId,
+                orderKey: Self.notePageOrderKey(insertionIndex),
+                configuration: inherited,
+                now: date
+            ),
+            revision: 0,
+            syncState: .pending
+        )
+        pages.insert(page, at: min(max(insertionIndex, 0), pages.count))
+        try await savePageOrderAndCount(note: note, pages: pages, at: date)
+        return newId
+    }
+
+    @discardableResult
+    public func insertNotePage(
+        noteId: UUID,
+        before pageId: UUID,
+        configuration: NoteCanvasConfiguration? = nil,
+        at date: Date = .now
+    ) async throws -> UUID {
+        var pages = try await ensureNotePages(noteId: noteId)
+        guard let insertionIndex = pages.firstIndex(where: { $0.id == pageId }) else {
+            throw StoreError.entityNotFound
+        }
+        let note = try await payload(NotePayload.self, id: noteId)
+        let newId = UUID()
+        let inherited = configuration ?? pages[insertionIndex].payload.configuration
+        pages.insert(
+            IdentifiedPayload(
+                id: newId,
+                payload: NotePagePayload(
+                    noteId: noteId,
+                    orderKey: Self.notePageOrderKey(insertionIndex),
+                    configuration: inherited,
+                    now: date
+                ),
+                revision: 0,
+                syncState: .pending
+            ),
+            at: insertionIndex
+        )
+        try await savePageOrderAndCount(note: note, pages: pages, at: date)
+        return newId
+    }
+
+    @discardableResult
+    public func duplicateNotePage(
+        noteId: UUID,
+        pageId: UUID,
+        at date: Date = .now
+    ) async throws -> UUID {
+        var pages = try await ensureNotePages(noteId: noteId)
+        guard let sourceIndex = pages.firstIndex(where: { $0.id == pageId }) else {
+            throw StoreError.entityNotFound
+        }
+        let newPageId = UUID()
+        var newPage = pages[sourceIndex].payload
+        newPage.schemaVersion = "note-page/v1"
+        newPage.orderKey = Self.notePageOrderKey(sourceIndex + 1)
+        newPage.trashedAt = nil
+        newPage.thumbnailRevision = 0
+        newPage.createdAt = date
+        newPage.updatedAt = date
+        pages.insert(
+            IdentifiedPayload(id: newPageId, payload: newPage, revision: 0, syncState: .pending),
+            at: sourceIndex + 1
+        )
+
+        let note = try await payload(NotePayload.self, id: noteId)
+        let sourceBlocks = try await list(NoteBlockPayload.self, parentId: noteId).filter {
+            !$0.payload.tombstone && $0.payload.canvasPageId == pageId
+        }
+        var writes = try pageOrderWrites(pages, at: date)
+        for source in sourceBlocks {
+            var copy = source.payload
+            copy.schemaVersion = "note-block/v6"
+            copy.canvasPageId = newPageId
+            copy.createdAt = date
+            copy.updatedAt = date
+            writes.append(try localWrite(
+                id: UUID(),
+                payload: copy,
+                parentId: noteId,
+                relationIds: noteBlockRelationIds(copy, pageId: newPageId)
+            ))
+        }
+        var changedNote = note.payload
+        changedNote.schemaVersion = "note/v4"
+        var canvas = changedNote.canvas ?? NoteCanvasConfiguration()
+        canvas.pageCount = pages.count
+        changedNote.canvas = canvas
+        changedNote.updatedAt = date
+        writes.append(try localWrite(
+            id: noteId,
+            payload: changedNote,
+            parentId: changedNote.courseId ?? changedNote.studySessionId,
+            relationIds: [changedNote.courseId, changedNote.studySessionId].compactMap(\ .self)
+        ))
+        try await database.saveLocalBatch(writes)
+        return newPageId
+    }
+
+    public func reorderNotePage(
+        noteId: UUID,
+        pageId: UUID,
+        destinationIndex: Int,
+        at date: Date = .now
+    ) async throws {
+        var pages = try await ensureNotePages(noteId: noteId)
+        guard let sourceIndex = pages.firstIndex(where: { $0.id == pageId }) else {
+            throw StoreError.entityNotFound
+        }
+        let page = pages.remove(at: sourceIndex)
+        pages.insert(page, at: min(max(destinationIndex, 0), pages.count))
+        let note = try await payload(NotePayload.self, id: noteId)
+        try await savePageOrderAndCount(note: note, pages: pages, at: date)
+    }
+
+    public func updateNotePageConfiguration(
+        noteId: UUID,
+        pageId: UUID,
+        configuration: NoteCanvasConfiguration,
+        at date: Date = .now
+    ) async throws {
+        var page = try await payload(NotePagePayload.self, id: pageId)
+        guard page.payload.noteId == noteId, page.payload.trashedAt == nil else {
+            throw StoreError.entityNotFound
+        }
+        var pageConfiguration = configuration
+        pageConfiguration.pageCount = 1
+        page.payload.configuration = pageConfiguration
+        page.payload.thumbnailRevision += 1
+        page.payload.updatedAt = date
+        _ = try await save(
+            id: page.id,
+            payload: page.payload,
+            parentId: noteId,
+            relationIds: [noteId]
+        )
+    }
+
+    @discardableResult
+    public func movePageToTrash(
+        noteId: UUID,
+        pageId: UUID,
+        displayName: String,
+        at date: Date = .now
+    ) async throws -> UUID {
+        let pages = try await ensureNotePages(noteId: noteId)
+        guard pages.count > 1,
+              var page = pages.first(where: { $0.id == pageId })
+        else { throw LocalDatabaseError.queryFailed("a note needs at least one active page") }
+        let groupId = UUID()
+        page.payload.trashedAt = date
+        page.payload.updatedAt = date
+        let blocks = try await list(NoteBlockPayload.self, parentId: noteId).filter {
+            !$0.payload.tombstone && $0.payload.canvasPageId == pageId
+        }
+        var writes = try [localWrite(
+            id: pageId,
+            payload: page.payload,
+            parentId: noteId,
+            relationIds: [noteId]
+        )]
+        for identified in blocks {
+            var block = identified.payload
+            block.tombstone = true
+            block.updatedAt = date
+            writes.append(try localWrite(
+                id: identified.id,
+                payload: block,
+                parentId: noteId,
+                relationIds: noteBlockRelationIds(block, pageId: pageId)
+            ))
+        }
+        let trashId = UUID()
+        let entry = TrashEntryPayload(
+            targetId: pageId,
+            targetType: .notePage,
+            deletionGroupId: groupId,
+            previousParentId: noteId,
+            previousOrderKey: page.payload.orderKey,
+            displayName: displayName,
+            now: date
+        )
+        writes.append(try localWrite(
+            id: trashId,
+            payload: entry,
+            parentId: noteId,
+            relationIds: [noteId, pageId] + blocks.map(\.id)
+        ))
+        var changedNote = try await payload(NotePayload.self, id: noteId)
+        var canvas = changedNote.payload.canvas ?? NoteCanvasConfiguration()
+        canvas.pageCount = pages.count - 1
+        changedNote.payload.schemaVersion = "note/v4"
+        changedNote.payload.canvas = canvas
+        changedNote.payload.updatedAt = date
+        writes.append(try localWrite(
+            id: noteId,
+            payload: changedNote.payload,
+            parentId: changedNote.payload.courseId ?? changedNote.payload.studySessionId,
+            relationIds: [changedNote.payload.courseId, changedNote.payload.studySessionId].compactMap(\ .self)
+        ))
+        try await database.saveLocalBatch(writes)
+        return trashId
+    }
+
+    @discardableResult
+    public func moveToTrash(
+        targetId: UUID,
+        targetType: EntityType,
+        displayName: String,
+        previousParentId: UUID? = nil,
+        previousOrderKey: String? = nil,
+        dependencyIds: [UUID] = [],
+        at date: Date = .now
+    ) async throws -> UUID {
+        guard let target = try await database.entity(id: targetId), target.entityType == targetType else {
+            throw StoreError.entityNotFound
+        }
+        if let existing = try await list(TrashEntryPayload.self).first(where: {
+            $0.payload.targetId == targetId
+        }) { return existing.id }
+        var protectedDependencies = Set(dependencyIds)
+        if targetType == .resource {
+            protectedDependencies.formUnion(
+                try await list(EvidencePayload.self)
+                    .filter { $0.payload.sourceId == targetId }
+                    .map(\.id)
+            )
+        } else if targetType == .collection {
+            protectedDependencies.formUnion(
+                try await list(CollectionPayload.self)
+                    .filter { $0.payload.parentCollectionId == targetId }
+                    .map(\.id)
+            )
+        }
+        let resolvedDependencies = Array(protectedDependencies).sorted {
+            $0.uuidString < $1.uuidString
+        }
+        let entry = TrashEntryPayload(
+            targetId: targetId,
+            targetType: targetType,
+            previousParentId: previousParentId ?? target.parentId,
+            previousOrderKey: previousOrderKey,
+            displayName: displayName,
+            estimatedByteCount: Int64(target.content.count),
+            dependencyIds: resolvedDependencies,
+            now: date
+        )
+        return try await save(
+            payload: entry,
+            parentId: previousParentId ?? target.parentId,
+            relationIds: [targetId] + resolvedDependencies
+        )
+    }
+
+    /// Moves one canvas item to Trash in the same transaction that hides it from the note and
+    /// derived search. The encrypted block remains recoverable until Trash is emptied.
+    @discardableResult
+    public func moveNoteBlockToTrash(
+        id: UUID,
+        displayName: String,
+        at date: Date = .now
+    ) async throws -> UUID {
+        var block = try await payload(NoteBlockPayload.self, id: id)
+        guard !block.payload.tombstone else {
+            if let existing = try await trashEntries().first(where: { $0.payload.targetId == id }) {
+                return existing.id
+            }
+            throw StoreError.entityNotFound
+        }
+        block.payload.schemaVersion = "note-block/v6"
+        block.payload.tombstone = true
+        block.payload.updatedAt = date
+        let trashId = UUID()
+        let entry = TrashEntryPayload(
+            targetId: id,
+            targetType: .noteBlock,
+            previousParentId: block.payload.noteId,
+            displayName: displayName,
+            estimatedByteCount: Int64((try CanonicalJSON.encode(block.payload)).count),
+            now: date
+        )
+        try await database.saveLocalBatch([
+            try localWrite(
+                id: id,
+                payload: block.payload,
+                parentId: block.payload.noteId,
+                relationIds: noteBlockRelationIds(block.payload, pageId: block.payload.canvasPageId)
+            ),
+            try localWrite(
+                id: trashId,
+                payload: entry,
+                parentId: block.payload.noteId,
+                relationIds: [block.payload.noteId, id]
+            ),
+        ])
+        return trashId
+    }
+
+    public func trashEntries() async throws -> [IdentifiedPayload<TrashEntryPayload>] {
+        try await list(TrashEntryPayload.self).sorted { $0.payload.deletedAt > $1.payload.deletedAt }
+    }
+
+    public func trashedTargetIds() async throws -> Set<UUID> {
+        Set(try await trashEntries().map(\.payload.targetId))
+    }
+
+    public func restoreTrashEntry(id: UUID, at date: Date = .now) async throws {
+        let entry = try await payload(TrashEntryPayload.self, id: id)
+        var writes: [LocalEntityWrite] = []
+        if entry.payload.targetType == .notePage {
+            var page = try await payload(NotePagePayload.self, id: entry.payload.targetId)
+            page.payload.trashedAt = nil
+            page.payload.updatedAt = date
+            writes.append(try localWrite(
+                id: page.id,
+                payload: page.payload,
+                parentId: page.payload.noteId,
+                relationIds: [page.payload.noteId]
+            ))
+            let blocks = try await list(NoteBlockPayload.self, parentId: page.payload.noteId).filter {
+                $0.payload.canvasPageId == page.id
+            }
+            for identified in blocks {
+                var block = identified.payload
+                block.tombstone = false
+                block.updatedAt = date
+                writes.append(try localWrite(
+                    id: identified.id,
+                    payload: block,
+                    parentId: page.payload.noteId,
+                    relationIds: noteBlockRelationIds(block, pageId: page.id)
+                ))
+            }
+            var note = try await payload(NotePayload.self, id: page.payload.noteId)
+            let activeCount = try await notePages(noteId: page.payload.noteId, includeTrashed: true)
+                .filter { $0.id == page.id || $0.payload.trashedAt == nil }.count
+            var canvas = note.payload.canvas ?? NoteCanvasConfiguration()
+            canvas.pageCount = activeCount
+            note.payload.schemaVersion = "note/v4"
+            note.payload.canvas = canvas
+            note.payload.updatedAt = date
+            writes.append(try localWrite(
+                id: note.id,
+                payload: note.payload,
+                parentId: note.payload.courseId ?? note.payload.studySessionId,
+                relationIds: [note.payload.courseId, note.payload.studySessionId].compactMap(\ .self)
+            ))
+        } else if entry.payload.targetType == .noteBlock {
+            var block = try await payload(NoteBlockPayload.self, id: entry.payload.targetId)
+            block.payload.tombstone = false
+            block.payload.updatedAt = date
+            writes.append(try localWrite(
+                id: block.id,
+                payload: block.payload,
+                parentId: block.payload.noteId,
+                relationIds: noteBlockRelationIds(block.payload, pageId: block.payload.canvasPageId)
+            ))
+        }
+        try await database.saveLocalBatch(writes, deleting: [id], deletedAt: date)
+    }
+
+    public struct EmptyTrashResult: Equatable, Sendable {
+        public var deletedCount: Int
+        public var protectedCount: Int
+    }
+
+    public func emptyTrash(at date: Date = .now) async throws -> EmptyTrashResult {
+        let entries = try await trashEntries()
+        let removable = entries.filter { $0.payload.dependencyIds.isEmpty }
+        var deletionIds = Set(removable.map(\.id) + removable.map(\.payload.targetId))
+        let liveEntities = try await database.allEntities()
+        var foundDependentRecord = true
+        while foundDependentRecord {
+            foundDependentRecord = false
+            for entity in liveEntities where !deletionIds.contains(entity.id) {
+                let ownedByDeletedRecord = entity.parentId.map(deletionIds.contains) == true
+                    && Self.permanentlyOwnedTrashTypes.contains(entity.entityType)
+                let linkedToDeletedRecord = !deletionIds.isDisjoint(with: entity.relationIds)
+                    && Self.permanentlyLinkedTrashTypes.contains(entity.entityType)
+                guard ownedByDeletedRecord || linkedToDeletedRecord else { continue }
+                deletionIds.insert(entity.id)
+                foundDependentRecord = true
+            }
+        }
+        try await database.saveLocalBatch([], deleting: Array(deletionIds), deletedAt: date)
+        return EmptyTrashResult(
+            deletedCount: removable.count,
+            protectedCount: entries.count - removable.count
+        )
+    }
+
+    /// Records in these sets are either structural children or disposable projections. Assets,
+    /// Evidence, learning history, and owner-authored records are intentionally excluded.
+    private static let permanentlyOwnedTrashTypes: Set<EntityType> = [
+        .notePage, .noteBlock, .sourceVersion, .annotation,
+        .collectionItem, .sessionNote, .sessionResource,
+        .aiArtifact, .recognitionArtifact, .recognitionDecision, .transcriptCorrection,
+    ]
+
+    private static let permanentlyLinkedTrashTypes: Set<EntityType> = [
+        .notePage, .noteBlock,
+        .collectionItem, .sessionNote, .sessionResource,
+        .aiArtifact, .recognitionArtifact, .recognitionDecision, .transcriptCorrection,
+    ]
+
+    private func savePageOrderAndCount(
+        note: IdentifiedPayload<NotePayload>,
+        pages: [IdentifiedPayload<NotePagePayload>],
+        at date: Date
+    ) async throws {
+        var writes = try pageOrderWrites(pages, at: date)
+        var changed = note.payload
+        changed.schemaVersion = "note/v4"
+        var canvas = changed.canvas ?? NoteCanvasConfiguration()
+        canvas.pageCount = max(pages.count, 1)
+        changed.canvas = canvas
+        changed.updatedAt = date
+        writes.append(try localWrite(
+            id: note.id,
+            payload: changed,
+            parentId: changed.courseId ?? changed.studySessionId,
+            relationIds: [changed.courseId, changed.studySessionId].compactMap(\ .self)
+        ))
+        try await database.saveLocalBatch(writes)
+    }
+
+    private func pageOrderWrites(
+        _ pages: [IdentifiedPayload<NotePagePayload>],
+        at date: Date
+    ) throws -> [LocalEntityWrite] {
+        try pages.enumerated().map { index, identified in
+            var page = identified.payload
+            page.orderKey = Self.notePageOrderKey(index)
+            page.updatedAt = date
+            return try localWrite(
+                id: identified.id,
+                payload: page,
+                parentId: page.noteId,
+                relationIds: [page.noteId]
+            )
+        }
+    }
+
+    private func noteBlockRelationIds(_ block: NoteBlockPayload, pageId: UUID?) -> [UUID] {
+        [block.noteId, pageId, block.assetId, block.evidenceId].compactMap(\ .self)
+    }
+
+    private static func notePageOrderKey(_ index: Int) -> String {
+        String(format: "%012d", max(index, 0) * 1_000)
     }
 
     /// Adds an existing note to a topic collection without moving or duplicating the note.
@@ -714,7 +1268,8 @@ public actor EpistoriaStore {
         noteId: UUID,
         text: String = "",
         placement: NoteCanvasPlacement,
-        pageIndex: Int = 0
+        pageIndex: Int = 0,
+        pageId: UUID? = nil
     ) async throws -> UUID {
         let count = try await database.entities(type: .noteBlock, parentId: noteId).count
         var block = NoteBlockPayload(
@@ -725,7 +1280,12 @@ public actor EpistoriaStore {
         )
         block.canvasPlacement = placement
         block.canvasPageIndex = max(pageIndex, 0)
-        return try await save(payload: block, parentId: noteId, relationIds: [noteId])
+        block.canvasPageId = pageId
+        return try await save(
+            payload: block,
+            parentId: noteId,
+            relationIds: [noteId, pageId].compactMap(\ .self)
+        )
     }
 
     /// Places a reusable Evidence card on a note. The Evidence remains the source of truth and
@@ -735,7 +1295,8 @@ public actor EpistoriaStore {
         noteId: UUID,
         evidenceId: UUID,
         placement: NoteCanvasPlacement,
-        pageIndex: Int = 0
+        pageIndex: Int = 0,
+        pageId: UUID? = nil
     ) async throws -> UUID {
         _ = try await payload(NotePayload.self, id: noteId)
         let evidence = try await payload(EvidencePayload.self, id: evidenceId)
@@ -752,10 +1313,11 @@ public actor EpistoriaStore {
         block.evidenceId = evidenceId
         block.canvasPlacement = placement
         block.canvasPageIndex = max(pageIndex, 0)
+        block.canvasPageId = pageId
         return try await save(
             payload: block,
             parentId: noteId,
-            relationIds: [noteId, evidenceId, source.id, version.id]
+            relationIds: [noteId, pageId, evidenceId, source.id, version.id].compactMap(\ .self)
         )
     }
 
@@ -765,7 +1327,8 @@ public actor EpistoriaStore {
         assetId: UUID,
         filename: String,
         placement: NoteCanvasPlacement,
-        pageIndex: Int = 0
+        pageIndex: Int = 0,
+        pageId: UUID? = nil
     ) async throws -> UUID {
         let count = try await database.entities(type: .noteBlock, parentId: noteId).count
         var block = NoteBlockPayload(
@@ -777,10 +1340,11 @@ public actor EpistoriaStore {
         block.assetId = assetId
         block.canvasPlacement = placement
         block.canvasPageIndex = max(pageIndex, 0)
+        block.canvasPageId = pageId
         return try await save(
             payload: block,
             parentId: noteId,
-            relationIds: [noteId, assetId]
+            relationIds: [noteId, pageId, assetId].compactMap(\ .self)
         )
     }
 
@@ -789,7 +1353,8 @@ public actor EpistoriaStore {
         noteId: UUID,
         shape: NoteCanvasShape,
         placement: NoteCanvasPlacement,
-        pageIndex: Int = 0
+        pageIndex: Int = 0,
+        pageId: UUID? = nil
     ) async throws -> UUID {
         let count = try await database.entities(type: .noteBlock, parentId: noteId).count
         var block = NoteBlockPayload(
@@ -801,7 +1366,12 @@ public actor EpistoriaStore {
         block.canvasShape = shape
         block.canvasPlacement = placement
         block.canvasPageIndex = max(pageIndex, 0)
-        return try await save(payload: block, parentId: noteId, relationIds: [noteId])
+        block.canvasPageId = pageId
+        return try await save(
+            payload: block,
+            parentId: noteId,
+            relationIds: [noteId, pageId].compactMap(\ .self)
+        )
     }
 
     @discardableResult
@@ -809,7 +1379,8 @@ public actor EpistoriaStore {
         noteId: UUID,
         symbol: String,
         placement: NoteCanvasPlacement,
-        pageIndex: Int = 0
+        pageIndex: Int = 0,
+        pageId: UUID? = nil
     ) async throws -> UUID {
         let count = try await database.entities(type: .noteBlock, parentId: noteId).count
         var block = NoteBlockPayload(
@@ -820,11 +1391,20 @@ public actor EpistoriaStore {
         )
         block.canvasPlacement = placement
         block.canvasPageIndex = max(pageIndex, 0)
-        return try await save(payload: block, parentId: noteId, relationIds: [noteId])
+        block.canvasPageId = pageId
+        return try await save(
+            payload: block,
+            parentId: noteId,
+            relationIds: [noteId, pageId].compactMap(\ .self)
+        )
     }
 
     @discardableResult
-    public func appendCanvasInkLayer(noteId: UUID, pageIndex: Int = 0) async throws -> UUID {
+    public func appendCanvasInkLayer(
+        noteId: UUID,
+        pageIndex: Int = 0,
+        pageId: UUID? = nil
+    ) async throws -> UUID {
         let count = try await database.entities(type: .noteBlock, parentId: noteId).count
         var block = NoteBlockPayload(
             noteId: noteId,
@@ -833,7 +1413,12 @@ public actor EpistoriaStore {
         )
         block.canvasRole = .inkLayer
         block.canvasPageIndex = max(pageIndex, 0)
-        return try await save(payload: block, parentId: noteId, relationIds: [noteId])
+        block.canvasPageId = pageId
+        return try await save(
+            payload: block,
+            parentId: noteId,
+            relationIds: [noteId, pageId].compactMap(\ .self)
+        )
     }
 
     @discardableResult

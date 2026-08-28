@@ -10,9 +10,12 @@ the current personal beta.
 - Select plain, ruled, grid, dotted, or isometric paper.
 - Choose compact, standard, or wide pattern spacing and a neutral page color.
 - Scroll through fixed-paper pages as one continuous vertical document.
-- Jump directly to a numbered page or append a blank page from the persistent tool rail.
-- Switch between Select, Pen, Marker, Eraser, Text, Image, Shape, Symbol, and undo controls without
+- Open the page manager to review thumbnails, insert before or after, append, duplicate, reorder,
+  change a page template, move a page to Trash, or restore it.
+- Switch between Select, Pen, Marker, Eraser, Text, Image, Shape, Pages, Undo, and Redo without
   opening the system Pencil palette.
+- Open **More** for optional Evidence, recognition review, Learn, Ask, Math, and Symbol tools. Pin
+  the optional tools you use regularly without making the rail scroll.
 - Choose a pixel eraser with an adjustable circular width or a stroke eraser that removes a
   complete Pencil stroke.
 - Tap a selected Pen or Marker again to change its width and color.
@@ -21,13 +24,15 @@ the current personal beta.
   outline color, fill, and line width before placement.
 - Place editable algebra, calculus, Greek, set, logic, and comparison symbols.
 - Write anywhere with Apple Pencil.
-- Add typed text and images.
+- Add typed text and images from Photos, Files, the clipboard, and drag and drop.
 - Move, resize, rotate, and reorder text, images, shapes, and symbols.
 - Write over text and images without flattening the underlying material.
 - Open a note in an immersive workspace that uses the full iPad detail area.
 - Keep Pencil data separate by page so editing one page does not rewrite the complete note.
-- Export one note as a readable PDF that includes its paper, typed text, math symbols, vector
-  shapes, images, and Pencil ink.
+- Find typed text, equations, and labeled recognition inside the current note. Open a match on its
+  exact page and region.
+- Export selected pages or the complete note as a readable PDF. Keep original page sizes or lay
+  pages out on A4 or US Letter in portrait or landscape. Print the prepared PDF from the iPad.
 
 ## Sources
 
@@ -122,7 +127,11 @@ the current personal beta.
 - Remove a note from one List or Session without deleting the note, its other links, or Session
   activity history.
 - Review notes with a page miniature, content excerpt, page count, and save state.
+- Pin important notes above recent work.
 - Link notes, Sources, Concepts, cards, tests, and study sessions to a Topic.
+- Move notes, pages, Sources, Lists, and canvas items to encrypted Trash. Restore them manually.
+- Empty Trash only through a separate permanent action. Sources with Evidence and Lists with child
+  Lists remain protected until their dependencies are reviewed.
 - Archive and restore notes and Topics.
 - Return to recent notes and resources from Today.
 
@@ -191,6 +200,10 @@ Mac is not required. It is optional.
 
 ## Learning
 
+Learning tools are grouped in one hub. Open **Learn** from Today, a Topic, or a note to carry the
+current context into Sessions, Review, Tutor, Knowledge, or History. The default notebook workflow
+does not require an AI provider or Compute Node.
+
 ### Concept and Evidence map
 
 - Open a Topic's knowledge map from its dashboard.
@@ -208,7 +221,7 @@ Mac is not required. It is optional.
 
 ### Adaptive Tutor
 
-- Start a Learning Guide from Study, a Topic, or the persistent notebook tool rail.
+- Start a Learning Guide from Learning, a Topic, or More in the notebook rail.
 - Limit each session to one Topic, selected immutable Source Versions, a turn count, an expiration,
   and a spending limit.
 - Include connected knowledge only through an explicit session option.
@@ -278,7 +291,7 @@ require representative device validation.
   unresolved question when that record remains available.
 - Review append-only Study Next response history. Restoring a suppressed recommendation adds a new
   response without deleting the earlier action.
-- Open **Study → Week** for an offline summary of the previous seven days and the next seven days.
+- Open **Learning → Overview** for an offline summary of the previous seven days and the next seven days.
 - Review focused time, completed sessions, card reviews, submitted tests, average test score,
   difficult Topics, unresolved questions, dated goals, scheduled card reviews, and three suggested
   next actions.
@@ -324,7 +337,7 @@ require representative device validation.
   and chunks when derived AI records are selected for export.
 - Include transcript corrections and timestamped Evidence in `knowledge.json`. Generated
   transcript chunks remain separate in `ai-artifacts.json`.
-- Import a validated version 5 export into an empty notebook. Stable records and original files
+- Import a validated version 5 or 6 export into an empty notebook. Stable records and original files
   are encrypted for the target notebook before activation.
 
 Import does not merge with or replace existing notebook data. See

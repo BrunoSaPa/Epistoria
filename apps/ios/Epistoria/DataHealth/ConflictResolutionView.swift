@@ -222,6 +222,11 @@ struct ConflictResolutionView: View {
             if let block = try? CanonicalJSON.decode(NoteBlockPayload.self, from: content) {
                 value = block.plainText.isEmpty ? "Handwritten canvas item with original strokes" : block.plainText
             } else { value = "Notebook canvas item" }
+        case .notePage:
+            value = "Notebook page"
+        case .trashEntry:
+            value = (try? CanonicalJSON.decode(TrashEntryPayload.self, from: content).displayName)
+                ?? "Deleted item"
         case .resource:
             value = (try? CanonicalJSON.decode(ResourcePayload.self, from: content).title) ?? "Resource"
         case .asset:

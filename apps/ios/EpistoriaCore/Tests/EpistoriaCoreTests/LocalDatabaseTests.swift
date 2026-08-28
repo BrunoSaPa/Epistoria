@@ -1530,7 +1530,7 @@ final class LocalDatabaseTests: XCTestCase {
         let allEvidence = try await store.list(EvidencePayload.self)
         let backlinks = try await store.evidenceBacklinks(evidenceId: evidenceId)
 
-        XCTAssertEqual(block.payload.schemaVersion, "note-block/v5")
+        XCTAssertEqual(block.payload.schemaVersion, "note-block/v6")
         XCTAssertEqual(block.payload.evidenceId, evidenceId)
         XCTAssertEqual(evidence.payload.sourceVersionId, versionId)
         XCTAssertEqual(allEvidence.count, 1)
@@ -2380,6 +2380,152 @@ final class LocalDatabaseTests: XCTestCase {
         grant = try await store.payload(AutomationGrantPayload.self, id: grantId)
         XCTAssertNotNil(grant.payload.revokedAt)
         XCTAssertFalse(grant.payload.isActive(at: now.addingTimeInterval(180)))
+    }
+
+    func testStablePagesSupportInsertionDuplicationReorderTrashAndRestore() async throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let database = try SQLCipherDatabase(
+            url: directory.appendingPathComponent("stable-pages.sqlite"),
+            key: Data(repeating: 71, count: 32)
+        )
+        let store = EpistoriaStore(database: database)
+        let noteId = try await store.createNote(
+            title: "Stable pages",
+            canvas: NoteCanvasConfiguration(pageCount: 2)
+        )
+        var pages = try await store.notePages(noteId: noteId)
+        XCTAssertEqual(pages.count, 2)
+
+        let sourcePageId = pages[1].id
+        let blockId = try await store.appendCanvasText(
+            noteId: noteId,
+            text: "Content on the second stable page",
+            placement: NoteCanvasPlacement(x: 20, y: 30, width: 240, height: 80),
+            pageIndex: 1,
+            pageId: sourcePageId
+        )
+        let insertedId = try await store.insertNotePage(noteId: noteId, before: pages[0].id)
+        pages = try await store.notePages(noteId: noteId)
+        XCTAssertEqual(pages.first?.id, insertedId)
+
+        let duplicateId = try await store.duplicateNotePage(noteId: noteId, pageId: sourcePageId)
+        var duplicatedBlocks = try await store.list(NoteBlockPayload.self, parentId: noteId)
+            .filter { !$0.payload.tombstone && $0.payload.canvasPageId == duplicateId }
+        XCTAssertEqual(duplicatedBlocks.count, 1)
+        XCTAssertEqual(duplicatedBlocks.first?.payload.plainText, "Content on the second stable page")
+
+        try await store.reorderNotePage(noteId: noteId, pageId: duplicateId, destinationIndex: 0)
+        pages = try await store.notePages(noteId: noteId)
+        XCTAssertEqual(pages.first?.id, duplicateId)
+
+        let trashId = try await store.movePageToTrash(
+            noteId: noteId,
+            pageId: sourcePageId,
+            displayName: "Second page"
+        )
+        pages = try await store.notePages(noteId: noteId)
+        var originalBlock = try await store.payload(NoteBlockPayload.self, id: blockId)
+        XCTAssertEqual(pages.count, 3)
+        XCTAssertTrue(originalBlock.payload.tombstone)
+
+        try await store.restoreTrashEntry(id: trashId)
+        pages = try await store.notePages(noteId: noteId)
+        originalBlock = try await store.payload(NoteBlockPayload.self, id: blockId)
+        XCTAssertEqual(pages.count, 4)
+        XCTAssertFalse(originalBlock.payload.tombstone)
+        duplicatedBlocks = try await store.list(NoteBlockPayload.self, parentId: noteId)
+            .filter { !$0.payload.tombstone && $0.payload.canvasPageId == duplicateId }
+        XCTAssertEqual(duplicatedBlocks.count, 1)
+    }
+
+    func testTrashIsManualRecoverableAndProtectsDependencies() async throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let database = try SQLCipherDatabase(
+            url: directory.appendingPathComponent("trash.sqlite"),
+            key: Data(repeating: 72, count: 32)
+        )
+        let store = EpistoriaStore(database: database)
+        let recoverableId = try await store.createNote(title: "Recoverable")
+        let restoreEntryId = try await store.moveToTrash(
+            targetId: recoverableId,
+            targetType: .note,
+            displayName: "Recoverable"
+        )
+        var trashedIds = try await store.trashedTargetIds()
+        XCTAssertTrue(trashedIds.contains(recoverableId))
+        try await store.restoreTrashEntry(id: restoreEntryId)
+        trashedIds = try await store.trashedTargetIds()
+        XCTAssertFalse(trashedIds.contains(recoverableId))
+        _ = try await store.payload(NotePayload.self, id: recoverableId)
+
+        let protectedId = try await store.createNote(title: "Protected")
+        _ = try await store.moveToTrash(
+            targetId: protectedId,
+            targetType: .note,
+            displayName: "Protected",
+            dependencyIds: [UUID()]
+        )
+        let removableId = try await store.createNote(title: "Removable")
+        let removablePages = try await store.notePages(noteId: removableId)
+        let removablePageId = try XCTUnwrap(removablePages.first?.id)
+        let removableBlockId = try await store.appendCanvasText(
+            noteId: removableId,
+            text: "Delete with the note",
+            placement: NoteCanvasPlacement(x: 20, y: 20, width: 200, height: 60),
+            pageIndex: 0,
+            pageId: removablePageId
+        )
+        _ = try await store.moveToTrash(
+            targetId: removableId,
+            targetType: .note,
+            displayName: "Removable"
+        )
+        let result = try await store.emptyTrash()
+        XCTAssertEqual(result.deletedCount, 1)
+        XCTAssertEqual(result.protectedCount, 1)
+        trashedIds = try await store.trashedTargetIds()
+        XCTAssertTrue(trashedIds.contains(protectedId))
+        XCTAssertFalse(trashedIds.contains(removableId))
+        let remainingPages = try await store.list(NotePagePayload.self)
+        let remainingBlocks = try await store.list(NoteBlockPayload.self)
+        XCTAssertFalse(remainingPages.contains { $0.id == removablePageId })
+        XCTAssertFalse(remainingBlocks.contains { $0.id == removableBlockId })
+    }
+
+    func testTrashAutomaticallyProtectsSourceEvidence() async throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let database = try SQLCipherDatabase(
+            url: directory.appendingPathComponent("trash-source-protection.sqlite"),
+            key: Data(repeating: 73, count: 32)
+        )
+        let store = EpistoriaStore(database: database)
+        let sourceId = try await store.createSource(type: .pastedText, title: "Protected source")
+        let source = try await store.payload(SourcePayload.self, id: sourceId)
+        let versionId = try XCTUnwrap(source.payload.currentVersionId)
+        let evidenceId = try await store.createEvidence(
+            sourceId: sourceId,
+            sourceVersionId: versionId,
+            kind: .excerpt,
+            locator: SourceLocator(kind: .plainText, startOffset: 0, endOffset: 12),
+            excerpt: "Keep this"
+        )
+
+        let trashId = try await store.moveToTrash(
+            targetId: sourceId,
+            targetType: .resource,
+            displayName: "Protected source"
+        )
+        let entry = try await store.payload(TrashEntryPayload.self, id: trashId)
+        XCTAssertEqual(entry.payload.dependencyIds, [evidenceId])
+
+        let result = try await store.emptyTrash()
+        XCTAssertEqual(result.deletedCount, 0)
+        XCTAssertEqual(result.protectedCount, 1)
+        _ = try await store.payload(SourcePayload.self, id: sourceId)
+        _ = try await store.payload(EvidencePayload.self, id: evidenceId)
     }
 }
 

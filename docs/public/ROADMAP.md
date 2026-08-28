@@ -10,21 +10,20 @@ change after personal use and beta testing.
 - Complete two-device synchronization and concurrent-version testing.
 - Complete fresh-device recovery and independent backup drills.
 - Complete private installation and update testing.
-- Test version 5 clean-notebook import on a physical spare iPad with representative data.
+- Test version 6 clean-notebook import on a physical spare iPad with representative data.
 
 ## Portability and file access
 
 - Define safe merge behavior before allowing import into a notebook that already contains data.
 - Download selected or all restored files for offline use.
 - Improve archive and restore support for Sources and Lists.
-- Add a persistent Trash with a clear retention policy.
+- Validate permanent Trash deletion, protected dependencies, encrypted asset reclamation, and
+  two-device restoration on physical devices.
 
 ## Notebook tools
 
-- Add page thumbnails, insertion, duplication, deletion with recovery, and ordering to the
-  continuous fixed-page document.
-- Add direct printing and PDF page-range and layout options.
-- Add image crop and mask tools.
+- Add non-destructive image crop, mask, rotation presets, and replace-original-reference tools.
+- Add a Share Sheet extension for direct image, text, link, and file capture.
 - Add editing for an existing shape's style, connectors, snapping, and alignment guides.
 - Evaluate square, angled, and custom eraser footprints after physical Apple Pencil testing.
 - Validate handwritten-math recognition, result review, graph interaction, and original-stroke
@@ -113,7 +112,7 @@ Completed:
     Both run on the iPad. Exact results remain available when related matching is unavailable.
 23. The Adaptive Tutor keeps encrypted session transcripts, uses cited automatic hybrid-search
     excerpts, adapts its next activity from accepted learning signals, and requires bounded
-    provider approval. It is available from Study, Topics, and the notebook.
+    provider approval. It is available from Learning, Topics, and the notebook.
 24. Each Topic has an interactive Concept and Evidence map. Node arrangement is encrypted and
     durable. Evidence can open its exact Source, appear in a note, show its typed Concept
     relationships, or start a grounded Tutor session.
@@ -165,7 +164,7 @@ the app.
 
 ### Explore
 
-- Evaluate sandboxed spreadsheet and dataset analysis on the trusted Mac. File, network, and code
+- Evaluate sandboxed spreadsheet and dataset analysis on an optional Compute Node. File, network, and code
   execution permissions must be explicit and revocable.
 
 ## More subjects

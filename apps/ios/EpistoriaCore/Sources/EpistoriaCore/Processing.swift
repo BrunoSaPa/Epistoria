@@ -21,6 +21,34 @@ public enum ProcessingRoute: String, Codable, CaseIterable, Sendable {
     case computeNode = "COMPUTE_NODE"
 }
 
+public enum ProcessingRoutePreferenceMode: String, Codable, CaseIterable, Sendable {
+    case ipadFirst = "IPAD_FIRST"
+    case preferComputeNodeForHeavyWork = "PREFER_COMPUTE_NODE_FOR_HEAVY_WORK"
+}
+
+/// Device-local routing policy. It never contains provider credentials or notebook content.
+public struct ProcessingRoutePreference: Codable, Equatable, Sendable {
+    public var mode: ProcessingRoutePreferenceMode
+    public var computeNodeCapabilities: Set<ProcessingCapability>
+
+    public init(
+        mode: ProcessingRoutePreferenceMode = .ipadFirst,
+        computeNodeCapabilities: Set<ProcessingCapability> = [
+            .transcription, .officeConversion, .formulaRecognition, .localProvider,
+        ]
+    ) {
+        self.mode = mode
+        self.computeNodeCapabilities = computeNodeCapabilities
+    }
+
+    public func orderedRoutes(for required: Set<ProcessingCapability>) -> [ProcessingRoute] {
+        guard mode == .preferComputeNodeForHeavyWork,
+              !required.isDisjoint(with: computeNodeCapabilities)
+        else { return [.onDevice, .directProvider, .computeNode] }
+        return [.computeNode, .onDevice, .directProvider]
+    }
+}
+
 public enum ProcessingCapability: String, Codable, CaseIterable, Sendable {
     case textRecognition = "recognition.text"
     case formulaRecognition = "recognition.formula"
@@ -146,8 +174,22 @@ public struct ProcessingRouter: ProcessingRouting, Sendable {
         approval: ProcessingApproval?,
         availability: [ProcessingRouteAvailability]
     ) -> ProcessingRoute? {
+        route(
+            requiredCapabilities: requiredCapabilities,
+            approval: approval,
+            availability: availability,
+            preference: ProcessingRoutePreference()
+        )
+    }
+
+    public func route(
+        requiredCapabilities: Set<ProcessingCapability>,
+        approval: ProcessingApproval?,
+        availability: [ProcessingRouteAvailability],
+        preference: ProcessingRoutePreference
+    ) -> ProcessingRoute? {
         let byRoute = Dictionary(uniqueKeysWithValues: availability.map { ($0.route, $0) })
-        for candidate in [ProcessingRoute.onDevice, .directProvider, .computeNode] {
+        for candidate in preference.orderedRoutes(for: requiredCapabilities) {
             guard let value = byRoute[candidate], value.isAvailable,
                   requiredCapabilities.isSubset(of: value.capabilities)
             else { continue }

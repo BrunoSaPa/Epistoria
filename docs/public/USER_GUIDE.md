@@ -20,6 +20,8 @@ Today provides the main actions and recent work:
 - **Continue session** returns to an active session.
 - **Add Source** imports supported files, captures a webpage, or adds a shared Google file or
   YouTube reference.
+- **Learn** opens the learning hub. Learning status appears on Today only when there is active or
+  due work.
 - **Recent** opens recently used notes and resources.
 
 The status row reports whether work is saved on the iPad, waiting to sync, syncing, synced, or in
@@ -42,11 +44,10 @@ available around the page.
 For A4 or US Letter notes, scroll vertically through the pages. The page closest to the center of
 the screen becomes the current page for new content and notebook commands.
 
-Use the persistent tool rail:
-
-- Select the page counter to jump to an existing page.
-- Select **Add page** to append a blank page and scroll to it.
-- Use Command-Shift-N with a keyboard to append a page.
+Select **Pages** in the persistent tool rail to open the page manager. It shows each stable page
+with a thumbnail. From there, insert a page before or after the current page, append, duplicate,
+drag to reorder, change the page template, or move a page to Trash. Selecting a thumbnail opens
+that page. Use Command-Shift-N with a keyboard to append a page.
 
 An empty page uses only a small metadata entry. Epistoria creates page content records when you
 add text, an image, a shape, a symbol, or Pencil writing. Infinite canvases do not show
@@ -60,18 +61,20 @@ numbered-page controls.
   **Pixel eraser** to remove only the area under the adjustable circle. Use **Stroke eraser** to
   remove the complete Pencil stroke you touch. The preview shows the current round footprint or
   whole-stroke behavior.
-- Select **Size** to choose a Pen or Marker stroke width.
 - Select **Text** to add typed text at the current view center.
-- Select **Image** to add an image.
+- Select **Image** to add an image from Photos or Files. Images can also be pasted or dropped onto
+  the note.
 - Select **Shape**, then tap the page to place the current shape. Tap the selected Shape tool
   again to choose rectangle, rounded rectangle, ellipse, triangle, diamond, line, or arrow and
   set its outline, fill, and line width. The preview updates before placement.
-- Select **Symbol**, then tap the page to place the current math symbol. Tap the selected Symbol
+- Select **More → Symbol**, then tap the page to place the current math symbol. Tap the selected Symbol
   tool again to choose from algebra, calculus, Greek, set, logic, and comparison symbols. The
   selected symbol appears in the preview.
 - Select **Select** to move, resize, rotate, or reorder text, images, shapes, and symbols.
 - Use the notebook actions to bring an item forward or send it backward.
 - Select **Undo** or **Redo** in the rail for current-page ink changes.
+- Select **More** to reach Evidence, recognition review, Learn, Ask, Math, and Symbol. Optional
+  tools can be pinned to the fixed rail in **Settings → Interface and Controls**.
 
 Pencil writing stays separate from the text or image below it. Removing an item requires
 confirmation and provides temporary undo while the note remains open.
@@ -79,7 +82,33 @@ confirmation and provides temporary undo while the note remains open.
 Shapes and symbols are stored as notebook items. Switch to **Select** to move, resize, rotate, or
 remove them. Select a symbol again in Select mode to edit it as text.
 
-## Export one note as a PDF
+## Adjust the workspace
+
+Open **Settings → Interface and Controls** to reorder the core sidebar destinations, hide or pin
+Learning, reorder notebook rail tools, and pin optional tools. These choices stay on this iPad.
+Use the separate **Restore Defaults** action for the sidebar or the notebook rail when needed.
+
+Open **Settings → Notebook Defaults** to choose the format, orientation, paper style, spacing, and
+paper color for new notes. Existing notes do not change.
+
+Pin a note from its Notebook row to keep it above unpinned recent notes.
+
+## Use Trash
+
+Deleting a note, page, Source, List, or canvas item moves it to encrypted Trash. Open
+**Settings → Trash** to review item counts and storage estimates, restore an item, or empty
+unprotected items permanently. Trash does not expire automatically.
+
+Epistoria blocks permanent removal of a Source that still has Evidence and a List that still has
+child Lists. Review those dependencies first. Empty Trash creates synchronized deletion records.
+This action cannot be undone, so make an encrypted notebook export before permanently removing
+important material.
+
+## Find, export, and print a note
+
+Select **More → Find in Note** to search typed text, equations, accepted recognition, and labeled
+unreviewed recognition in the open note. Results are grouped by page. Selecting a result opens
+and highlights its saved region.
 
 A note PDF is readable and contains decrypted personal information. Save it only to a trusted
 location.
@@ -87,9 +116,11 @@ location.
 1. Open the note.
 2. Open **Notebook actions**.
 3. Select **Export note as PDF…**.
-4. Read the warning and select **Create readable PDF**.
-5. Select **Save or share PDF**.
-6. Select **Done** after saving the destination copy.
+4. Choose all pages, the current page, or a page range.
+5. Keep each page's original size or choose A4 or US Letter and an orientation.
+6. Select **Create PDF**.
+7. Select **Save or share PDF**, or select **Print** for the standard iPad print controls.
+8. Select **Done** after saving or printing.
 
 Fixed-paper notes keep their A4 or US Letter page size and orientation. Each notebook sheet
 becomes one PDF page. An infinite note becomes one custom-size PDF page that contains the used
@@ -99,7 +130,7 @@ printing, or sharing. It is not an Epistoria backup and cannot be imported into 
 
 ## Use local recognition
 
-1. Open **Settings → Local Processing**.
+1. Open **Settings → Search and Recognition**.
 2. Keep automatic notebook or Source recognition on as needed.
 3. Add optional language tags such as `en-US` and `es-MX`, or leave the field empty to use device
    language detection.
@@ -247,14 +278,17 @@ encrypted and remains available after relaunch. Acceptance cannot be repeated to
 Map arrangement is encrypted and included in readable export. The map works offline and does not
 require an AI provider. Tutor requests still use the Tutor approval and provider boundaries.
 
-## Use Study
+## Use Learning
 
-Study contains Tutor, Study Next, Week, Sessions, Flashcards, Tests, and History.
+Learning keeps optional study tools in one master-detail hub. Its sections are Overview,
+Sessions, Review, Tutor, Knowledge, and History. Select **Learn** from Today, a Topic, or a note to
+open the hub with the current Topic or note context. Learning can be pinned in the sidebar from
+**Settings → Interface and Controls**.
 
 ### Use the Adaptive Tutor
 
-1. Open **Study → Tutor → Start or resume Tutor**, or select **Tutor** from a Topic dashboard or
-   notebook tool rail.
+1. Open **Learning → Tutor → Start or resume Tutor**, or select **Learn → Tutor** from a Topic or
+   note.
 2. Select a Topic. When you start from a Topic or assigned note, it is selected automatically.
 3. Enter an objective or leave it empty to use the Topic name.
 4. Set a time target.
@@ -505,7 +539,7 @@ After a successful download, the encrypted local copy opens offline.
 
 ## Manage learning records
 
-Open **Study**, then select **Manage learning records** in the toolbar.
+Open **Learning → Knowledge**, then select **Manage learning records**.
 
 - Edit goals and set them to Active, Completed, or Archived.
 - Edit unresolved questions, record a resolution, or reopen them.
@@ -528,7 +562,7 @@ rename it, move it under another List, or archive it. Linked notes and Sources a
 Study Next suggestions run locally and do not need AI. Recurring provider work is off until you
 create a separate permission.
 
-1. Open **Study → Manage learning records → Proactive automation**.
+1. Open **Learning → Knowledge → Manage learning records → Proactive automation**.
 2. Select **New permission**.
 3. Select the exact Topics and tasks that may run automatically.
 4. Set the minimum interval for each Topic/task pair, expiration, and USD spending limit.
@@ -649,7 +683,7 @@ file.
 
 ## Import a readable export
 
-Import requires an empty notebook and a version 5 export. It does not merge with or replace
+Import requires an empty notebook and a version 5 or 6 export. It does not merge with or replace
 existing data.
 
 1. Open **Settings → Data Health → Portable export**.

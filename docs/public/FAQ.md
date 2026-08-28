@@ -127,7 +127,7 @@ You can pin it, snooze it for one day, dismiss it, or mark it as irrelevant.
 
 ## Does the weekly review use AI?
 
-No. Open **Study → Week** to calculate the review from durable sessions, card reviews, test
+No. Open **Learning → Overview** to calculate the review from durable sessions, card reviews, test
 attempts, responses, goals, questions, and schedules stored on the iPad. It shows the previous
 seven days, the next seven days, and up to three current Study Next actions.
 
@@ -218,7 +218,7 @@ included only when reviewed AI data is selected.
 Version 5 packages can be imported into an empty notebook. Epistoria validates the package first,
 then encrypts its records and original files for the target notebook. Import does not merge with
 or replace existing data. Versions 1 through 4 remain readable but must be recreated with a
-version 5 build before import.
+version 5 or 6 build before import.
 
 ## Can revoking a device erase it remotely?
 

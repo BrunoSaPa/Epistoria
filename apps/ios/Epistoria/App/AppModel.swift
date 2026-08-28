@@ -98,6 +98,7 @@ final class AppModel {
 
     var phase: Phase = .loading
     var selectedSection: AppSection? = .today
+    var learningLaunchContext: LearningLaunchContext?
     var lastSyncReport: SyncReport?
     var lastSuccessfulSyncAt: Date?
     var syncError: String?
@@ -113,6 +114,7 @@ final class AppModel {
     let localProcessingSettings: LocalProcessingSettings
     let formulaModelManager: OnDeviceFormulaModelManager
     let formulaRecognitionEngine: CoreMLFormulaRecognitionEngine
+    let workspacePreferences: WorkspacePreferences
 
     private(set) var database: SQLCipherDatabase?
     private(set) var store: EpistoriaStore?
@@ -160,6 +162,7 @@ final class AppModel {
         directTranscriptionClient: any ProviderTranscriptionClient = DirectProviderClient(),
         localProcessingSettings: LocalProcessingSettings = LocalProcessingSettings(),
         formulaModelManager: OnDeviceFormulaModelManager = OnDeviceFormulaModelManager(),
+        workspacePreferences: WorkspacePreferences = WorkspacePreferences(),
         crypto: EntityCrypto = EntityCrypto(),
         applicationSupportURL: URL? = nil
     ) {
@@ -172,6 +175,7 @@ final class AppModel {
         self.directTranscriptionClient = directTranscriptionClient
         self.localProcessingSettings = localProcessingSettings
         self.formulaModelManager = formulaModelManager
+        self.workspacePreferences = workspacePreferences
         formulaRecognitionEngine = CoreMLFormulaRecognitionEngine(modelManager: formulaModelManager)
         self.crypto = crypto
         applicationSupportOverride = applicationSupportURL
@@ -2145,7 +2149,10 @@ final class AppModel {
         }
     }
 
-    func createNotePDF(noteId: UUID) async throws -> NotePDFExportResult {
+    func createNotePDF(
+        noteId: UUID,
+        options: NotePDFExportOptions = .allPages
+    ) async throws -> NotePDFExportResult {
         guard !isCreatingPortableExport,
               !isImportingPortableExport,
               !isCreatingNotePDF,
@@ -2176,7 +2183,7 @@ final class AppModel {
         try await pendingSaves.flushAll()
 
         let service = NotePDFExportService(store: store, assetManager: assetManager)
-        let task = Task { try await service.export(noteId: noteId) }
+        let task = Task { try await service.export(noteId: noteId, options: options) }
         notePDFExportTask = task
         return try await withTaskCancellationHandler {
             try await task.value

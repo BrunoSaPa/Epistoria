@@ -34,6 +34,7 @@ struct LibraryView: View {
     @State private var youtubeTitle = ""
     @State private var youtubeTopicId: UUID?
     @State private var importProgress: String?
+    @State private var pendingTrashSource: IdentifiedPayload<SourcePayload>?
     @State private var errorMessage: String?
 
     var body: some View {
@@ -80,6 +81,9 @@ struct LibraryView: View {
                         }
                         .accessibilityIdentifier("library.resource.\(resource.id.uuidString)")
                         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                            Button("Trash", systemImage: "trash", role: .destructive) {
+                                pendingTrashSource = resource
+                            }
                             Button(resource.payload.archivedAt == nil ? "Archive" : "Restore", systemImage: resource.payload.archivedAt == nil ? "archivebox" : "arrow.uturn.backward") {
                                 Task { await setSourceArchived(resource, archived: resource.payload.archivedAt == nil) }
                             }
@@ -178,6 +182,23 @@ struct LibraryView: View {
                 Button("Try again") { Task { await load() } }
                 Button("Dismiss", role: .cancel) { errorMessage = nil }
             } message: { Text(errorMessage ?? "") }
+            .confirmationDialog(
+                "Move this Source to Trash?",
+                isPresented: Binding(
+                    get: { pendingTrashSource != nil },
+                    set: { if !$0 { pendingTrashSource = nil } }
+                ),
+                titleVisibility: .visible
+            ) {
+                Button("Move to Trash", role: .destructive) {
+                    guard let source = pendingTrashSource else { return }
+                    Task { await moveSourceToTrash(source) }
+                    pendingTrashSource = nil
+                }
+                Button("Cancel", role: .cancel) { pendingTrashSource = nil }
+            } message: {
+                Text("The Source stays encrypted. Epistoria checks protected references before permanent deletion.")
+            }
         }
     }
 
@@ -186,11 +207,31 @@ struct LibraryView: View {
         do {
             async let loadedResources = store.list(SourcePayload.self)
             async let loadedTopics = store.topics()
-            let result = try await (loadedResources, loadedTopics)
-            resources = result.0.sorted { $0.payload.importedAt > $1.payload.importedAt }
+            async let loadedTrash = store.trashedTargetIds()
+            let result = try await (loadedResources, loadedTopics, loadedTrash)
+            resources = result.0
+                .filter { !result.2.contains($0.id) }
+                .sorted { $0.payload.importedAt > $1.payload.importedAt }
             topics = result.1.filter { !$0.payload.archived }
         }
         catch { errorMessage = error.localizedDescription }
+    }
+
+    private func moveSourceToTrash(_ source: IdentifiedPayload<SourcePayload>) async {
+        guard let store = model.store else { return }
+        do {
+            let dependencies = try await store.list(EvidencePayload.self)
+                .filter { $0.payload.sourceId == source.id }
+                .map(\.id)
+            _ = try await store.moveToTrash(
+                targetId: source.id,
+                targetType: .resource,
+                displayName: source.payload.title,
+                dependencyIds: dependencies
+            )
+            model.noteLocalMutation()
+            await load()
+        } catch { errorMessage = error.localizedDescription }
     }
 
     private var visibleResources: [IdentifiedPayload<SourcePayload>] {
@@ -632,6 +673,16 @@ struct ResourceDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
+                Button {
+                    model.learningLaunchContext = LearningLaunchContext(
+                        topicId: source?.payload.primaryTopicId,
+                        sourceVersionId: selectedSourceVersionId ?? source?.payload.currentVersionId,
+                        destination: .overview
+                    )
+                    model.selectedSection = .learning
+                } label: {
+                    Label("Learn from this Source", systemImage: "graduationcap")
+                }
                 Button { isComparing = true } label: {
                     Label("Compare Sources", systemImage: "rectangle.split.2x1")
                 }

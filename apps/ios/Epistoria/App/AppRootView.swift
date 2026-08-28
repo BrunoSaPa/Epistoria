@@ -1,11 +1,11 @@
 import SwiftUI
 
-enum AppSection: String, CaseIterable, Identifiable {
+enum AppSection: String, CaseIterable, Codable, Identifiable {
     case today = "Today"
     case notebook = "Notebook"
     case topics = "Topics"
     case library = "Library"
-    case study = "Study"
+    case learning = "Learning"
     case search = "Search"
     case settings = "Settings"
 
@@ -17,29 +17,15 @@ enum AppSection: String, CaseIterable, Identifiable {
         case .notebook: "book.pages"
         case .topics: "square.grid.2x2"
         case .library: "books.vertical"
-        case .study: "graduationcap"
+        case .learning: "graduationcap"
         case .search: "magnifyingglass"
         case .settings: "gearshape"
         }
     }
-}
 
-private enum AppSectionGroup: String, CaseIterable, Identifiable {
-    case daily = "Daily"
-    case knowledge = "Knowledge"
-    case learning = "Learning"
-    case utilities = "Utilities"
-
-    var id: Self { self }
-
-    var sections: [AppSection] {
-        switch self {
-        case .daily: [.today, .notebook]
-        case .knowledge: [.topics, .library]
-        case .learning: [.study]
-        case .utilities: [.search, .settings]
-        }
-    }
+    static let defaultSidebarOrder: [AppSection] = [
+        .today, .notebook, .topics, .library, .search,
+    ]
 }
 
 struct AppRootView: View {
@@ -82,17 +68,12 @@ struct AppRootView: View {
                         .accessibilityElement(children: .combine)
                     }
 
-                    ForEach(AppSectionGroup.allCases) { group in
-                        Section(group.rawValue) {
-                            ForEach(group.sections) { section in
-                                Label(section.rawValue, systemImage: section.symbol)
-                                    .tag(section)
-                                    .disabled(
-                                        (model.isCreatingPortableExport || model.isImportingPortableExport)
-                                            && section != .settings
-                                    )
-                                    .accessibilityIdentifier("navigation.\(section.rawValue.lowercased().replacingOccurrences(of: " ", with: "-"))")
-                            }
+                    Section("Workspace") {
+                        ForEach(model.workspacePreferences.visibleSidebarSections) { section in
+                            Label(section.rawValue, systemImage: section.symbol)
+                                .tag(section)
+                                .disabled(model.isCreatingPortableExport || model.isImportingPortableExport)
+                                .accessibilityIdentifier("navigation.\(section.rawValue.lowercased().replacingOccurrences(of: " ", with: "-"))")
                         }
                     }
                 }
@@ -100,7 +81,26 @@ struct AppRootView: View {
                 .navigationTitle("Knowledge")
                 .navigationSplitViewColumnWidth(min: 230, ideal: 270, max: 320)
                 .safeAreaInset(edge: .bottom) {
-                    SidebarSyncStatus(model: model)
+                    VStack(spacing: 0) {
+                        Divider()
+                        Button {
+                            model.selectedSection = .settings
+                        } label: {
+                            Label("Settings", systemImage: "gearshape")
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 11)
+                                .background(
+                                    model.selectedSection == .settings
+                                        ? EpistoriaDesign.subtleFill : Color.clear,
+                                    in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                )
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.horizontal, 10)
+                        .accessibilityIdentifier("navigation.settings")
+                        SidebarSyncStatus(model: model)
+                    }
                 }
             } detail: {
                 destination(model.selectedSection ?? .today)
@@ -152,7 +152,8 @@ struct AppRootView: View {
         case .notebook: NotebookView(model: model)
         case .topics: TopicsView(model: model)
         case .library: LibraryView(model: model)
-        case .study: StudyView(model: model)
+        case .learning:
+            StudyView(model: model, launchContext: model.learningLaunchContext)
         case .search: KnowledgeSearchView(model: model)
         case .settings: SettingsView(model: model)
         }

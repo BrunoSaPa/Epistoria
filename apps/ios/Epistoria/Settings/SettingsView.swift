@@ -6,7 +6,28 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             List {
-                Section("Notebook") {
+                Section("Interface") {
+                    NavigationLink {
+                        InterfaceControlsSettingsView(model: model)
+                    } label: {
+                        SettingsRow(
+                            title: "Interface and Controls",
+                            detail: "Sidebar order, visibility, and notebook rail tools",
+                            symbol: "sidebar.left"
+                        )
+                    }
+                    NavigationLink {
+                        NotebookDefaultsView(model: model)
+                    } label: {
+                        SettingsRow(
+                            title: "Notebook Defaults",
+                            detail: "Page size, orientation, paper, and color for new notes",
+                            symbol: "book.pages"
+                        )
+                    }
+                }
+
+                Section("Data") {
                     NavigationLink {
                         DataHealthView(model: model)
                     } label: {
@@ -16,9 +37,18 @@ struct SettingsView: View {
                             symbol: "lock.shield"
                         )
                     }
+                    NavigationLink {
+                        TrashView(model: model)
+                    } label: {
+                        SettingsRow(
+                            title: "Trash",
+                            detail: "Restore deleted items or remove them permanently",
+                            symbol: "trash"
+                        )
+                    }
                 }
 
-                Section("Learning") {
+                Section("AI and Learning") {
                     NavigationLink {
                         AIProviderSettingsView(model: model)
                     } label: {
@@ -35,7 +65,7 @@ struct SettingsView: View {
                     )
                 }
 
-                Section("Local processing") {
+                Section("Search and Recognition") {
                     NavigationLink {
                         LocalProcessingSettingsView(model: model)
                     } label: {
@@ -45,12 +75,20 @@ struct SettingsView: View {
                             symbol: "text.viewfinder"
                         )
                     }
-                    NavigationLink {
-                        ComputeNodeSettingsView(model: model)
-                    } label: {
+                    NavigationLink { ProcessingActivityView(model: model) } label: {
+                        SettingsRow(
+                            title: "Processing Activity",
+                            detail: "Local, direct-provider, and optional accelerated work",
+                            symbol: "list.bullet.rectangle"
+                        )
+                    }
+                }
+
+                Section("Acceleration") {
+                    NavigationLink { ComputeNodeSettingsView(model: model) } label: {
                         SettingsRow(
                             title: "Compute Nodes",
-                            detail: "Optional acceleration for large local work",
+                            detail: "Optional acceleration for approved heavy local work",
                             symbol: "desktopcomputer"
                         )
                     }

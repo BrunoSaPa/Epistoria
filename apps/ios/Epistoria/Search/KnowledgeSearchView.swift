@@ -83,7 +83,7 @@ struct KnowledgeSearchView: View {
 
     private func search(skipDelay: Bool = false) async {
         let clean = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !clean.isEmpty, let database = model.database else {
+        guard !clean.isEmpty, let database = model.database, let store = model.store else {
             hits = []
             return
         }
@@ -91,9 +91,14 @@ struct KnowledgeSearchView: View {
         if !skipDelay { try? await Task.sleep(for: .milliseconds(220)) }
         guard !Task.isCancelled else { return }
         do {
-            let results = try await database.search(clean, entityTypes: scopedEntityTypes)
+            async let searchResults = database.search(clean, entityTypes: scopedEntityTypes)
+            async let trashedTargets = store.trashedTargetIds()
+            let result = try await (searchResults, trashedTargets)
             guard !Task.isCancelled else { return }
-            hits = results
+            hits = result.0.filter {
+                !result.1.contains($0.entity.id)
+                    && !($0.entity.parentId.map { result.1.contains($0) } ?? false)
+            }
             isSearching = false
         } catch {
             isSearching = false

@@ -172,9 +172,16 @@ public actor AssetManager {
             throw AssetManagerError.fileTooLarge
         }
         let plaintext = try Data(contentsOf: sourceURL, options: .mappedIfSafe)
-        guard plaintext.count <= 64 * 1_024 * 1_024 else {
-            throw AssetManagerError.fileTooLarge
-        }
+        return try await importImage(
+            data: plaintext,
+            filename: sourceURL.lastPathComponent.isEmpty ? "Imported image" : sourceURL.lastPathComponent
+        )
+    }
+
+    /// Imports image bytes supplied by Photos, the clipboard, drag and drop, or a Share Sheet
+    /// without placing decrypted content in a temporary file.
+    public func importImage(data plaintext: Data, filename: String = "Imported image") async throws -> ImportedImage {
+        guard plaintext.count <= 64 * 1_024 * 1_024 else { throw AssetManagerError.fileTooLarge }
         guard let source = CGImageSourceCreateWithData(plaintext as CFData, nil),
               CGImageSourceGetCount(source) > 0,
               let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil)
@@ -193,18 +200,18 @@ public actor AssetManager {
         let mimeType = typeIdentifier
             .flatMap(UTType.init)
             .flatMap(\.preferredMIMEType) ?? "image/unknown"
-        let filename = sourceURL.lastPathComponent.isEmpty
+        let safeFilename = filename.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             ? "Imported image"
-            : sourceURL.lastPathComponent
+            : String(filename.prefix(240))
         let imported = try await importAsset(
             plaintext: plaintext,
             mimeType: mimeType,
-            originalFilename: filename
+            originalFilename: safeFilename
         )
         return ImportedImage(
             assetId: imported.assetId,
             reusedExistingAsset: imported.reusedExistingAsset,
-            filename: filename,
+            filename: safeFilename,
             pixelWidth: pixelWidth,
             pixelHeight: pixelHeight
         )

@@ -29,7 +29,7 @@ following options:
 - A4 or US Letter paper in portrait or landscape orientation.
 - An infinite canvas that supports positive and negative coordinates.
 - Plain, ruled, grid, or dotted paper.
-- One canvas-wide PencilKit ink layer.
+- Stable fixed pages with page-local PencilKit ink, or one infinite canvas.
 - Movable, resizable, rotatable, and layered text and image items.
 
 The app also provides:
@@ -37,13 +37,17 @@ The app also provides:
 - One private notebook that connects subjects, sources, notes, sessions, and learning history.
 - Immutable PDF import and separate page annotations.
 - Areas, Topics, optional Lists, academic Topic details, and study sessions.
+- A page manager for insertion, duplication, reordering, paper changes, Trash, and restoration.
+- A fixed notebook tool rail with a customizable More panel for optional learning and recognition
+  tools.
 - Automatic on-device hybrid search. Exact text matches appear first. Related results can find
   different wording and link back to the matching note item or PDF passage when available.
-- Reversible archive and restore for notes and courses.
+- Find in Note, pinned notes, Archive, and manually emptied encrypted Trash.
+- One contextual Learning hub for sessions, review, Tutor, Concepts, goals, questions, and history.
 - Optional encrypted synchronization through a private server.
 - Explicit conflict review that preserves concurrent versions.
 - A readable ZIP export with JSON, original files, PencilKit data, and SHA-256 checksums.
-- Validated version 5 export import into an empty notebook under a new local encryption key.
+- Validated version 5 and 6 export import into an empty notebook under a new local encryption key.
 - AI provider management for OpenAI, Anthropic, Gemini, and OpenAI-compatible local or hosted
   endpoints, with device-only Keychain storage.
 - An Adaptive Tutor that keeps durable encrypted transcripts, cites frozen Source Versions, and
@@ -151,14 +155,14 @@ IBM Bob.
 ## Project status
 
 The repository is a personal beta candidate. The following automated checks passed on
-2026-08-24:
+2026-08-28:
 
 - `make verify`
 - Full unsigned iOS Simulator bundle build, including assets and the privacy manifest
-- 84 Swift Core tests
-- 45 iOS app and UI tests on an iPad Simulator
+- 118 Swift Core tests
+- 53 iOS app tests and 2 accessibility UI tests on an iPad Pro 11-inch Simulator
 - 7 API unit tests
-- 75 worker tests
+- 89 optional Compute Node worker tests
 
 The following release checks are still open:
 
@@ -210,7 +214,7 @@ are not published in this repository.
 
 | Option | Estimated recurring infrastructure cost | Limitation |
 |---|---:|---|
-| Trusted Mac, Docker, and Tailscale Personal | $0 incremental | Sync and processing stop while the Mac is unavailable |
+| Personal Mac, Docker, and Tailscale Personal | $0 incremental | Remote sync stops while the personal server is unavailable; local notebook work and direct iPad processing continue |
 | Small VM, provider backup, and private object storage | About $15.60 per month at the dated baseline | Requires server maintenance and recovery drills |
 
 AI is optional and billed by the configured provider when used. Pricing assumptions must be
@@ -222,7 +226,7 @@ checked against the provider's current rates before deployment.
 |---|---|
 | `apps/ios` | SwiftUI iPad app and `EpistoriaCore` Swift package |
 | `apps/api` | NestJS API, Prisma schema, sync log, asset broker, devices, conflicts, and encrypted jobs |
-| `services/worker` | Trusted Python worker for PDF extraction and optional AI jobs |
+| `services/worker` | Optional Compute Node compatibility worker for accelerated local processing |
 | `packages/contracts` | Versioned wire, content, AI, and cryptographic test contracts |
 | `infra` | Local and personal-production infrastructure templates |
 | `scripts` | Build, verification, backup, restore, retention, and worker helpers |
@@ -238,7 +242,7 @@ engineering and operations documentation is intentionally excluded from the publ
 - The sync service stores ciphertext and structural metadata only.
 - Original files and PencilKit data remain separate from derived previews and AI output.
 - Concurrent versions remain available until the user resolves the conflict.
-- Version 5 readable exports can be imported only into an empty notebook. Import does not merge
-  with or replace existing records.
+- Version 5 and 6 readable exports can be imported only into an empty notebook. Import does not
+  merge with or replace existing records.
 - One Epistoria notebook connects the owner's subjects, sources, notes, sessions, and planned
   learning history. Setup does not create a second local notebook when one is configured.

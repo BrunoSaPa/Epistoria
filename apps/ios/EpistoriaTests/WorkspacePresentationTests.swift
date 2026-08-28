@@ -4,6 +4,68 @@ import XCTest
 
 @MainActor
 final class WorkspacePresentationTests: XCTestCase {
+    func testWorkspacePreferencesRemainDeviceLocalAcrossRelaunch() throws {
+        let suiteName = "WorkspacePreferencesTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let preferences = WorkspacePreferences(defaults: defaults)
+        preferences.learningPinned = true
+        preferences.setSidebarVisible(.library, visible: false)
+        preferences.moveNotebookTools(
+            from: IndexSet(integer: preferences.notebookToolOrder.count - 1),
+            to: 0
+        )
+        preferences.pinnedOptionalTools = [.math, .ocr]
+        preferences.processingRoutePreference = ProcessingRoutePreference(
+            mode: .preferComputeNodeForHeavyWork
+        )
+        preferences.defaultPageFormat = .letter
+        preferences.defaultPageOrientation = .landscape
+        preferences.defaultPaperStyle = .grid
+        preferences.defaultPaperColor = .stone
+
+        let reopened = WorkspacePreferences(defaults: defaults)
+
+        XCTAssertTrue(reopened.learningPinned)
+        XCTAssertFalse(reopened.visibleSidebarSections.contains(.library))
+        XCTAssertTrue(reopened.visibleSidebarSections.contains(.learning))
+        XCTAssertFalse(reopened.visibleSidebarSections.contains(.settings))
+        XCTAssertEqual(reopened.notebookToolOrder.first, .redo)
+        XCTAssertEqual(reopened.pinnedOptionalTools, [.math, .ocr])
+        XCTAssertEqual(reopened.processingRoutePreference.mode, .preferComputeNodeForHeavyWork)
+        XCTAssertEqual(reopened.defaultPageFormat, .letter)
+        XCTAssertEqual(reopened.defaultPageOrientation, .landscape)
+        XCTAssertEqual(reopened.defaultPaperStyle, .grid)
+        XCTAssertEqual(reopened.defaultPaperColor, .stone)
+    }
+
+    func testWorkspacePreferenceResetsPersistSeparately() throws {
+        let suiteName = "WorkspacePreferencesResetTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let preferences = WorkspacePreferences(defaults: defaults)
+        preferences.learningPinned = true
+        preferences.setSidebarVisible(.topics, visible: false)
+        preferences.pinnedOptionalTools = [.learn]
+        preferences.moveNotebookTools(
+            from: IndexSet(integer: preferences.notebookToolOrder.count - 1),
+            to: 0
+        )
+
+        preferences.resetSidebar()
+        let afterSidebarReset = WorkspacePreferences(defaults: defaults)
+        XCTAssertEqual(afterSidebarReset.visibleSidebarSections, AppSection.defaultSidebarOrder)
+        XCTAssertEqual(afterSidebarReset.notebookToolOrder.first, .redo)
+        XCTAssertEqual(afterSidebarReset.pinnedOptionalTools, [.learn])
+
+        afterSidebarReset.resetNotebookRail()
+        let afterRailReset = WorkspacePreferences(defaults: defaults)
+        XCTAssertEqual(afterRailReset.notebookToolOrder, NotebookToolID.defaultCore)
+        XCTAssertTrue(afterRailReset.pinnedOptionalTools.isEmpty)
+    }
+
     func testOnlyTheActiveEditorCanEndImmersivePresentation() {
         let presentation = EpistoriaWorkspacePresentation()
         let firstEditor = UUID()

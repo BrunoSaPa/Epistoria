@@ -39,10 +39,10 @@ struct TodayView: View {
                 LazyVStack(alignment: .leading, spacing: 32) {
                     welcomeHeader
                     syncStatusCard
-                    learningOverview
                     quickActions
                     activeSessionCard
                     recentSection
+                    if hasLearningActivity { learningOverview }
                 }
                 .padding(.horizontal, EpistoriaDesign.Spacing.page)
                 .padding(.vertical, EpistoriaDesign.Spacing.xLarge)
@@ -219,6 +219,16 @@ struct TodayView: View {
                     isImporting = true
                 }
                 .accessibilityIdentifier("today.import-pdf")
+
+                EpistoriaQuickAction(
+                    title: "Learn",
+                    subtitle: "Sessions, review, Tutor, and history",
+                    symbol: "graduationcap"
+                ) {
+                    model.learningLaunchContext = LearningLaunchContext(destination: .overview)
+                    model.selectedSection = .learning
+                }
+                .accessibilityIdentifier("today.learn")
             }
         }
     }
@@ -228,7 +238,8 @@ struct TodayView: View {
             EpistoriaSectionHeading(title: "Study Next", subtitle: "A local recommendation based on your saved learning history.")
             if let nextRecommendation {
                 Button {
-                    model.selectedSection = .study
+                    model.learningLaunchContext = LearningLaunchContext(destination: .overview)
+                    model.selectedSection = .learning
                 } label: {
                     recentRow(
                         title: nextRecommendation.title,
@@ -240,13 +251,23 @@ struct TodayView: View {
                 .buttonStyle(EpistoriaPressButtonStyle())
             }
             HStack(spacing: 18) {
-                Button("\(dueCards.count) due") { model.selectedSection = .study }
-                Button("\(unfinishedAttempts.count) unfinished test\(unfinishedAttempts.count == 1 ? "" : "s")") { model.selectedSection = .study }
+                Button("\(dueCards.count) due") {
+                    model.learningLaunchContext = LearningLaunchContext(destination: .review)
+                    model.selectedSection = .learning
+                }
+                Button("\(unfinishedAttempts.count) unfinished test\(unfinishedAttempts.count == 1 ? "" : "s")") {
+                    model.learningLaunchContext = LearningLaunchContext(destination: .review)
+                    model.selectedSection = .learning
+                }
                 Button("\(sourceInboxCount) in Source Inbox") { model.selectedSection = .library }
             }
             .font(.subheadline.weight(.medium))
             .buttonStyle(.plain)
         }
+    }
+
+    private var hasLearningActivity: Bool {
+        nextRecommendation != nil || !dueCards.isEmpty || !unfinishedAttempts.isEmpty
     }
 
     @ViewBuilder
@@ -476,15 +497,26 @@ struct TodayView: View {
             async let loadedGoals = store.list(StudyGoalPayload.self)
             async let loadedUnresolved = store.list(UnresolvedQuestionPayload.self)
             async let loadedRecommendations = store.list(StudyRecommendationPayload.self)
-            let result = try await (loadedNotes, loadedSessions, loadedResources, loadedCourses, loadedTopics, loadedSources, loadedCards, loadedReviews, loadedTests, loadedAttempts, loadedGoals, loadedUnresolved, loadedRecommendations)
+            async let loadedTrash = store.trashedTargetIds()
+            let result = try await (loadedNotes, loadedSessions, loadedResources, loadedCourses, loadedTopics, loadedSources, loadedCards, loadedReviews, loadedTests, loadedAttempts, loadedGoals, loadedUnresolved, loadedRecommendations, loadedTrash)
             notes = result.0
-                .filter { $0.payload.archivedAt == nil }
-                .sorted { $0.payload.updatedAt > $1.payload.updatedAt }
+                .filter { $0.payload.archivedAt == nil && !result.13.contains($0.id) }
+                .sorted {
+                    if ($0.payload.pinnedAt != nil) != ($1.payload.pinnedAt != nil) {
+                        return $0.payload.pinnedAt != nil
+                    }
+                    return ($0.payload.pinnedAt ?? $0.payload.updatedAt)
+                        > ($1.payload.pinnedAt ?? $1.payload.updatedAt)
+                }
             sessions = result.1.sorted { $0.payload.startedAt > $1.payload.startedAt }
             resources = result.2.sorted { $0.payload.importedAt > $1.payload.importedAt }
             courses = result.3.filter { !$0.payload.archived }
             topics = result.4
-            sourceInboxCount = result.5.filter { $0.payload.primaryTopicId == nil && $0.payload.archivedAt == nil }.count
+            sourceInboxCount = result.5.filter {
+                $0.payload.primaryTopicId == nil
+                    && $0.payload.archivedAt == nil
+                    && !result.13.contains($0.id)
+            }.count
             cards = result.6
             reviews = result.7
             tests = result.8
@@ -506,7 +538,15 @@ struct TodayView: View {
             let timestamp = Date.now.formatted(
                 .dateTime.month(.abbreviated).day().hour().minute()
             )
-            let id = try await store.createNote(title: "Quick note — \(timestamp)")
+            let id = try await store.createNote(
+                title: "Quick note — \(timestamp)",
+                canvas: NoteCanvasConfiguration(
+                    pageFormat: model.workspacePreferences.defaultPageFormat,
+                    orientation: model.workspacePreferences.defaultPageOrientation,
+                    paperStyle: model.workspacePreferences.defaultPaperStyle,
+                    paperColor: model.workspacePreferences.defaultPaperColor
+                )
+            )
             model.noteLocalMutation()
             await load()
             destination = .note(id)

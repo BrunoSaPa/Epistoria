@@ -1,6 +1,30 @@
 import EpistoriaCore
 import SwiftUI
 
+extension LearningDestination {
+    fileprivate var title: String {
+        switch self {
+        case .overview: "Overview"
+        case .sessions: "Sessions"
+        case .review: "Review"
+        case .tutor: "Tutor"
+        case .knowledge: "Knowledge"
+        case .history: "History"
+        }
+    }
+
+    fileprivate var symbol: String {
+        switch self {
+        case .overview: "arrow.forward.circle"
+        case .sessions: "timer"
+        case .review: "rectangle.stack"
+        case .tutor: "graduationcap"
+        case .knowledge: "point.3.connected.trianglepath.dotted"
+        case .history: "clock.arrow.circlepath"
+        }
+    }
+}
+
 enum StudyRecommendationDestination: Hashable, Identifiable {
     case card(UUID)
     case session(UUID)
@@ -55,19 +79,9 @@ enum StudyRecommendationDestination: Hashable, Identifiable {
 }
 
 struct StudyView: View {
-    private enum StudySection: String, CaseIterable, Identifiable {
-        case guide = "Tutor"
-        case next = "Study Next"
-        case week = "Week"
-        case sessions = "Sessions"
-        case flashcards = "Flashcards"
-        case tests = "Tests"
-        case history = "History"
-        var id: Self { self }
-    }
-
     @Bindable var model: AppModel
-    @State private var section = StudySection.next
+    let launchContext: LearningLaunchContext?
+    @State private var section: LearningDestination
     @State private var topics: [IdentifiedPayload<TopicPayload>] = []
     @State private var sessions: [IdentifiedPayload<StudySessionPayload>] = []
     @State private var cards: [IdentifiedPayload<FlashcardPayload>] = []
@@ -83,49 +97,80 @@ struct StudyView: View {
     @State private var openedRecommendationDestination: StudyRecommendationDestination?
     @State private var errorMessage: String?
 
-    var body: some View {
-        NavigationStack {
-            VStack(spacing: 0) {
-                Picker("Study section", selection: $section) {
-                    ForEach(StudySection.allCases) { Text($0.rawValue).tag($0) }
-                }
-                .pickerStyle(.segmented)
-                .padding(.horizontal, EpistoriaDesign.Spacing.page)
-                .padding(.vertical, 12)
+    init(model: AppModel, launchContext: LearningLaunchContext? = nil) {
+        self.model = model
+        self.launchContext = launchContext
+        _section = State(initialValue: launchContext?.destination ?? .overview)
+    }
 
+    var body: some View {
+        NavigationSplitView {
+            List {
+                Section("Learning") {
+                    ForEach(LearningDestination.allCases, id: \.self) { destination in
+                        Button {
+                            section = destination
+                        } label: {
+                            HStack {
+                                Label(destination.title, systemImage: destination.symbol)
+                                Spacer()
+                                if section == destination {
+                                    Image(systemName: "checkmark")
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(EpistoriaDesign.ink)
+                                }
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityAddTraits(section == destination ? .isSelected : [])
+                    }
+                }
+            }
+            .navigationTitle("Learning")
+            .navigationSplitViewColumnWidth(min: 190, ideal: 220, max: 260)
+        } detail: {
+            NavigationStack {
                 List {
                     switch section {
-                    case .guide: tutorContent
-                    case .next: studyNextContent
-                    case .week: weeklyReviewContent
+                    case .overview:
+                        studyNextContent
+                        weeklyReviewContent
                     case .sessions: sessionsContent
-                    case .flashcards: flashcardsContent
-                    case .tests: testsContent
+                    case .review:
+                        flashcardsContent
+                        testsContent
+                    case .tutor: tutorContent
+                    case .knowledge: knowledgeContent
                     case .history: historyContent
                     }
                 }
                 .listStyle(.insetGrouped)
-            }
-            .navigationTitle("Study")
-            .epistoriaPageBackground()
-            .toolbar {
-                ToolbarItem(placement: .primaryAction) {
-                    NavigationLink {
-                        LearningManagementView(model: model)
-                    } label: {
-                        Label("Manage learning records", systemImage: "slider.horizontal.3")
+                .navigationTitle(section.title)
+                .epistoriaPageBackground()
+                .toolbar {
+                    ToolbarItem(placement: .primaryAction) {
+                        NavigationLink {
+                            LearningManagementView(model: model)
+                        } label: {
+                            Label("Manage learning records", systemImage: "slider.horizontal.3")
+                        }
                     }
                 }
+                .task { await load() }
+                .refreshable { await load() }
+                .navigationDestination(item: $openedRecommendationDestination) { destination in
+                    recommendationDestination(destination)
+                }
+                .alert("Learning error", isPresented: .constant(errorMessage != nil)) {
+                    Button("Try again") { Task { await load() } }
+                    Button("Dismiss", role: .cancel) { errorMessage = nil }
+                } message: { Text(errorMessage ?? "") }
             }
-            .task { await load() }
-            .refreshable { await load() }
-            .navigationDestination(item: $openedRecommendationDestination) { destination in
-                recommendationDestination(destination)
-            }
-            .alert("Study error", isPresented: .constant(errorMessage != nil)) {
-                Button("Try again") { Task { await load() } }
-                Button("Dismiss", role: .cancel) { errorMessage = nil }
-            } message: { Text(errorMessage ?? "") }
+        }
+        .navigationSplitViewStyle(.balanced)
+        .onChange(of: launchContext) { _, context in
+            if let context { section = context.destination }
         }
     }
 
@@ -137,7 +182,7 @@ struct StudyView: View {
                 Text("Work through cited explanations, examples, retrieval questions, and transfer problems. Tutor sessions and your answers are saved locally.")
                     .foregroundStyle(.secondary)
                 NavigationLink {
-                    AdaptiveTutorView(model: model)
+                    AdaptiveTutorView(model: model, topicId: launchContext?.topicId)
                 } label: {
                     Label("Start or resume Tutor", systemImage: "arrow.right.circle.fill")
                         .font(.headline)
@@ -152,6 +197,52 @@ struct StudyView: View {
             StudyRow(title: "Grounded", detail: "Answers cite the exact frozen Source Version used.", symbol: "link")
             StudyRow(title: "Adaptive", detail: "Accepted results change the next activity. Draft assessments do not.", symbol: "arrow.triangle.branch")
             StudyRow(title: "Bounded", detail: "Each session has a reviewed Topic scope, provider route, turn limit, expiration, and spending limit.", symbol: "hand.raised")
+        }
+    }
+
+    @ViewBuilder private var knowledgeContent: some View {
+        Section {
+            NavigationLink {
+                LearningManagementView(model: model)
+            } label: {
+                StudyRow(
+                    title: "Learning records",
+                    detail: "Concepts, goals, unresolved questions, decks, and permissions",
+                    symbol: "point.3.connected.trianglepath.dotted"
+                )
+            }
+        }
+        Section("Open goals") {
+            if goals.filter({ $0.payload.state == .active }).isEmpty {
+                Text("No active goals.").foregroundStyle(.secondary)
+            }
+            ForEach(goals.filter { $0.payload.state == .active }.prefix(8), id: \.id) { goal in
+                NavigationLink {
+                    LearningManagementView(model: model, initialTarget: .goal(goal.id))
+                } label: {
+                    StudyRow(
+                        title: goal.payload.title,
+                        detail: topicName(goal.payload.topicId),
+                        symbol: "target"
+                    )
+                }
+            }
+        }
+        Section("Unresolved questions") {
+            if unresolved.filter({ $0.payload.resolvedAt == nil }).isEmpty {
+                Text("No unresolved questions.").foregroundStyle(.secondary)
+            }
+            ForEach(unresolved.filter { $0.payload.resolvedAt == nil }.prefix(8), id: \.id) { item in
+                NavigationLink {
+                    LearningManagementView(model: model, initialTarget: .question(item.id))
+                } label: {
+                    StudyRow(
+                        title: item.payload.question,
+                        detail: topicName(item.payload.topicId),
+                        symbol: "questionmark.circle"
+                    )
+                }
+            }
         }
     }
 

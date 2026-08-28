@@ -16,6 +16,39 @@ struct ComputeNodeSettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
+            Section {
+                Toggle(
+                    "Prefer a Compute Node for heavy local work",
+                    isOn: Binding(
+                        get: {
+                            model.workspacePreferences.processingRoutePreference.mode
+                                == .preferComputeNodeForHeavyWork
+                        },
+                        set: { enabled in
+                            var preference = model.workspacePreferences.processingRoutePreference
+                            preference.mode = enabled ? .preferComputeNodeForHeavyWork : .ipadFirst
+                            model.workspacePreferences.processingRoutePreference = preference
+                        }
+                    )
+                )
+                Text("Every job still shows its route. Epistoria never changes to a paid or external provider silently.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } header: {
+                Text("Routing")
+            }
+
+            if model.workspacePreferences.processingRoutePreference.mode
+                == .preferComputeNodeForHeavyWork
+            {
+                Section("Eligible work") {
+                    capabilityToggle("Long transcription", capability: .transcription)
+                    capabilityToggle("Office conversion", capability: .officeConversion)
+                    capabilityToggle("Larger formula models", capability: .formulaRecognition)
+                    capabilityToggle("Private-network AI", capability: .localProvider)
+                }
+            }
+
             Section("Compute Nodes") {
                 if isLoading && nodes.isEmpty {
                     ProgressView("Checking nodes…")
@@ -97,6 +130,27 @@ struct ComputeNodeSettingsView: View {
     private func capability(_ title: String, symbol: String) -> some View {
         Label(title, systemImage: symbol)
             .foregroundStyle(.primary)
+    }
+
+    private func capabilityToggle(
+        _ title: String,
+        capability: ProcessingCapability
+    ) -> some View {
+        Toggle(
+            title,
+            isOn: Binding(
+                get: {
+                    model.workspacePreferences.processingRoutePreference.computeNodeCapabilities
+                        .contains(capability)
+                },
+                set: { enabled in
+                    var preference = model.workspacePreferences.processingRoutePreference
+                    if enabled { preference.computeNodeCapabilities.insert(capability) }
+                    else { preference.computeNodeCapabilities.remove(capability) }
+                    model.workspacePreferences.processingRoutePreference = preference
+                }
+            )
+        )
     }
 
     private func jobStateLabel(_ state: ProcessingJobState) -> String {

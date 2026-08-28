@@ -9,8 +9,8 @@ Epistoria remains in personal beta. The following limits apply to the current pr
 
 ## Recovery and export
 
-- The app imports only version 5 readable exports and only into an empty notebook. It does not
-  merge with or replace existing data. Versions 1 through 4 must be recreated before import.
+- The app imports version 5 or 6 readable exports only into an empty notebook. It does not merge
+  with or replace existing data. Versions 1 through 4 must be recreated before import.
 - An export with an unresolved binary file conflict cannot be imported until that conflict is
   resolved in the source notebook.
 - A note can be exported as a readable PDF. The PDF cannot be imported as an editable note.
@@ -23,12 +23,17 @@ Epistoria remains in personal beta. The following limits apply to the current pr
 
 ## Notebook
 
-- Fixed notes scroll continuously and support page jump and append. They do not yet have
-  thumbnails, insertion, duplication, deletion, or reordering.
+- Fixed notes scroll continuously and use stable pages with thumbnails, insertion, duplication,
+  reordering, per-page templates, and recoverable deletion. Physical-device stress testing of
+  very large page collections is still open.
 - Very large Pencil documents have a current per-page ink limit.
 - The pixel eraser has a round adjustable footprint. Square, angled, and custom eraser tips are
   not available. Whole-stroke erasing remains a separate mode.
-- Image crop, masks, general handwriting recognition, and direct printing are not available.
+- Image crop, masks, non-destructive image replacement, and a Share Sheet capture extension are
+  not available. Images can be added from Photos, Files, clipboard, and drag and drop.
+- Text and handwriting recognition are available for local search and review. Formula recognition
+  remains development-gated until a permissively licensed on-device model passes physical-iPad
+  accuracy, latency, memory, and thermal checks.
 - Shapes support placement, movement, resizing, rotation, outline, optional fill, and PDF output.
   Existing shape style cannot yet be changed after placement.
 - Math symbols and accepted recognized expressions are editable text items. The app does not yet
@@ -50,7 +55,9 @@ Epistoria remains in personal beta. The following limits apply to the current pr
 - Institutions and academic terms do not yet have complete lifecycle controls.
 - Archiving a List preserves its links and does not archive linked items.
 - Archiving a deck does not archive its cards. Cards must be suspended or archived separately.
-- There is no persistent cross-record Trash.
+- Trash covers notes, pages, Sources, Lists, and canvas items and is removed manually. Permanent
+  asset-file reclamation is conservative, so encrypted files that might still be referenced can
+  remain on disk after an item is permanently removed.
 - Some undo actions remain available only while the current screen is open.
 
 ## Device validation

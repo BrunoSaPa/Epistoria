@@ -454,7 +454,9 @@ final class SourceAdapterTests: XCTestCase {
         let data = videoFixture()
         let url = try ProtectedVideoFileStore.write(data, filenameExtension: "mp4")
         XCTAssertEqual(try Data(contentsOf: url), data)
+        #if os(iOS)
         XCTAssertEqual(try url.resourceValues(forKeys: [.isExcludedFromBackupKey]).isExcludedFromBackup, true)
+        #endif
         try ProtectedVideoFileStore.remove(url)
         XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
 

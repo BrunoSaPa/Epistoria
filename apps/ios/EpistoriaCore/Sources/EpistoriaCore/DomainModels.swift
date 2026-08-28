@@ -11,7 +11,9 @@ public enum EntityType: String, Codable, CaseIterable, Sendable {
     case course = "COURSE"
     case studySession = "STUDY_SESSION"
     case note = "NOTE"
+    case notePage = "NOTE_PAGE"
     case noteBlock = "NOTE_BLOCK"
+    case trashEntry = "TRASH_ENTRY"
     case resource = "RESOURCE"
     case asset = "ASSET"
     case annotation = "ANNOTATION"
@@ -481,11 +483,14 @@ public struct StudySessionPayload: EntityPayload, Equatable {
 
 public struct NotePayload: EntityPayload, Equatable {
     public static let entityType = EntityType.note
-    public var schemaVersion = "note/v3"
+    public var schemaVersion = "note/v4"
     public var title: String
     public var courseId: UUID?
     public var studySessionId: UUID?
     public var archivedAt: Date?
+    /// A local-first ordering hint used by Notebook and Today. The value is encrypted and syncs
+    /// with the note so another owner device can present the same pinned set.
+    public var pinnedAt: Date?
     /// `nil` only for records created before the spatial editor. Those records render with the
     /// documented A4/plain compatibility default and are upgraded on the first canvas change.
     public var canvas: NoteCanvasConfiguration?
@@ -503,6 +508,7 @@ public struct NotePayload: EntityPayload, Equatable {
         self.courseId = courseId
         self.studySessionId = studySessionId
         archivedAt = nil
+        pinnedAt = nil
         self.canvas = canvas
         createdAt = now
         updatedAt = now
@@ -511,7 +517,7 @@ public struct NotePayload: EntityPayload, Equatable {
 
 public struct NoteBlockPayload: EntityPayload, Equatable {
     public static let entityType = EntityType.noteBlock
-    public var schemaVersion = "note-block/v5"
+    public var schemaVersion = "note-block/v6"
     public var noteId: UUID
     public var blockType: NoteBlockKind
     public var orderKey: String
@@ -529,6 +535,9 @@ public struct NoteBlockPayload: EntityPayload, Equatable {
     public var canvasShape: NoteCanvasShape?
     /// Page-local records use a zero-based index. A missing value is legacy page zero.
     public var canvasPageIndex: Int?
+    /// Stable page identity. `canvasPageIndex` remains a read-only compatibility fallback for
+    /// records written before note pages became first-class encrypted entities.
+    public var canvasPageId: UUID?
     public var tombstone: Bool
     public var createdAt: Date
     public var updatedAt: Date
@@ -562,6 +571,7 @@ public struct NoteBlockPayload: EntityPayload, Equatable {
         canvasRole = nil
         canvasShape = nil
         canvasPageIndex = nil
+        canvasPageId = nil
         tombstone = false
         createdAt = now
         updatedAt = now

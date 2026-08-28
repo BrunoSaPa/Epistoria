@@ -375,7 +375,7 @@ final class EpistoriaExportServiceTests: XCTestCase {
             contentsOf: package.appendingPathComponent("knowledge.json"), encoding: .utf8)
         let learning = try String(
             contentsOf: package.appendingPathComponent("learning.json"), encoding: .utf8)
-        XCTAssertTrue(metadata.contains("epistoria-export/5"))
+        XCTAssertTrue(metadata.contains("epistoria-export/6"))
         let entities = try String(
             contentsOf: package.appendingPathComponent("entities.json"),
             encoding: .utf8

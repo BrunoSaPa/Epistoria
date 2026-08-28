@@ -45,6 +45,26 @@ struct TopicDashboardView: View {
         }
         .navigationTitle(topic?.payload.name ?? "Topic")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Menu {
+                    Button("Ask Topic", systemImage: "sparkles") { showStudio = true }
+                    Button("Knowledge map", systemImage: "point.3.connected.trianglepath.dotted") {
+                        showKnowledgeMap = true
+                    }
+                    Divider()
+                    Button("Create card", systemImage: "rectangle.stack") { showNewCard = true }
+                    Button("Create test", systemImage: "checkmark.square") { showNewTest = true }
+                    Button("New Concept", systemImage: "circle.hexagongrid") { showNewConcept = true }
+                    Button("Add goal", systemImage: "target") { showNewGoal = true }
+                    Button("Open question", systemImage: "questionmark.circle") {
+                        showNewQuestion = true
+                    }
+                } label: {
+                    Label("More Topic actions", systemImage: "ellipsis.circle")
+                }
+            }
+        }
         .navigationDestination(item: $selectedSessionId) { sessionId in
             SessionDetailView(model: model, sessionId: sessionId)
         }
@@ -123,15 +143,20 @@ struct TopicDashboardView: View {
                 else { showNewSession = true }
             }
             EpistoriaQuickAction(title: "Add Source", subtitle: "Documents, books, sheets, or images", symbol: "doc.badge.plus") { isImportingSources = true }
-            EpistoriaQuickAction(title: "Ask Topic", subtitle: "Review a cited AI request", symbol: "sparkles") { showStudio = true }
-            EpistoriaQuickAction(title: "Tutor", subtitle: "Start an adaptive cited lesson", symbol: "graduationcap") { showTutor = true }
-            EpistoriaQuickAction(title: "Knowledge map", subtitle: "Arrange Concepts and Evidence", symbol: "point.3.connected.trianglepath.dotted") { showKnowledgeMap = true }
-            EpistoriaQuickAction(title: "Create cards", subtitle: "Durable review material", symbol: "rectangle.stack") { showNewCard = true }
-            EpistoriaQuickAction(title: "Create test", subtitle: "Coverage-first blueprint", symbol: "checkmark.square") { showNewTest = true }
-            EpistoriaQuickAction(title: "New Concept", subtitle: "Define an idea and connect evidence", symbol: "point.3.connected.trianglepath.dotted") { showNewConcept = true }
-            EpistoriaQuickAction(title: "Add goal", subtitle: "Give Study Next a deadline", symbol: "target") { showNewGoal = true }
-            EpistoriaQuickAction(title: "Open question", subtitle: "Track what remains unclear", symbol: "questionmark.circle") { showNewQuestion = true }
+            EpistoriaQuickAction(
+                title: "Learn",
+                subtitle: "Tutor, practice, Concepts, and history",
+                symbol: "graduationcap"
+            ) { openLearning() }
         }
+    }
+
+    private func openLearning(_ destination: LearningDestination = .overview) {
+        model.learningLaunchContext = LearningLaunchContext(
+            topicId: topicId,
+            destination: destination
+        )
+        model.selectedSection = .learning
     }
 
     @ViewBuilder
@@ -247,10 +272,16 @@ struct TopicDashboardView: View {
             async let loadedQuestions = store.list(UnresolvedQuestionPayload.self)
             async let loadedGoals = store.list(StudyGoalPayload.self)
             async let loadedRecommendations = store.list(StudyRecommendationPayload.self)
-            let values = try await (loadedTopic, loadedNotes, loadedSources, loadedSessions, loadedConcepts, loadedCards, loadedTests, loadedQuestions, loadedGoals, loadedRecommendations)
+            async let loadedTrash = store.trashedTargetIds()
+            let values = try await (loadedTopic, loadedNotes, loadedSources, loadedSessions, loadedConcepts, loadedCards, loadedTests, loadedQuestions, loadedGoals, loadedRecommendations, loadedTrash)
             topic = values.0
-            notes = values.1.filter { $0.payload.courseId == topicId && $0.payload.archivedAt == nil }.sorted { $0.payload.updatedAt > $1.payload.updatedAt }
-            sources = values.2.filter { $0.payload.primaryTopicId == topicId || $0.payload.relatedTopicIds.contains(topicId) }.sorted { $0.payload.updatedAt > $1.payload.updatedAt }
+            notes = values.1.filter {
+                $0.payload.courseId == topicId && $0.payload.archivedAt == nil && !values.10.contains($0.id)
+            }.sorted { $0.payload.updatedAt > $1.payload.updatedAt }
+            sources = values.2.filter {
+                ($0.payload.primaryTopicId == topicId || $0.payload.relatedTopicIds.contains(topicId))
+                    && !values.10.contains($0.id)
+            }.sorted { $0.payload.updatedAt > $1.payload.updatedAt }
             sessions = values.3.filter { $0.payload.courseId == topicId }.sorted { $0.payload.startedAt > $1.payload.startedAt }
             concepts = values.4.filter { $0.payload.topicIds.contains(topicId) }
             cards = values.5.filter { $0.payload.topicId == topicId && $0.payload.archivedAt == nil }

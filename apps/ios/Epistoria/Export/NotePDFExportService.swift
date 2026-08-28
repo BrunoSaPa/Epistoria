@@ -1,5 +1,4 @@
 import EpistoriaCore
-import CoreText
 import ImageIO
 import PencilKit
 import UIKit
@@ -10,6 +9,21 @@ struct NotePDFExportResult: Identifiable {
     let title: String
     let pageCount: Int
     let byteCount: Int64
+}
+
+enum NotePDFPaperSize: String, CaseIterable, Identifiable {
+    case original = "Original page size"
+    case a4 = "A4"
+    case letter = "US Letter"
+    var id: Self { self }
+}
+
+struct NotePDFExportOptions: Equatable {
+    var pageRange: ClosedRange<Int>?
+    var paperSize: NotePDFPaperSize = .original
+    var orientation: NotePageOrientation?
+
+    static let allPages = NotePDFExportOptions(pageRange: nil)
 }
 
 enum NotePDFExportError: LocalizedError {
@@ -39,9 +53,12 @@ enum NotePDFExportError: LocalizedError {
 final class NotePDFExportService {
     private struct PagePlan {
         var pageIndex: Int
+        var pageId: UUID?
+        var configuration: NoteCanvasConfiguration
         var worldRect: CGRect
         var outputSize: CGSize
         var worldScale: CGFloat
+        var outputOffset: CGPoint
     }
 
     private struct OCRTextLayer {
@@ -67,9 +84,13 @@ final class NotePDFExportService {
         self.fileManager = fileManager
     }
 
-    func export(noteId: UUID) async throws -> NotePDFExportResult {
+    func export(
+        noteId: UUID,
+        options: NotePDFExportOptions = .allPages
+    ) async throws -> NotePDFExportResult {
         try Task.checkCancellation()
         try Self.removeAllTemporaryPDFs()
+        let stablePages = try await store.ensureNotePages(noteId: noteId)
         async let loadedNote = store.payload(NotePayload.self, id: noteId)
         async let loadedBlocks = store.list(NoteBlockPayload.self, parentId: noteId)
         async let loadedEvidence = store.list(EvidencePayload.self)
@@ -84,7 +105,12 @@ final class NotePDFExportService {
             .filter { !$0.payload.tombstone }
             .sorted { $0.payload.orderKey < $1.payload.orderKey }
         let configuration = note.payload.canvas ?? NoteCanvasConfiguration()
-        let plans = try pagePlans(configuration: configuration, blocks: blocks)
+        let allPlans = try pagePlans(
+            pages: stablePages,
+            fallbackConfiguration: configuration,
+            blocks: blocks
+        )
+        let plans = try configuredPlans(allPlans, options: options)
         let images = try await loadImages(for: blocks)
         let evidenceCards = evidenceCards(
             for: blocks,
@@ -92,7 +118,11 @@ final class NotePDFExportService {
             sources: sources,
             versions: versions
         )
-        let ocrTextLayers = await acceptedOCRTextLayers(from: ocrArtifacts)
+        let ocrTextLayers = await acceptedOCRTextLayers(
+            from: ocrArtifacts,
+            pages: stablePages,
+            blocks: blocks
+        )
         try Task.checkCancellation()
 
         try fileManager.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
@@ -131,7 +161,6 @@ final class NotePDFExportService {
                     )
                     draw(
                         plan: plan,
-                        configuration: configuration,
                         blocks: blocks,
                         images: images,
                         evidenceCards: evidenceCards,
@@ -194,19 +223,36 @@ final class NotePDFExportService {
     }
 
     private func pagePlans(
-        configuration: NoteCanvasConfiguration,
+        pages: [IdentifiedPayload<NotePagePayload>],
+        fallbackConfiguration: NoteCanvasConfiguration,
         blocks: [IdentifiedPayload<NoteBlockPayload>]
     ) throws -> [PagePlan] {
+        let configuration = pages.first?.payload.configuration ?? fallbackConfiguration
         if let width = configuration.pageWidth, let height = configuration.pageHeight {
             guard width.isFinite, height.isFinite, width > 0, height > 0 else {
                 throw NotePDFExportError.invalidPageGeometry
             }
-            return (0 ..< configuration.effectivePageCount).map {
-                PagePlan(
-                    pageIndex: $0,
-                    worldRect: CGRect(x: 0, y: 0, width: width, height: height),
-                    outputSize: CGSize(width: width, height: height),
-                    worldScale: 1
+            let activePages = pages.isEmpty
+                ? [IdentifiedPayload(
+                    id: UUID(),
+                    payload: NotePagePayload(noteId: UUID(), orderKey: "0", configuration: configuration),
+                    revision: 0,
+                    syncState: .synced
+                )]
+                : pages
+            return try activePages.enumerated().map { index, page in
+                guard let pageWidth = page.payload.configuration.pageWidth,
+                      let pageHeight = page.payload.configuration.pageHeight,
+                      pageWidth.isFinite, pageHeight.isFinite, pageWidth > 0, pageHeight > 0
+                else { throw NotePDFExportError.invalidPageGeometry }
+                return PagePlan(
+                    pageIndex: index,
+                    pageId: pages.isEmpty ? nil : page.id,
+                    configuration: page.payload.configuration,
+                    worldRect: CGRect(x: 0, y: 0, width: pageWidth, height: pageHeight),
+                    outputSize: CGSize(width: pageWidth, height: pageHeight),
+                    worldScale: 1,
+                    outputOffset: .zero
                 )
             }
         }
@@ -236,11 +282,53 @@ final class NotePDFExportService {
         return [
             PagePlan(
                 pageIndex: 0,
+                pageId: pages.first?.id,
+                configuration: configuration,
                 worldRect: bounds,
                 outputSize: CGSize(width: bounds.width * scale, height: bounds.height * scale),
-                worldScale: scale
+                worldScale: scale,
+                outputOffset: .zero
             ),
         ]
+    }
+
+    private func configuredPlans(
+        _ plans: [PagePlan],
+        options: NotePDFExportOptions
+    ) throws -> [PagePlan] {
+        var selected = options.pageRange.map { range in
+            plans.filter { range.contains($0.pageIndex) }
+        } ?? plans
+        guard !selected.isEmpty else { throw NotePDFExportError.invalidPageGeometry }
+        guard options.paperSize != .original || options.orientation != nil else { return selected }
+
+        selected = selected.map { plan in
+            var changed = plan
+            var outputSize: CGSize
+            switch options.paperSize {
+            case .original: outputSize = plan.outputSize
+            case .a4: outputSize = CGSize(width: 595, height: 842)
+            case .letter: outputSize = CGSize(width: 612, height: 792)
+            }
+            let desiredOrientation = options.orientation ?? (
+                outputSize.width > outputSize.height ? .landscape : .portrait
+            )
+            if (desiredOrientation == .landscape) != (outputSize.width > outputSize.height) {
+                outputSize = CGSize(width: outputSize.height, height: outputSize.width)
+            }
+            let scale = min(
+                outputSize.width / plan.worldRect.width,
+                outputSize.height / plan.worldRect.height
+            )
+            changed.outputSize = outputSize
+            changed.worldScale = scale
+            changed.outputOffset = CGPoint(
+                x: max((outputSize.width - plan.worldRect.width * scale) / 2, 0),
+                y: max((outputSize.height - plan.worldRect.height * scale) / 2, 0)
+            )
+            return changed
+        }
+        return selected
     }
 
     private func loadImages(
@@ -266,25 +354,43 @@ final class NotePDFExportService {
 
     private func draw(
         plan: PagePlan,
-        configuration: NoteCanvasConfiguration,
         blocks: [IdentifiedPayload<NoteBlockPayload>],
         images: [UUID: UIImage],
         evidenceCards: [UUID: NSAttributedString],
         ocrTextLayers: [OCRTextLayer],
         context: CGContext
     ) {
+        let configuration = plan.configuration
         let outputBounds = CGRect(origin: .zero, size: plan.outputSize)
         context.setFillColor(configuration.paperColor.uiColor.cgColor)
         context.fill(outputBounds)
+
+        // Keep the OCR layer as ordinary PDF text so PDFKit and third-party readers can
+        // search it. Drawing it in the paper color before the paper pattern and notebook
+        // content makes it visually absent without relying on rendering-mode-3 text, which
+        // PDFKit omits from `PDFPage.string` on iPad.
+        context.saveGState()
+        context.clip(to: outputBounds)
+        context.translateBy(x: plan.outputOffset.x, y: plan.outputOffset.y)
+        context.scaleBy(x: plan.worldScale, y: plan.worldScale)
+        context.translateBy(x: -plan.worldRect.minX, y: -plan.worldRect.minY)
+        drawSearchableOCRText(
+            ocrTextLayers.filter { $0.pageIndex == plan.pageIndex },
+            pageSize: plan.worldRect.size,
+            foregroundColor: configuration.paperColor.uiColor
+        )
+        context.restoreGState()
+
         drawPaper(configuration, in: outputBounds, scale: plan.worldScale, context: context)
 
         context.saveGState()
         context.clip(to: outputBounds)
+        context.translateBy(x: plan.outputOffset.x, y: plan.outputOffset.y)
         context.scaleBy(x: plan.worldScale, y: plan.worldScale)
         context.translateBy(x: -plan.worldRect.minX, y: -plan.worldRect.minY)
 
         let pageBlocks = blocks.filter {
-            $0.payload.canvasRole != .inkLayer && pageIndex(for: $0.payload, configuration: configuration) == plan.pageIndex
+            $0.payload.canvasRole != .inkLayer && belongsToPage($0.payload, plan: plan)
         }
         let arranged = pageBlocks.enumerated().sorted { lhs, rhs in
             let left = lhs.element.payload.canvasPlacement?.zIndex ?? lhs.offset
@@ -304,7 +410,7 @@ final class NotePDFExportService {
         }
 
         for block in blocks where block.payload.canvasRole == .inkLayer
-            && pageIndex(for: block.payload, configuration: configuration) == plan.pageIndex
+            && belongsToPage(block.payload, plan: plan)
         {
             guard let data = block.payload.drawingData,
                   let drawing = try? PKDrawing(data: data),
@@ -313,16 +419,13 @@ final class NotePDFExportService {
             let rasterScale = max(0.25, min(2, 4_096 / max(plan.worldRect.width, plan.worldRect.height)))
             drawing.image(from: plan.worldRect, scale: rasterScale).draw(in: plan.worldRect)
         }
-        drawSearchableOCRText(
-            ocrTextLayers.filter { $0.pageIndex == plan.pageIndex },
-            pageSize: plan.worldRect.size,
-            context: context
-        )
         context.restoreGState()
     }
 
     private func acceptedOCRTextLayers(
-        from artifacts: [IdentifiedPayload<OCRArtifactPayload>]
+        from artifacts: [IdentifiedPayload<OCRArtifactPayload>],
+        pages: [IdentifiedPayload<NotePagePayload>],
+        blocks: [IdentifiedPayload<NoteBlockPayload>]
     ) async -> [OCRTextLayer] {
         var layers: [OCRTextLayer] = []
         for artifact in artifacts where artifact.payload.state == .current {
@@ -334,9 +437,16 @@ final class NotePDFExportService {
                 continue
             }
             for resolved in regions where !resolved.content.isEmpty {
+                let targetPageIndex = blocks.first(where: { $0.id == artifact.payload.targetId })
+                    .flatMap { block in
+                        block.payload.canvasPageId.flatMap { pageId in
+                            pages.firstIndex(where: { $0.id == pageId })
+                        } ?? block.payload.canvasPageIndex
+                    }
+                    ?? max((artifact.payload.pageNumber ?? 1) - 1, 0)
                 for rectangle in resolved.region.rectangles {
                     layers.append(OCRTextLayer(
-                        pageIndex: max((artifact.payload.pageNumber ?? 1) - 1, 0),
+                        pageIndex: max(targetPageIndex, 0),
                         rectangle: CGRect(
                             x: CGFloat(rectangle.x),
                             y: CGFloat(rectangle.y),
@@ -354,7 +464,7 @@ final class NotePDFExportService {
     private func drawSearchableOCRText(
         _ layers: [OCRTextLayer],
         pageSize: CGSize,
-        context: CGContext
+        foregroundColor: UIColor
     ) {
         for layer in layers {
             let rect = CGRect(
@@ -364,15 +474,17 @@ final class NotePDFExportService {
                 height: max(layer.rectangle.height * pageSize.height, 1)
             )
             let fontSize = max(5, min(rect.height * 0.75, 28))
-            let line = CTLineCreateWithAttributedString(NSAttributedString(
+            NSAttributedString(
                 string: layer.content,
-                attributes: [.font: UIFont.systemFont(ofSize: fontSize)]
-            ))
-            context.saveGState()
-            context.setTextDrawingMode(.invisible)
-            context.textPosition = CGPoint(x: rect.minX, y: rect.maxY - fontSize)
-            CTLineDraw(line, context)
-            context.restoreGState()
+                attributes: [
+                    .font: UIFont.systemFont(ofSize: fontSize),
+                    .foregroundColor: foregroundColor,
+                ]
+            ).draw(
+                with: rect,
+                options: [.usesLineFragmentOrigin, .usesFontLeading],
+                context: nil
+            )
         }
     }
 
@@ -563,11 +675,11 @@ final class NotePDFExportService {
         context.restoreGState()
     }
 
-    private func pageIndex(
-        for payload: NoteBlockPayload,
-        configuration: NoteCanvasConfiguration
-    ) -> Int {
-        configuration.pageFormat == .infinite ? 0 : max(payload.canvasPageIndex ?? 0, 0)
+    private func belongsToPage(_ payload: NoteBlockPayload, plan: PagePlan) -> Bool {
+        if let pageId = plan.pageId, let blockPageId = payload.canvasPageId {
+            return pageId == blockPageId
+        }
+        return max(payload.canvasPageIndex ?? 0, 0) == plan.pageIndex
     }
 
     private func legacyPlacement(

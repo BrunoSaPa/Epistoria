@@ -136,6 +136,44 @@ final class NotePDFExportServiceTests: XCTestCase {
         XCTAssertLessThanOrEqual(max(bounds.width, bounds.height), 14_400)
     }
 
+    func testPageRangeAndPaperOverridePreserveSelectedStablePage() async throws {
+        let fixture = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let noteID = try await fixture.store.createNote(
+            title: "Selected export",
+            canvas: NoteCanvasConfiguration(pageCount: 3)
+        )
+        let pages = try await fixture.store.notePages(noteId: noteID)
+        for index in pages.indices {
+            _ = try await fixture.store.appendCanvasText(
+                noteId: noteID,
+                text: "Stable page \(index + 1)",
+                placement: NoteCanvasPlacement(x: 40, y: 60, width: 300, height: 80),
+                pageIndex: index,
+                pageId: pages[index].id
+            )
+        }
+
+        let result = try await fixture.service.export(
+            noteId: noteID,
+            options: NotePDFExportOptions(
+                pageRange: 1 ... 1,
+                paperSize: .a4,
+                orientation: .landscape
+            )
+        )
+        let document = try XCTUnwrap(PDFDocument(url: result.fileURL))
+        let page = try XCTUnwrap(document.page(at: 0))
+        let bounds = page.bounds(for: .mediaBox)
+
+        XCTAssertEqual(document.pageCount, 1)
+        XCTAssertEqual(bounds.width, 842, accuracy: 0.01)
+        XCTAssertEqual(bounds.height, 595, accuracy: 0.01)
+        XCTAssertTrue(page.string?.contains("Stable page 2") == true)
+        XCTAssertFalse(page.string?.contains("Stable page 1") == true)
+        XCTAssertFalse(page.string?.contains("Stable page 3") == true)
+    }
+
     func testAcceptedOCRAddsSearchableTextWithoutChangingInk() async throws {
         let fixture = try makeFixture()
         defer { try? FileManager.default.removeItem(at: fixture.root) }
@@ -179,6 +217,12 @@ final class NotePDFExportServiceTests: XCTestCase {
             )
         )
         try await fixture.store.reviewOCRArtifact(id: artifactID, state: .accepted)
+
+        let reviewedArtifacts = try await fixture.store.ocrArtifacts(parentId: noteID)
+        XCTAssertEqual(reviewedArtifacts.map(\.id), [artifactID])
+        XCTAssertEqual(reviewedArtifacts.first?.payload.reviewState, .accepted)
+        let resolvedOCRText = try await fixture.store.resolvedOCRText(artifactId: artifactID)
+        XCTAssertEqual(resolvedOCRText, "accepted handwritten factorization")
 
         let result = try await fixture.service.export(noteId: noteID)
         let page = try XCTUnwrap(PDFDocument(url: result.fileURL)?.page(at: 0))

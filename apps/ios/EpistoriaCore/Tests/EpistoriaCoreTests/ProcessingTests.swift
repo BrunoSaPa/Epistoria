@@ -87,4 +87,32 @@ final class ProcessingTests: XCTestCase {
         XCTAssertNil(waiting?.computeNodeId)
         XCTAssertEqual(waiting?.errorCode, "COMPUTE_NODE_REMOVED")
     }
+
+    func testComputeNodePreferenceOnlyChangesApprovedHeavyRoutes() {
+        let router = ProcessingRouter()
+        let availability = [
+            ProcessingRouteAvailability(route: .onDevice, capabilities: [.textRecognition, .transcription]),
+            ProcessingRouteAvailability(route: .computeNode, capabilities: [.textRecognition, .transcription]),
+        ]
+        let preference = ProcessingRoutePreference(mode: .preferComputeNodeForHeavyWork)
+
+        XCTAssertEqual(
+            router.route(
+                requiredCapabilities: [.textRecognition],
+                approval: nil,
+                availability: availability,
+                preference: preference
+            ),
+            .onDevice
+        )
+        XCTAssertEqual(
+            router.route(
+                requiredCapabilities: [.transcription],
+                approval: nil,
+                availability: availability,
+                preference: preference
+            ),
+            .computeNode
+        )
+    }
 }
