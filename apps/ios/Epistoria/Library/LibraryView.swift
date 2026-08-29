@@ -35,6 +35,7 @@ struct LibraryView: View {
     @State private var youtubeTopicId: UUID?
     @State private var importProgress: String?
     @State private var pendingTrashSource: IdentifiedPayload<SourcePayload>?
+    @State private var isConfirmingFailedCaptureDiscard = false
     @State private var errorMessage: String?
 
     var body: some View {
@@ -94,6 +95,9 @@ struct LibraryView: View {
             }
             .navigationTitle("Library")
             .epistoriaPageBackground()
+            .safeAreaInset(edge: .top) {
+                sharedCaptureStatus
+            }
             .toolbar {
                 ToolbarItem(placement: .principal) {
                     Picker("Library section", selection: $section) {
@@ -178,6 +182,9 @@ struct LibraryView: View {
             }
             .task { await load() }
             .refreshable { await load() }
+            .onChange(of: model.sharedCaptureImportRevision) {
+                Task { await load() }
+            }
             .alert("Library error", isPresented: .constant(errorMessage != nil)) {
                 Button("Try again") { Task { await load() } }
                 Button("Dismiss", role: .cancel) { errorMessage = nil }
@@ -199,6 +206,54 @@ struct LibraryView: View {
             } message: {
                 Text("The Source stays encrypted. Epistoria checks protected references before permanent deletion.")
             }
+            .confirmationDialog(
+                "Discard failed captures?",
+                isPresented: $isConfirmingFailedCaptureDiscard,
+                titleVisibility: .visible
+            ) {
+                Button("Discard encrypted captures", role: .destructive) {
+                    model.discardFailedSharedCaptures()
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("This removes only the encrypted Share extension packages that could not be imported. Existing Sources are unchanged.")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var sharedCaptureStatus: some View {
+        if let failure = model.sharedCaptureFailureMessage,
+           model.failedSharedCaptureCount > 0 {
+            HStack(spacing: 12) {
+                Image(systemName: "exclamationmark.circle")
+                    .foregroundStyle(.secondary)
+                Text(failure)
+                    .font(.callout)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Button("Retry") {
+                    Task { await model.retryFailedSharedCaptures() }
+                }
+                .buttonStyle(.bordered)
+                Button("Discard", role: .destructive) {
+                    isConfirmingFailedCaptureDiscard = true
+                }
+                .buttonStyle(.bordered)
+            }
+            .padding(12)
+            .background(.regularMaterial)
+        } else if let message = model.sharedCaptureImportMessage {
+            HStack(spacing: 12) {
+                Image(systemName: "tray.and.arrow.down")
+                    .foregroundStyle(.secondary)
+                Text(message)
+                    .font(.callout)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Button("Dismiss") { model.sharedCaptureImportMessage = nil }
+                    .buttonStyle(.bordered)
+            }
+            .padding(12)
+            .background(.regularMaterial)
         }
     }
 
@@ -627,6 +682,12 @@ struct ResourceDetailView: View {
                       let url = selectedYouTubeURL,
                       let reference = try? YouTubeReference(url: url) {
                 YouTubeSourceView(reference: reference)
+            } else if resource?.payload.resourceType == .website,
+                      sourceData == nil,
+                      let url = source?.payload.canonicalURL {
+                SharedWebReferenceView(url: url) {
+                    Task { await refreshWebPage() }
+                }
             } else if let sourceData, resource?.payload.resourceType == .pdf {
                 PDFDocumentView(
                     data: sourceData,
@@ -1097,7 +1158,9 @@ struct ResourceDetailView: View {
                                     .textSelection(.enabled)
                             }
                         }
-                        Text("This is a local snapshot. The page is never refreshed automatically.")
+                        Text(sourceData == nil
+                            ? "This shared link has not been fetched. Capture it to create an encrypted offline snapshot."
+                            : "This is a local snapshot. The page is never refreshed automatically.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -3115,6 +3178,27 @@ private struct PreparedSourceContent: Sendable {
     init(csv: CSVSourceDocument? = nil, text: String? = nil) {
         self.csv = csv
         self.text = text
+    }
+}
+
+private struct SharedWebReferenceView: View {
+    let url: URL
+    let capture: () -> Void
+
+    var body: some View {
+        ContentUnavailableView {
+            Label("Shared webpage", systemImage: "link")
+        } description: {
+            VStack(spacing: 8) {
+                Text(url.absoluteString)
+                    .textSelection(.enabled)
+                Text("The link was saved without contacting the website.")
+            }
+        } actions: {
+            Button("Capture offline copy", action: capture)
+                .buttonStyle(.borderedProminent)
+                .tint(EpistoriaDesign.ink)
+        }
     }
 }
 

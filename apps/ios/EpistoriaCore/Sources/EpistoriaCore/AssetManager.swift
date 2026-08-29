@@ -273,6 +273,154 @@ public actor AssetManager {
         )
     }
 
+    /// Imports bytes that are already in memory, including content drained from the encrypted
+    /// Share extension inbox. Validation completes before a Source record is created.
+    public func importSource(
+        data plaintext: Data,
+        filename: String,
+        topicId: UUID? = nil,
+        sessionId: UUID? = nil,
+        identifiers: [String] = []
+    ) async throws -> ImportedResource {
+        let trimmedFilename = filename.trimmingCharacters(in: .whitespacesAndNewlines)
+        let leafFilename = (trimmedFilename as NSString).lastPathComponent
+            .replacingOccurrences(of: "\\", with: "-")
+        let safeFilename = String(leafFilename.prefix(240))
+        guard !safeFilename.isEmpty, safeFilename != ".", safeFilename != ".." else {
+            throw SourceAdapterError.malformed
+        }
+        let extensionName = URL(fileURLWithPath: safeFilename).pathExtension.lowercased()
+        let title = URL(fileURLWithPath: safeFilename).deletingPathExtension().lastPathComponent
+
+        if extensionName == "pdf" {
+            guard plaintext.count <= 512 * 1_024 * 1_024 else {
+                throw AssetManagerError.fileTooLarge
+            }
+            guard plaintext.starts(with: Data("%PDF-".utf8)) else {
+                throw AssetManagerError.notPDF
+            }
+            let imported = try await importAsset(
+                plaintext: plaintext,
+                mimeType: "application/pdf",
+                originalFilename: safeFilename
+            )
+            let sourceId = try await store.createSource(
+                type: .pdf,
+                title: title.isEmpty ? "Imported PDF" : title,
+                originalAssetId: imported.assetId,
+                identifiers: identifiers,
+                primaryTopicId: topicId,
+                sessionId: sessionId
+            )
+            return ImportedResource(
+                resourceId: sourceId,
+                assetId: imported.assetId,
+                reusedExistingAsset: imported.reusedExistingAsset
+            )
+        }
+        if let type = UTType(filenameExtension: extensionName), type.conforms(to: .image) {
+            let image = try await importImage(data: plaintext, filename: safeFilename)
+            let sourceId = try await store.createSource(
+                type: .image,
+                title: title.isEmpty ? "Imported image" : title,
+                originalAssetId: image.assetId,
+                identifiers: identifiers,
+                primaryTopicId: topicId,
+                sessionId: sessionId
+            )
+            return ImportedResource(
+                resourceId: sourceId,
+                assetId: image.assetId,
+                reusedExistingAsset: image.reusedExistingAsset
+            )
+        }
+
+        let adapter = try SourceAdapterRegistry().adapter(for: safeFilename)
+        guard plaintext.count <= adapter.maximumBytes else { throw SourceAdapterError.tooLarge }
+        let mimeType = UTType(filenameExtension: extensionName)?.preferredMIMEType
+            ?? "application/octet-stream"
+        try await adapter.validateForImport(
+            data: plaintext,
+            filename: safeFilename,
+            mimeType: mimeType
+        )
+        let imported = try await importAsset(
+            plaintext: plaintext,
+            mimeType: mimeType,
+            originalFilename: safeFilename
+        )
+        let sourceId = try await store.createSource(
+            type: adapter.sourceType,
+            title: title.isEmpty ? "Imported Source" : title,
+            originalAssetId: imported.assetId,
+            identifiers: identifiers,
+            primaryTopicId: topicId,
+            sessionId: sessionId
+        )
+        return ImportedResource(
+            resourceId: sourceId,
+            assetId: imported.assetId,
+            reusedExistingAsset: imported.reusedExistingAsset
+        )
+    }
+
+    public func importPastedText(
+        _ text: String,
+        title: String? = nil,
+        topicId: UUID? = nil,
+        identifiers: [String] = []
+    ) async throws -> ImportedResource {
+        let cleanText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanText.isEmpty, let data = cleanText.data(using: .utf8) else {
+            throw SourceAdapterError.containsNoReadableText
+        }
+        let adapter = PlainTextSourceAdapter(sourceType: .pastedText, extensions: ["txt"])
+        try adapter.validate(data: data, filename: "Shared text.txt", mimeType: "text/plain")
+        let imported = try await importAsset(
+            plaintext: data,
+            mimeType: "text/plain",
+            originalFilename: "Shared text.txt"
+        )
+        let proposedTitle = title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let firstLine = cleanText.split(whereSeparator: \.isNewline).first.map(String.init) ?? ""
+        let resolvedTitle = String((proposedTitle.isEmpty ? firstLine : proposedTitle).prefix(120))
+        let sourceId = try await store.createSource(
+            type: .pastedText,
+            title: resolvedTitle.isEmpty ? "Shared text" : resolvedTitle,
+            originalAssetId: imported.assetId,
+            identifiers: identifiers,
+            primaryTopicId: topicId
+        )
+        return ImportedResource(
+            resourceId: sourceId,
+            assetId: imported.assetId,
+            reusedExistingAsset: imported.reusedExistingAsset
+        )
+    }
+
+    /// Saves a validated HTTPS reference without fetching it. The owner can capture a frozen
+    /// webpage version later from Library, which keeps sharing offline and network-transparent.
+    @discardableResult
+    public func importURLReference(
+        _ url: URL,
+        title: String? = nil,
+        topicId: UUID? = nil,
+        identifiers: [String] = []
+    ) async throws -> UUID {
+        let normalized = try WebSnapshotCaptureService.validatedURL(url)
+        let cleanTitle = title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let fallbackTitle = normalized.host?.replacingOccurrences(of: "www.", with: "")
+            ?? "Shared link"
+        return try await store.createSource(
+            type: .website,
+            title: String((cleanTitle.isEmpty ? fallbackTitle : cleanTitle).prefix(240)),
+            canonicalURL: normalized,
+            capturedURL: normalized,
+            identifiers: identifiers,
+            primaryTopicId: topicId
+        )
+    }
+
     public func importWebSnapshot(
         from url: URL,
         topicId: UUID? = nil,

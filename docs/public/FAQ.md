@@ -18,6 +18,17 @@ Optional synchronization, first-time restored-file downloads, and AI requests re
 applicable service and connection. The optional Compute Node is needed only for work explicitly
 routed to it.
 
+## Can I save something from another iPad app?
+
+Yes. Use **Save to Epistoria** in the iPad Share Sheet for a supported image, file, selected text,
+or HTTPS link. The extension encrypts the item on the device and Epistoria imports it into
+unassigned Source Inbox after the notebook unlocks. It does not require sync, AI, or a Compute
+Node.
+
+A shared link is stored as a reference and is not opened automatically. You can later choose
+**Capture offline copy** from that Source. Share Sheet capture accepts up to 10 items at a time and
+32 MB per item. Use Library import for larger files.
+
 ## Does related search use my AI provider?
 
 No. Exact and related search run on the unlocked iPad. They do not create an AI request, use the

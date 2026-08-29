@@ -29,8 +29,10 @@ Epistoria remains in personal beta. The following limits apply to the current pr
 - Very large Pencil documents have a current per-page ink limit.
 - The pixel eraser has a round adjustable footprint. Square, angled, and custom eraser tips are
   not available. Whole-stroke erasing remains a separate mode.
-- A Share Sheet capture extension is not available. Images can be added from Photos, Files,
-  clipboard, and drag and drop.
+- Share Sheet capture accepts up to 10 supported items at a time. Each item must be 32 MB or
+  smaller. Import larger files from Library.
+- A shared HTTPS link is saved as a reference without contacting the website. Use **Capture
+  offline copy** in the Source when a frozen local webpage is required.
 - Text and handwriting recognition are available for local search and review. Formula recognition
   remains development-gated until a permissively licensed on-device model passes physical-iPad
   accuracy, latency, memory, and thermal checks.

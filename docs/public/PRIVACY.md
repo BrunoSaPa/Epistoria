@@ -16,6 +16,12 @@ Exact and related search run on the unlocked iPad. Search information remains in
 storage. Related search does not send a query or notebook content to the synchronization service,
 paired Mac, or configured AI provider.
 
+**Save to Epistoria** encrypts shared images, files, text, and links in a device-local capture
+inbox. The extension does not unlock or read the notebook, contact an AI provider, or start
+synchronization. The unlocked app validates the encrypted item before it
+creates an unassigned Source. Capture packages are not synchronized, backed up, or included in a
+readable export. A shared link is not fetched automatically.
+
 ## Optional private synchronization
 
 Private synchronization sends encrypted content to a configured service. The service handles the

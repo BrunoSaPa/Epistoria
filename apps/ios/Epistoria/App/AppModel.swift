@@ -106,6 +106,11 @@ final class AppModel {
     var pendingRecordCount = 0
     var pendingFileCount = 0
     var unresolvedConflictCount = 0
+    var sharedCaptureImportMessage: String?
+    var sharedCaptureFailureMessage: String?
+    private(set) var pendingSharedCaptureCount = 0
+    private(set) var failedSharedCaptureCount = 0
+    private(set) var sharedCaptureImportRevision = 0
     private(set) var isCreatingPortableExport = false
     private(set) var isImportingPortableExport = false
     private(set) var isCreatingNotePDF = false
@@ -132,6 +137,7 @@ final class AppModel {
     private let directProviderClient: any ProviderClient
     private let directTranscriptionClient: any ProviderTranscriptionClient
     private let crypto: EntityCrypto
+    private let sharedCaptureImporter: SharedCaptureImporter?
     private let applicationSupportOverride: URL?
     private var isOpening = false
     private var automaticSyncTask: Task<Void, Never>?
@@ -144,6 +150,7 @@ final class AppModel {
     private var portableImportService: EpistoriaPortableImportService?
     private var pendingPortableImportPlan: EpistoriaImportPlan?
     private var notePDFExportTask: Task<NotePDFExportResult, Error>?
+    private var sharedCaptureImportTask: Task<SharedCaptureImportReport, Never>?
     private var syncRequestedWhileRunning = false
     private var pathMonitor: NWPathMonitor?
     private var isLocking = false
@@ -163,6 +170,7 @@ final class AppModel {
         localProcessingSettings: LocalProcessingSettings = LocalProcessingSettings(),
         formulaModelManager: OnDeviceFormulaModelManager = OnDeviceFormulaModelManager(),
         workspacePreferences: WorkspacePreferences = WorkspacePreferences(),
+        sharedCaptureImporter: SharedCaptureImporter? = .live(),
         crypto: EntityCrypto = EntityCrypto(),
         applicationSupportURL: URL? = nil
     ) {
@@ -176,6 +184,7 @@ final class AppModel {
         self.localProcessingSettings = localProcessingSettings
         self.formulaModelManager = formulaModelManager
         self.workspacePreferences = workspacePreferences
+        self.sharedCaptureImporter = sharedCaptureImporter
         formulaRecognitionEngine = CoreMLFormulaRecognitionEngine(modelManager: formulaModelManager)
         self.crypto = crypto
         applicationSupportOverride = applicationSupportURL
@@ -307,6 +316,10 @@ final class AppModel {
         }
         notePDFExportTask = nil
         isCreatingNotePDF = false
+        let captureImport = sharedCaptureImportTask
+        captureImport?.cancel()
+        if let captureImport { _ = await captureImport.value }
+        sharedCaptureImportTask = nil
         isReconfiguringSync = false
 
         // Give disappearing editors a main-actor turn to stage their last snapshot, then
@@ -2338,12 +2351,66 @@ final class AppModel {
         } catch {
             pendingSaveWarning = "A recent edit is still waiting for a safe local write. Free storage if needed; Epistoria will keep retrying."
         }
+        await drainSharedCaptureInbox()
         await refreshDataHealth()
         guard generation == sessionGeneration, !isLocking, case .ready = phase else { return }
         if let pendingSaveWarning { syncError = pendingSaveWarning }
         resumeSyncSchedulingIfNeeded()
         scheduleProactiveAutomation()
         scheduleSemanticIndexing(delay: .zero)
+    }
+
+    func drainSharedCaptureInbox() async {
+        guard let sharedCaptureImporter, let store, let assetManager,
+              sharedCaptureImportTask == nil,
+              !isLocking, case .ready = phase
+        else { return }
+        let generation = sessionGeneration
+        let task = Task {
+            await sharedCaptureImporter.drain(store: store, assetManager: assetManager)
+        }
+        sharedCaptureImportTask = task
+        let report = await task.value
+        sharedCaptureImportTask = nil
+        guard generation == sessionGeneration, !isLocking, case .ready = phase else { return }
+        pendingSharedCaptureCount = report.remainingPendingCount
+        failedSharedCaptureCount = report.failedCount
+        if report.importedCount > 0 {
+            let noun = report.importedCount == 1 ? "item" : "items"
+            sharedCaptureImportMessage = "Imported \(report.importedCount) shared \(noun) into Source Inbox."
+            sharedCaptureImportRevision &+= 1
+            noteLocalMutation()
+        }
+        if report.failedCount > 0 {
+            let detail = report.firstFailureDescription.map { " \($0)" } ?? ""
+            sharedCaptureFailureMessage = "\(report.failedCount) encrypted capture\(report.failedCount == 1 ? "" : "s") could not be imported.\(detail)"
+        } else {
+            sharedCaptureFailureMessage = nil
+        }
+    }
+
+    func retryFailedSharedCaptures() async {
+        guard let sharedCaptureImporter else { return }
+        do {
+            try sharedCaptureImporter.retryFailed()
+            sharedCaptureFailureMessage = nil
+            await drainSharedCaptureInbox()
+        } catch {
+            sharedCaptureFailureMessage = error.localizedDescription
+        }
+    }
+
+    func discardFailedSharedCaptures() {
+        guard let sharedCaptureImporter else { return }
+        do {
+            try sharedCaptureImporter.discardFailed()
+            let counts = sharedCaptureImporter.counts()
+            pendingSharedCaptureCount = counts.pending
+            failedSharedCaptureCount = counts.failed
+            sharedCaptureFailureMessage = nil
+        } catch {
+            sharedCaptureFailureMessage = error.localizedDescription
+        }
     }
 
     private func scheduleSemanticIndexing(delay: Duration) {

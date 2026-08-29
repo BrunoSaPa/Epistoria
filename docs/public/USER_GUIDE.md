@@ -377,6 +377,29 @@ Only one session can have an active timer. Other sessions can remain Planned or 
 abandoning a session preserves its notes, Sources, and activity history. Removing an activity row
 does not delete the underlying item.
 
+## Capture from another app
+
+Use the iPad Share Sheet to send supported content to Source Inbox.
+
+1. Open an image, supported file, webpage link, or selected text in another app.
+2. Open the Share Sheet.
+3. Select **Save to Epistoria**. Use **More** to enable the action if it is not visible.
+4. Wait for **Saved to Source Inbox**, then select **Done**.
+5. Open Epistoria. Unlock the notebook if required.
+6. Open **Library** and select **Inbox**.
+
+The Share extension accepts up to 10 items at a time. Each item must be 32 MB or smaller. Use
+**Import files** in Library for larger content.
+
+The extension encrypts the capture before saving it in the device-local inbox. Epistoria validates
+the content after the notebook opens. A successful import creates an unassigned Source. If an item
+fails validation, Library shows **Retry** and **Discard** controls. Discarding a failed capture does
+not remove existing Sources.
+
+A shared HTTPS link is saved without opening the website. Open the Source and select **Capture
+offline copy** when you want an encrypted snapshot. This action requires a network connection and
+creates a new immutable Source Version.
+
 ## Read and annotate Sources
 
 Library contains Inbox, All Sources, Recent, type filters, and Topic filters. Inbox contains

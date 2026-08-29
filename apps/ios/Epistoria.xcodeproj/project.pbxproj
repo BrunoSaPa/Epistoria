@@ -28,6 +28,7 @@
 		426067C698D45A2AD8D2CED3 /* DataHealthView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0F3B3FDFBB2BCD218101F2E /* DataHealthView.swift */; };
 		4295FF11D9057AB5501F087E /* CollectionDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE4D8FF2EA33C72A7A980377 /* CollectionDetailView.swift */; };
 		482E7AD95B81D9D2E6FE394C /* LearningManagementView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB7D498397579BAB468C3052 /* LearningManagementView.swift */; };
+		499DEACDF8CB9FC0BFE80D80 /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = E88BD724499FB7F121239719 /* ShareViewController.swift */; };
 		4AB03CD64DBD7DD0C95F2E38 /* PendingSaveRegistryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4A9C2EECA501629A0A6DE66 /* PendingSaveRegistryTests.swift */; };
 		4C3C9122AB20F2632A91F255 /* PendingSaveRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5AB1C23E0019EE50083F7840 /* PendingSaveRegistry.swift */; };
 		4CCD3844DBF0F87D64872215 /* StudyView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08B89468624166AB5B132D9F /* StudyView.swift */; };
@@ -38,6 +39,8 @@
 		5C8B62FD6B846169EF018314 /* OnDeviceFormulaRecognition.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02AC1296F471208EFE04B97A /* OnDeviceFormulaRecognition.swift */; };
 		5CDC0722C68F41F50FB24C69 /* TopicStudioView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22B2DB2C7A2173AC08F7A0DE /* TopicStudioView.swift */; };
 		63483CFD426EFD5BD4059DFB /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 9DC037239C3AAD04DDDC7E98 /* PrivacyInfo.xcprivacy */; };
+		641274454DAB9B6199EA7E85 /* EpistoriaShareExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 3A2B5FAB52B3183D7EE040B4 /* EpistoriaShareExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		684D4141C9C5AF194B7EC1B7 /* EpistoriaCore in Frameworks */ = {isa = PBXBuildFile; productRef = 34F184766C314D1E4E26134E /* EpistoriaCore */; };
 		75473A2695DFA6965D56A438 /* ConceptEvidenceMapView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F37F52121145FD6B5212E2C /* ConceptEvidenceMapView.swift */; };
 		791C0EE9B2E6C9BEC5AD000F /* WorkspacePreferences.swift in Sources */ = {isa = PBXBuildFile; fileRef = D94F268BAEFEF2AF2402D634 /* WorkspacePreferences.swift */; };
 		7B47D68D383BA5605CF24828 /* TopicDashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE33F134D1461DBC505B80B8 /* TopicDashboardView.swift */; };
@@ -45,10 +48,12 @@
 		95F88D19371F947D93F4BC43 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21D6211A0941084661F0FDEA /* SettingsView.swift */; };
 		9608B8B5525AE37248D76356 /* EpistoriaCore in Frameworks */ = {isa = PBXBuildFile; productRef = DBFCA34805D80887859E9A10 /* EpistoriaCore */; };
 		99CD9B1D16B8674E84C0C4A7 /* AccountStorageLocatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D596908EB59446C1A5DE9C2 /* AccountStorageLocatorTests.swift */; };
+		9CDB0342F97F01240DBD985A /* SharedCaptureImporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D797F90BD3E76574289053B /* SharedCaptureImporter.swift */; };
 		A3579CA6BB5CC1F9266C32BA /* NoteImageEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B791ADD645AD913AB8F4F02 /* NoteImageEditorView.swift */; };
 		A423FEC02233BDC185DF7430 /* AccountConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E6623DB8C75432BEBBCAF11 /* AccountConfiguration.swift */; };
 		A5D94E2534C764EDA8A7B2C9 /* SpatialNotebookCanvas.swift in Sources */ = {isa = PBXBuildFile; fileRef = D375328611A336119E2F55C0 /* SpatialNotebookCanvas.swift */; };
 		AC37C44E07929B7D23EE6A20 /* AIProviderProfileStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9168A7AD8732315016FE923D /* AIProviderProfileStore.swift */; };
+		ACA59261ED164583DB7FD007 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = A95B685FBF984DA26132866C /* PrivacyInfo.xcprivacy */; };
 		B0BDDE9736A79A9B4EC8FEB0 /* LearningDetailViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F587C85FB9CDBD4AD20B0D1 /* LearningDetailViews.swift */; };
 		B1545FB1ED851A4A6F5AA038 /* AppRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 994FB1067AAB271804368E81 /* AppRootView.swift */; };
 		B1E650B2FF8F504AA6045930 /* AdaptiveTutorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8935DE5EF28714C1897ECF7F /* AdaptiveTutorView.swift */; };
@@ -71,6 +76,7 @@
 		EFD9BBBBB498140A5267BAFC /* NoteFindInNoteView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6B09408C06D37900F55E5AC /* NoteFindInNoteView.swift */; };
 		F24D041C272858D40ABDA08A /* NotebookVisualStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0B720938C61EE02FC5D5A7A /* NotebookVisualStyle.swift */; };
 		F5B47A66F44C672C034CA1E8 /* OCRReviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D60B32C10ED6AADA33708517 /* OCRReviewView.swift */; };
+		FED252F16EBA9989F06CFDBE /* SharedCaptureImporterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB4B13B11DAEDECBBF30F409 /* SharedCaptureImporterTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -81,6 +87,13 @@
 			remoteGlobalIDString = 65C89720360569BD8ED0A4ED;
 			remoteInfo = Epistoria;
 		};
+		6A4F7F04635D1766AAAE5872 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = DA6C2D03FC6D0244DBB5B43A /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = E3602219488AD6221F5744E2;
+			remoteInfo = EpistoriaShareExtension;
+		};
 		80CAA386DD2E9CFF4F4F344B /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = DA6C2D03FC6D0244DBB5B43A /* Project object */;
@@ -90,12 +103,27 @@
 		};
 /* End PBXContainerItemProxy section */
 
+/* Begin PBXCopyFilesBuildPhase section */
+		3F165F0B3F9AA24EC6F85952 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				641274454DAB9B6199EA7E85 /* EpistoriaShareExtension.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
 		02AC1296F471208EFE04B97A /* OnDeviceFormulaRecognition.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnDeviceFormulaRecognition.swift; sourceTree = "<group>"; };
 		05409469B2C2B557F4ED04A7 /* WorkspacePresentationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspacePresentationTests.swift; sourceTree = "<group>"; };
 		07D6428F2835D5D270587135 /* NotebookView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotebookView.swift; sourceTree = "<group>"; };
 		08B89468624166AB5B132D9F /* StudyView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StudyView.swift; sourceTree = "<group>"; };
 		0E6623DB8C75432BEBBCAF11 /* AccountConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountConfiguration.swift; sourceTree = "<group>"; };
+		1189A509F91B4CF6CD16A66C /* Epistoria.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Epistoria.entitlements; sourceTree = "<group>"; };
 		14FBF3B7A2C6EFB97A8C896A /* EpistoriaExportService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EpistoriaExportService.swift; sourceTree = "<group>"; };
 		15B4A893BDC4C76907E1C2C1 /* UniversityView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UniversityView.swift; sourceTree = "<group>"; };
 		15B5D2C3B60622FA5DE19156 /* NotePDFExportService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotePDFExportService.swift; sourceTree = "<group>"; };
@@ -103,10 +131,12 @@
 		1CFA4F0C1427C4D173C8C791 /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
 		21D6211A0941084661F0FDEA /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		22B2DB2C7A2173AC08F7A0DE /* TopicStudioView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TopicStudioView.swift; sourceTree = "<group>"; };
+		26395CBE9D1A15058BA6AC81 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		296046E5F66D2C6212FE9F27 /* KnowledgeSearchView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KnowledgeSearchView.swift; sourceTree = "<group>"; };
 		2D728728FA6ED995D0FFF0EB /* NoteImageEditingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteImageEditingTests.swift; sourceTree = "<group>"; };
 		30EFB9A31E1C3EF9A2C4938E /* AIProviderSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIProviderSettingsView.swift; sourceTree = "<group>"; };
 		328ED5306D56EEB231FE8184 /* LassoOverlayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LassoOverlayView.swift; sourceTree = "<group>"; };
+		3A2B5FAB52B3183D7EE040B4 /* EpistoriaShareExtension.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = EpistoriaShareExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		411AD8353E00924FDD329665 /* LocalProcessingSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalProcessingSettingsView.swift; sourceTree = "<group>"; };
 		4A51BF1AFCD893DADFCF6CD8 /* EpistoriaDesign.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EpistoriaDesign.swift; sourceTree = "<group>"; };
 		4D79F9CAAF084868F1AF3A9C /* WorkspaceSettingsViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceSettingsViews.swift; sourceTree = "<group>"; };
@@ -124,6 +154,7 @@
 		6F1E4086C7FDF893EA78CE43 /* AIProviderProfileStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIProviderProfileStoreTests.swift; sourceTree = "<group>"; };
 		77B3805565CF9C5E40505BCF /* NoteQueryArtifactsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteQueryArtifactsView.swift; sourceTree = "<group>"; };
 		7931BB0B2776308E4D8C7656 /* LibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryView.swift; sourceTree = "<group>"; };
+		7D797F90BD3E76574289053B /* SharedCaptureImporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedCaptureImporter.swift; sourceTree = "<group>"; };
 		84F79068F407B2C7BBC367E9 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		8935DE5EF28714C1897ECF7F /* AdaptiveTutorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdaptiveTutorView.swift; sourceTree = "<group>"; };
 		8F37F52121145FD6B5212E2C /* ConceptEvidenceMapView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConceptEvidenceMapView.swift; sourceTree = "<group>"; };
@@ -137,6 +168,7 @@
 		9F5E9EDA6F3C5E53A7A9D068 /* NotePDFExportServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotePDFExportServiceTests.swift; sourceTree = "<group>"; };
 		A36B20FA305B052E3436C24B /* SpatialNotebookCanvasTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpatialNotebookCanvasTests.swift; sourceTree = "<group>"; };
 		A4A9C2EECA501629A0A6DE66 /* PendingSaveRegistryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PendingSaveRegistryTests.swift; sourceTree = "<group>"; };
+		A95B685FBF984DA26132866C /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		AE4D8FF2EA33C72A7A980377 /* CollectionDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CollectionDetailView.swift; sourceTree = "<group>"; };
 		AF1D4227ED61AF474A8A9F9E /* NotePageManagerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotePageManagerView.swift; sourceTree = "<group>"; };
 		B279FE27DE285AD320383789 /* NoteEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteEditorView.swift; sourceTree = "<group>"; };
@@ -151,8 +183,12 @@
 		D94F268BAEFEF2AF2402D634 /* WorkspacePreferences.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspacePreferences.swift; sourceTree = "<group>"; };
 		DA3EF4C44B5B4915DB15C54C /* EpistoriaCore */ = {isa = PBXFileReference; lastKnownFileType = folder; name = EpistoriaCore; path = EpistoriaCore; sourceTree = SOURCE_ROOT; };
 		DE33F134D1461DBC505B80B8 /* TopicDashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TopicDashboardView.swift; sourceTree = "<group>"; };
+		DEAD842E58C59F7ED50CAA63 /* EpistoriaShareExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = EpistoriaShareExtension.entitlements; sourceTree = "<group>"; };
 		E0F3B3FDFBB2BCD218101F2E /* DataHealthView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DataHealthView.swift; sourceTree = "<group>"; };
 		E26C40C6CA3FA05AA8956F9C /* LocalTextOCRService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalTextOCRService.swift; sourceTree = "<group>"; };
+		E5977CF78153E17017C6608F /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		E88BD724499FB7F121239719 /* ShareViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
+		EB4B13B11DAEDECBBF30F409 /* SharedCaptureImporterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedCaptureImporterTests.swift; sourceTree = "<group>"; };
 		F71473C0BC549E14DF27F39F /* NoteCanvasImageRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteCanvasImageRenderer.swift; sourceTree = "<group>"; };
 		F88A79D39FA49D05AF885DA9 /* ComputeNodeSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComputeNodeSettingsView.swift; sourceTree = "<group>"; };
 		F973AB6FF510D8DED2F212BC /* NoteReviewPreview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteReviewPreview.swift; sourceTree = "<group>"; };
@@ -166,6 +202,14 @@
 			buildActionMask = 2147483647;
 			files = (
 				9608B8B5525AE37248D76356 /* EpistoriaCore in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D3F46449A5CD1F6E0D2196FD /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				684D4141C9C5AF194B7EC1B7 /* EpistoriaCore in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -189,6 +233,7 @@
 				B2ADF9EA8B4CC8ABB172FB42 /* DeveloperNotebookResetView.swift */,
 				98E92AF31F99B4E43AAC5CFF /* EpistoriaApp.swift */,
 				5AB1C23E0019EE50083F7840 /* PendingSaveRegistry.swift */,
+				7D797F90BD3E76574289053B /* SharedCaptureImporter.swift */,
 				D94F268BAEFEF2AF2402D634 /* WorkspacePreferences.swift */,
 			);
 			path = App;
@@ -258,6 +303,7 @@
 			isa = PBXGroup;
 			children = (
 				E557062CAC139695EC6C21DC /* Epistoria */,
+				A80BFDD280C4A83FDAAC7260 /* EpistoriaShareExtension */,
 				EA43BCC539A106C69C15699E /* EpistoriaTests */,
 				CC01D55B94185DD52D36FB53 /* EpistoriaUITests */,
 				0155E6CAA591966DBE1DBB5B /* Packages */,
@@ -280,6 +326,7 @@
 			isa = PBXGroup;
 			children = (
 				6C755E81DF1E06F682506F2E /* Epistoria.app */,
+				3A2B5FAB52B3183D7EE040B4 /* EpistoriaShareExtension.appex */,
 				6B327DC563DB084489F94B66 /* EpistoriaTests.xctest */,
 				9F2107A5395CE766B240FE66 /* EpistoriaUITests.xctest */,
 			);
@@ -306,6 +353,8 @@
 			isa = PBXGroup;
 			children = (
 				84F79068F407B2C7BBC367E9 /* Assets.xcassets */,
+				1189A509F91B4CF6CD16A66C /* Epistoria.entitlements */,
+				26395CBE9D1A15058BA6AC81 /* Info.plist */,
 				9DC037239C3AAD04DDDC7E98 /* PrivacyInfo.xcprivacy */,
 			);
 			path = Resources;
@@ -352,12 +401,31 @@
 			path = Notebook;
 			sourceTree = "<group>";
 		};
+		A80BFDD280C4A83FDAAC7260 /* EpistoriaShareExtension */ = {
+			isa = PBXGroup;
+			children = (
+				E88BD724499FB7F121239719 /* ShareViewController.swift */,
+				DEEA77A564A4E8C143DB06B1 /* Resources */,
+			);
+			path = EpistoriaShareExtension;
+			sourceTree = "<group>";
+		};
 		CC01D55B94185DD52D36FB53 /* EpistoriaUITests */ = {
 			isa = PBXGroup;
 			children = (
 				1A96413C31E6FBDD6548E083 /* EpistoriaAccessibilityUITests.swift */,
 			);
 			path = EpistoriaUITests;
+			sourceTree = "<group>";
+		};
+		DEEA77A564A4E8C143DB06B1 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				DEAD842E58C59F7ED50CAA63 /* EpistoriaShareExtension.entitlements */,
+				E5977CF78153E17017C6608F /* Info.plist */,
+				A95B685FBF984DA26132866C /* PrivacyInfo.xcprivacy */,
+			);
+			path = Resources;
 			sourceTree = "<group>";
 		};
 		E557062CAC139695EC6C21DC /* Epistoria */ = {
@@ -391,6 +459,7 @@
 				2D728728FA6ED995D0FFF0EB /* NoteImageEditingTests.swift */,
 				9F5E9EDA6F3C5E53A7A9D068 /* NotePDFExportServiceTests.swift */,
 				A4A9C2EECA501629A0A6DE66 /* PendingSaveRegistryTests.swift */,
+				EB4B13B11DAEDECBBF30F409 /* SharedCaptureImporterTests.swift */,
 				A36B20FA305B052E3436C24B /* SpatialNotebookCanvasTests.swift */,
 				05409469B2C2B557F4ED04A7 /* WorkspacePresentationTests.swift */,
 			);
@@ -433,10 +502,12 @@
 				54E0C3FD8061679B7A5D2147 /* Sources */,
 				313794AEFF32BD4164CF0058 /* Resources */,
 				4831974CA0FE4154D9129D55 /* Frameworks */,
+				3F165F0B3F9AA24EC6F85952 /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				8E8B98049AFA79BBA530B3EE /* PBXTargetDependency */,
 			);
 			name = Epistoria;
 			packageProductDependencies = (
@@ -464,6 +535,26 @@
 			productReference = 9F2107A5395CE766B240FE66 /* EpistoriaUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
 		};
+		E3602219488AD6221F5744E2 /* EpistoriaShareExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 3EACEDDF29AF550C5E681A40 /* Build configuration list for PBXNativeTarget "EpistoriaShareExtension" */;
+			buildPhases = (
+				0003374113F9EADF92CC60F7 /* Sources */,
+				1809277A55E7FC71A802C279 /* Resources */,
+				D3F46449A5CD1F6E0D2196FD /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = EpistoriaShareExtension;
+			packageProductDependencies = (
+				34F184766C314D1E4E26134E /* EpistoriaCore */,
+			);
+			productName = EpistoriaShareExtension;
+			productReference = 3A2B5FAB52B3183D7EE040B4 /* EpistoriaShareExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -478,6 +569,9 @@
 					};
 					73C31BC81160E750CB0D0812 = {
 						TestTargetID = 65C89720360569BD8ED0A4ED;
+					};
+					E3602219488AD6221F5744E2 = {
+						ProvisioningStyle = Automatic;
 					};
 				};
 			};
@@ -499,6 +593,7 @@
 			projectRoot = "";
 			targets = (
 				65C89720360569BD8ED0A4ED /* Epistoria */,
+				E3602219488AD6221F5744E2 /* EpistoriaShareExtension */,
 				34CCF6192C01085ECB6FD284 /* EpistoriaTests */,
 				73C31BC81160E750CB0D0812 /* EpistoriaUITests */,
 			);
@@ -506,6 +601,14 @@
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		1809277A55E7FC71A802C279 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				ACA59261ED164583DB7FD007 /* PrivacyInfo.xcprivacy in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		313794AEFF32BD4164CF0058 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -518,6 +621,14 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		0003374113F9EADF92CC60F7 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				499DEACDF8CB9FC0BFE80D80 /* ShareViewController.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		54E0C3FD8061679B7A5D2147 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -565,6 +676,7 @@
 				4C3C9122AB20F2632A91F255 /* PendingSaveRegistry.swift in Sources */,
 				3EFE1A6A662E4985817B5A07 /* SessionsView.swift in Sources */,
 				95F88D19371F947D93F4BC43 /* SettingsView.swift in Sources */,
+				9CDB0342F97F01240DBD985A /* SharedCaptureImporter.swift in Sources */,
 				A5D94E2534C764EDA8A7B2C9 /* SpatialNotebookCanvas.swift in Sources */,
 				4CCD3844DBF0F87D64872215 /* StudyView.swift in Sources */,
 				1882F53EE20D174002135140 /* TodayView.swift in Sources */,
@@ -587,6 +699,7 @@
 				17076DDF89CCBE9ABCD6C8F6 /* NoteImageEditingTests.swift in Sources */,
 				5BA923E33DD56FC8E15298F9 /* NotePDFExportServiceTests.swift in Sources */,
 				4AB03CD64DBD7DD0C95F2E38 /* PendingSaveRegistryTests.swift in Sources */,
+				FED252F16EBA9989F06CFDBE /* SharedCaptureImporterTests.swift in Sources */,
 				310DAC23F2F5C4420FAFB8B7 /* SpatialNotebookCanvasTests.swift in Sources */,
 				595221EF82584E451C0BFE87 /* WorkspacePresentationTests.swift in Sources */,
 			);
@@ -603,6 +716,11 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
+		8E8B98049AFA79BBA530B3EE /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = E3602219488AD6221F5744E2 /* EpistoriaShareExtension */;
+			targetProxy = 6A4F7F04635D1766AAAE5872 /* PBXContainerItemProxy */;
+		};
 		C3A15A58D0A8803EFD764D62 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = 65C89720360569BD8ED0A4ED /* Epistoria */;
@@ -616,6 +734,29 @@
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
+		00244B4B744312E74970831A /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = EpistoriaShareExtension/Resources/EpistoriaShareExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				INFOPLIST_FILE = EpistoriaShareExtension/Resources/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.epistoria.notebook.share;
+				PRODUCT_NAME = EpistoriaShareExtension;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				TARGETED_DEVICE_FAMILY = 2;
+			};
+			name = Release;
+		};
 		2BD28B9AF8DBE4C429FE3575 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -780,23 +921,18 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Epistoria/Resources/Epistoria.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = Epistoria;
-				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.education";
-				INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsLocalNetworking = YES;
-				INFOPLIST_KEY_NSFaceIDUsageDescription = "Unlock your encrypted Epistoria account key.";
-				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Connect to your private Epistoria sync server on your local network.";
-				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
-				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
-				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Epistoria/Resources/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
+				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.epistoria.notebook;
 				PRODUCT_NAME = Epistoria;
 				SDKROOT = iphoneos;
@@ -809,29 +945,47 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Epistoria/Resources/Epistoria.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = Epistoria;
-				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.education";
-				INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsLocalNetworking = YES;
-				INFOPLIST_KEY_NSFaceIDUsageDescription = "Unlock your encrypted Epistoria account key.";
-				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Connect to your private Epistoria sync server on your local network.";
-				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
-				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
-				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Epistoria/Resources/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
+				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.epistoria.notebook;
 				PRODUCT_NAME = Epistoria;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = 2;
 			};
 			name = Release;
+		};
+		B47EE624B50282F7FD015BE0 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = EpistoriaShareExtension/Resources/EpistoriaShareExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				INFOPLIST_FILE = EpistoriaShareExtension/Resources/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.epistoria.notebook.share;
+				PRODUCT_NAME = EpistoriaShareExtension;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				TARGETED_DEVICE_FAMILY = 2;
+			};
+			name = Debug;
 		};
 		BD099E9DD7659126108A99F4 /* Debug */ = {
 			isa = XCBuildConfiguration;
@@ -890,6 +1044,15 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;
 		};
+		3EACEDDF29AF550C5E681A40 /* Build configuration list for PBXNativeTarget "EpistoriaShareExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B47EE624B50282F7FD015BE0 /* Debug */,
+				00244B4B744312E74970831A /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
 		C1BE9A2145E021D834E4AAF5 /* Build configuration list for PBXNativeTarget "Epistoria" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
@@ -918,6 +1081,10 @@
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		34F184766C314D1E4E26134E /* EpistoriaCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = EpistoriaCore;
+		};
 		DBFCA34805D80887859E9A10 /* EpistoriaCore */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = EpistoriaCore;

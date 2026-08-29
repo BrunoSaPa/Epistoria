@@ -1,5 +1,17 @@
 # Release notes
 
+## Encrypted Share Sheet capture
+
+- Added **Save to Epistoria** for supported images, files, selected text, and HTTPS links on iPad.
+- Encrypted shared items before writing them to a protected device-local capture inbox.
+- Kept the Share extension from unlocking or reading the notebook. It does not contact
+  synchronization, an AI provider, or a shared website.
+- Imported validated items into unassigned Source Inbox after notebook unlock.
+- Added idempotent retries, an encrypted failed-capture queue, and Library controls to retry or
+  discard failed packages without changing existing Sources.
+- Saved shared links as offline-safe references. The owner can request a frozen webpage snapshot
+  later.
+
 ## Non-destructive image editing
 
 - Added direct image cropping with draggable corners and common aspect-ratio presets.

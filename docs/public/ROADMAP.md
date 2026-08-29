@@ -22,7 +22,6 @@ change after personal use and beta testing.
 
 ## Notebook tools
 
-- Add a Share Sheet extension for direct image, text, link, and file capture.
 - Add editing for an existing shape's style, connectors, snapping, and alignment guides.
 - Evaluate square, angled, and custom eraser footprints after physical Apple Pencil testing.
 - Validate handwritten-math recognition, result review, graph interaction, and original-stroke

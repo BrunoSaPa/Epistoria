@@ -41,6 +41,11 @@ the current personal beta.
 ## Sources
 
 - Keep an Inbox for Sources that have not been assigned to a Topic.
+- Use **Save to Epistoria** from the iPad Share Sheet to capture supported images, files, selected
+  text, and HTTPS links. The extension encrypts the item on the device. Epistoria validates and
+  imports it into Source Inbox after the notebook opens.
+- Save a shared link without loading the website. Capture an offline webpage version later from
+  the Source when needed.
 - Import PDFs, images, plain text, Markdown, HTML, CSV, XLSX, DOCX, PPTX, EPUB, ODT, and ODP
   files.
 - Read CSV files in a local table with a pinned first row, row numbers, selectable text, and
