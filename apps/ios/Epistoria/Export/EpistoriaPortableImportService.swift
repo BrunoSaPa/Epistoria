@@ -53,7 +53,7 @@ enum EpistoriaImportError: Error, LocalizedError {
         case .requiresEmptyNotebook:
             "Import requires an empty notebook. Existing data was not changed."
         case .unsupportedFormat:
-            "This export cannot be restored. Use an epistoria-export/5 or epistoria-export/6 archive."
+            "This export cannot be restored. Use an epistoria-export/5, epistoria-export/6, or epistoria-export/7 archive."
         case let .malformedManifest(field):
             "The export manifest is invalid at \(field). Existing data was not changed."
         case let .missingAsset(path):
@@ -129,7 +129,9 @@ actor EpistoriaPortableImportService {
                 requireMatchingAccount: false
             )
             let metadata = try readMetadata(in: package)
-            guard ["epistoria-export/5", "epistoria-export/6"].contains(metadata.formatVersion) else {
+            guard ["epistoria-export/5", "epistoria-export/6", "epistoria-export/7"]
+                .contains(metadata.formatVersion)
+            else {
                 throw EpistoriaImportError.unsupportedFormat
             }
             try fileManager.createDirectory(at: encryptedAssets, withIntermediateDirectories: true)

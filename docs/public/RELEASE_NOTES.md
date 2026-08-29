@@ -1,5 +1,15 @@
 # Release notes
 
+## Non-destructive image editing
+
+- Added direct image cropping with draggable corners and common aspect-ratio presets.
+- Added 90-degree rotation, rounded masks, oval masks, and live previews.
+- Added replacement from Photos or Files while retaining the first encrypted image for
+  restoration.
+- Applied the same presentation settings to the notebook, selections, and readable PDF output.
+- Updated readable export to version 7 so the displayed image and first image reference remain
+  portable.
+
 ## Direct iPad AI workflows
 
 - Moved Tutor turns, note questions, provider-backed math help, session reviews,

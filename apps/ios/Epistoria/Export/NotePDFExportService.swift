@@ -509,7 +509,13 @@ final class NotePDFExportService {
                 context: nil
             )
         case .image:
-            image?.draw(in: aspectFitRect(imageSize: image?.size ?? .zero, destination: localRect))
+            if let image {
+                NoteCanvasImageRenderer.draw(
+                    image,
+                    configuration: block.payload.imageConfiguration,
+                    in: localRect
+                )
+            }
         case .handwriting:
             if let data = block.payload.drawingData,
                let drawing = try? PKDrawing(data: data),
@@ -736,18 +742,6 @@ final class NotePDFExportService {
         guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
         else { return nil }
         return UIImage(cgImage: cgImage)
-    }
-
-    private func aspectFitRect(imageSize: CGSize, destination: CGRect) -> CGRect {
-        guard imageSize.width > 0, imageSize.height > 0 else { return destination }
-        let scale = min(destination.width / imageSize.width, destination.height / imageSize.height)
-        let size = CGSize(width: imageSize.width * scale, height: imageSize.height * scale)
-        return CGRect(
-            x: destination.midX - size.width / 2,
-            y: destination.midY - size.height / 2,
-            width: size.width,
-            height: size.height
-        )
     }
 
     private func safeFilename(_ title: String) -> String {

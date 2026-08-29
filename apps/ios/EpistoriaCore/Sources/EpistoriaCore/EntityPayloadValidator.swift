@@ -94,7 +94,7 @@ public enum EntityPayloadValidator {
         case .studySession: ["study-session/v1"]
         case .note: ["note/v1", "note/v2", "note/v3", "note/v4"]
         case .notePage: ["note-page/v1"]
-        case .noteBlock: ["note-block/v1", "note-block/v2", "note-block/v3", "note-block/v4", "note-block/v5", "note-block/v6"]
+        case .noteBlock: ["note-block/v1", "note-block/v2", "note-block/v3", "note-block/v4", "note-block/v5", "note-block/v6", "note-block/v7"]
         case .trashEntry: ["trash-entry/v1"]
         case .resource: ["resource/v1", "source/v1"]
         case .asset: ["asset/v1"]

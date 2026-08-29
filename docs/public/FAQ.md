@@ -215,10 +215,10 @@ Transcript corrections and timestamped Evidence are owner records. They are incl
 readable knowledge file. Generated transcript chunks remain in the derived AI file and are
 included only when reviewed AI data is selected.
 
-Version 5 packages can be imported into an empty notebook. Epistoria validates the package first,
-then encrypts its records and original files for the target notebook. Import does not merge with
-or replace existing data. Versions 1 through 4 remain readable but must be recreated with a
-version 5 or 6 build before import.
+Version 5, 6, and 7 packages can be imported into an empty notebook. Epistoria validates the
+package first, then encrypts its records and original files for the target notebook. Import does
+not merge with or replace existing data. Versions 1 through 4 remain readable but must be
+recreated with a version 5, 6, or 7 build before import.
 
 ## Can revoking a device erase it remotely?
 

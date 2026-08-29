@@ -25,6 +25,10 @@ the current personal beta.
 - Place editable algebra, calculus, Greek, set, logic, and comparison symbols.
 - Write anywhere with Apple Pencil.
 - Add typed text and images from Photos, Files, the clipboard, and drag and drop.
+- Edit a selected image with a direct crop frame, crop presets, quarter-turn rotation, rounded or
+  oval masks, and a live preview.
+- Replace an image without rewriting its first encrypted file. Restore the first image from the
+  same editor when needed.
 - Move, resize, rotate, and reorder text, images, shapes, and symbols.
 - Write over text and images without flattening the underlying material.
 - Open a note in an immersive workspace that uses the full iPad detail area.

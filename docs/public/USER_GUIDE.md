@@ -82,6 +82,20 @@ confirmation and provides temporary undo while the note remains open.
 Shapes and symbols are stored as notebook items. Switch to **Select** to move, resize, rotate, or
 remove them. Select a symbol again in Select mode to edit it as text.
 
+### Edit an image
+
+1. Select **Select**, then select an image.
+2. Open the selected-item menu and select **Edit image**.
+3. Drag the crop frame or a corner. You can also choose Full, Square, 4:3, 16:9, or Inset.
+4. Rotate left or right in 90-degree steps.
+5. Choose no mask, a rounded mask, or an oval mask. Adjust the rounded corner size when needed.
+6. Select **Done** to save the presentation settings, or **Cancel** to discard the draft.
+
+Use **Replace from Photos** or **Replace from Files** to select another image. Replacement keeps
+the canvas frame and mask, resets crop and rotation for the new file, and retains the first
+encrypted image. Select **Restore First Image** to return to that file. Crop, mask, rotation, and
+replacement do not rewrite the original image bytes.
+
 ## Adjust the workspace
 
 Open **Settings → Interface and Controls** to reorder the core sidebar destinations, hide or pin
@@ -683,8 +697,8 @@ file.
 
 ## Import a readable export
 
-Import requires an empty notebook and a version 5 or 6 export. It does not merge with or replace
-existing data.
+Import requires an empty notebook and a version 5, 6, or 7 export. It does not merge with or
+replace existing data.
 
 1. Open **Settings → Data Health → Portable export**.
 2. Select **Import into empty notebook**.

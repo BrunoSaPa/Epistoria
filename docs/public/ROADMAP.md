@@ -10,7 +10,7 @@ change after personal use and beta testing.
 - Complete two-device synchronization and concurrent-version testing.
 - Complete fresh-device recovery and independent backup drills.
 - Complete private installation and update testing.
-- Test version 6 clean-notebook import on a physical spare iPad with representative data.
+- Test version 7 clean-notebook import on a physical spare iPad with representative data.
 
 ## Portability and file access
 
@@ -22,7 +22,6 @@ change after personal use and beta testing.
 
 ## Notebook tools
 
-- Add non-destructive image crop, mask, rotation presets, and replace-original-reference tools.
 - Add a Share Sheet extension for direct image, text, link, and file capture.
 - Add editing for an existing shape's style, connectors, snapping, and alignment guides.
 - Evaluate square, angled, and custom eraser footprints after physical Apple Pencil testing.

@@ -151,6 +151,7 @@ struct NoteEditorView: View {
     @State private var showEvidenceShelf = false
     @State private var showTutor = false
     @State private var showPageManager = false
+    @State private var editingImageBlockId: UUID?
     @State private var showMoreTools = false
     @State private var showFindInNote = false
     @State private var selectedPhotoItem: PhotosPickerItem?
@@ -331,6 +332,57 @@ struct NoteEditorView: View {
                     activeFocusRectangles = match.rectangles
                     currentPageIndex = match.pageIndex
                     requestedPageIndex = match.pageIndex
+                }
+            }
+            .sheet(
+                isPresented: Binding(
+                    get: { editingImageBlockId != nil },
+                    set: { if !$0 { editingImageBlockId = nil } }
+                )
+            ) {
+                if let editingImageBlockId,
+                   let block = blocks.first(where: { $0.id == editingImageBlockId }),
+                   let image = imagePreviews[editingImageBlockId]
+                {
+                    NoteImageEditorView(
+                        image: image,
+                        filename: block.payload.plainText,
+                        configuration: block.payload.imageConfiguration,
+                        hasOriginalReference: block.payload.imageConfiguration?.originalAssetId != nil,
+                        onSave: { configuration in
+                            try await saveImageConfiguration(
+                                blockId: editingImageBlockId,
+                                configuration: configuration
+                            )
+                        },
+                        onReplaceFile: { url, configuration in
+                            try await replaceImage(
+                                blockId: editingImageBlockId,
+                                from: url,
+                                configuration: configuration
+                            )
+                        },
+                        onReplaceData: { data, filename, configuration in
+                            try await replaceImage(
+                                blockId: editingImageBlockId,
+                                data: data,
+                                filename: filename,
+                                configuration: configuration
+                            )
+                        },
+                        onRestoreOriginal: { configuration in
+                            try await restoreOriginalImage(
+                                blockId: editingImageBlockId,
+                                configuration: configuration
+                            )
+                        }
+                    )
+                } else {
+                    ContentUnavailableView(
+                        "Image unavailable",
+                        systemImage: "photo",
+                        description: Text("Close this editor and reopen the image after it downloads.")
+                    )
                 }
             }
             .sheet(
@@ -617,6 +669,13 @@ struct NoteEditorView: View {
                         Button("Open Evidence source", systemImage: "arrow.up.right.square") {
                             openedEvidenceId = item.id
                         }
+                        Divider()
+                    }
+                    if selectedBlock.payload.blockType == .image {
+                        Button("Edit image…", systemImage: "crop") {
+                            editingImageBlockId = selectedBlock.id
+                        }
+                        .disabled(imagePreviews[selectedBlock.id] == nil)
                         Divider()
                     }
                     Button("Bring forward", systemImage: "square.2.layers.3d.top.filled") {
@@ -1919,7 +1978,11 @@ struct NoteEditorView: View {
                 }
             case .image:
                 if let image = imagePreviews[block.id] {
-                    content = .image(image, filename: block.payload.plainText)
+                    content = .image(
+                        image,
+                        filename: block.payload.plainText,
+                        configuration: block.payload.imageConfiguration
+                    )
                 } else {
                     content = .unsupported("Image unavailable\n\(block.payload.plainText)")
                 }
@@ -2446,9 +2509,95 @@ struct NoteEditorView: View {
         mode = .select
     }
 
+    private func saveImageConfiguration(
+        blockId: UUID,
+        configuration: NoteCanvasImageConfiguration
+    ) async throws {
+        guard !isArchived, let store = model.store else {
+            throw NoteEditorSaveError.encryptedStoreUnavailable
+        }
+        try await model.pendingSaves.flush(id: blockId)
+        _ = try await store.updateCanvasImage(id: blockId, configuration: configuration)
+        model.noteLocalMutation()
+        try await refreshBlock(blockId)
+    }
+
+    private func replaceImage(
+        blockId: UUID,
+        from url: URL,
+        configuration: NoteCanvasImageConfiguration
+    ) async throws {
+        guard !isArchived,
+              let store = model.store,
+              let assetManager = model.assetManager
+        else { throw NoteEditorSaveError.encryptedStoreUnavailable }
+        try await model.pendingSaves.flush(id: blockId)
+        let imported = try await assetManager.importImage(from: url)
+        _ = try await store.updateCanvasImage(
+            id: blockId,
+            configuration: configuration,
+            replacementAssetId: imported.assetId,
+            replacementFilename: imported.filename
+        )
+        model.noteLocalMutation()
+        imagePreviews[blockId] = nil
+        try await refreshBlock(blockId)
+        ocrArtifacts = try await store.ocrArtifacts(parentId: noteId)
+        await loadImagePreviews(around: currentPageIndex)
+    }
+
+    private func replaceImage(
+        blockId: UUID,
+        data: Data,
+        filename: String,
+        configuration: NoteCanvasImageConfiguration
+    ) async throws {
+        guard !isArchived,
+              let store = model.store,
+              let assetManager = model.assetManager
+        else { throw NoteEditorSaveError.encryptedStoreUnavailable }
+        try await model.pendingSaves.flush(id: blockId)
+        let imported = try await assetManager.importImage(data: data, filename: filename)
+        _ = try await store.updateCanvasImage(
+            id: blockId,
+            configuration: configuration,
+            replacementAssetId: imported.assetId,
+            replacementFilename: imported.filename
+        )
+        model.noteLocalMutation()
+        imagePreviews[blockId] = nil
+        try await refreshBlock(blockId)
+        ocrArtifacts = try await store.ocrArtifacts(parentId: noteId)
+        await loadImagePreviews(around: currentPageIndex)
+    }
+
+    private func restoreOriginalImage(
+        blockId: UUID,
+        configuration: NoteCanvasImageConfiguration
+    ) async throws {
+        guard !isArchived,
+              let store = model.store,
+              let block = blocks.first(where: { $0.id == blockId }),
+              let originalAssetId = block.payload.imageConfiguration?.originalAssetId
+        else { throw NoteEditorSaveError.imagePreviewUnavailable }
+        let asset = try await store.payload(AssetPayload.self, id: originalAssetId)
+        try await model.pendingSaves.flush(id: blockId)
+        _ = try await store.updateCanvasImage(
+            id: blockId,
+            configuration: configuration,
+            replacementAssetId: originalAssetId,
+            replacementFilename: asset.payload.originalFilename
+        )
+        model.noteLocalMutation()
+        imagePreviews[blockId] = nil
+        try await refreshBlock(blockId)
+        ocrArtifacts = try await store.ocrArtifacts(parentId: noteId)
+        await loadImagePreviews(around: currentPageIndex)
+    }
+
     private func savePlacement(id: UUID, placement: NoteCanvasPlacement) {
         guard !isArchived, var block = blocks.first(where: { $0.id == id }) else { return }
-        block.payload.schemaVersion = "note-block/v6"
+        block.payload.schemaVersion = "note-block/v7"
         block.payload.canvasPlacement = placement
         block.payload.updatedAt = .now
         replaceLocalBlock(block)
@@ -2467,7 +2616,7 @@ struct NoteEditorView: View {
                 from: NSRange(location: 0, length: attributedText.length),
                 documentAttributes: [.documentType: NSAttributedString.DocumentType.rtf]
             )
-            block.payload.schemaVersion = "note-block/v6"
+            block.payload.schemaVersion = "note-block/v7"
             block.payload.plainText = attributedText.string
             block.payload.richTextRtf = rtf
             block.payload.canvasPlacement = placement
@@ -2488,8 +2637,13 @@ struct NoteEditorView: View {
                 id: block.id,
                 payload: snapshot,
                 parentId: snapshot.noteId,
-                relationIds: [snapshot.noteId, snapshot.canvasPageId, snapshot.assetId, snapshot.evidenceId].compactMap(
-                    \.self)
+                relationIds: [
+                    snapshot.noteId,
+                    snapshot.canvasPageId,
+                    snapshot.assetId,
+                    snapshot.imageConfiguration?.originalAssetId,
+                    snapshot.evidenceId,
+                ].compactMap(\.self)
             )
             model.noteLocalMutation()
         }
@@ -2523,7 +2677,7 @@ struct NoteEditorView: View {
         if pageIndex == currentPageIndex { inkSaveState = .saving }
         let previousDrawingData = inkBlock.payload.drawingData
         var snapshot = inkBlock.payload
-        snapshot.schemaVersion = "note-block/v6"
+        snapshot.schemaVersion = "note-block/v7"
         snapshot.drawingData = value
         snapshot.updatedAt = .now
         var localBlock = inkBlock

@@ -127,6 +127,86 @@ public struct NoteCanvasShape: Codable, Equatable, Sendable {
     }
 }
 
+public enum NoteCanvasImageMask: String, Codable, CaseIterable, Sendable {
+    case none = "NONE"
+    case roundedRectangle = "ROUNDED_RECTANGLE"
+    case ellipse = "ELLIPSE"
+}
+
+/// A crop rectangle in normalized coordinates after the image's quarter-turn rotation is applied.
+/// Keeping it independent from the canvas frame makes the edit stable across resize and zoom.
+public struct NoteCanvasImageCrop: Codable, Equatable, Sendable {
+    public var x: Double
+    public var y: Double
+    public var width: Double
+    public var height: Double
+
+    public init(x: Double = 0, y: Double = 0, width: Double = 1, height: Double = 1) {
+        self.x = x
+        self.y = y
+        self.width = width
+        self.height = height
+        self = sanitized
+    }
+
+    public static let full = NoteCanvasImageCrop()
+
+    public var sanitized: NoteCanvasImageCrop {
+        var value = self
+        value.x = min(max(value.x.isFinite ? value.x : 0, 0), 0.98)
+        value.y = min(max(value.y.isFinite ? value.y : 0, 0), 0.98)
+        value.width = min(max(value.width.isFinite ? value.width : 1, 0.02), 1 - value.x)
+        value.height = min(max(value.height.isFinite ? value.height : 1, 0.02), 1 - value.y)
+        return value
+    }
+
+    public var isFullFrame: Bool {
+        let value = sanitized
+        return abs(value.x) < 0.000_001
+            && abs(value.y) < 0.000_001
+            && abs(value.width - 1) < 0.000_001
+            && abs(value.height - 1) < 0.000_001
+    }
+}
+
+/// Non-destructive presentation metadata for a canvas image. `assetId` on the block identifies
+/// the current displayed asset. `originalAssetId` retains the first immutable asset after a
+/// replacement so the owner can restore it without relying on undo history.
+public struct NoteCanvasImageConfiguration: Codable, Equatable, Sendable {
+    public var crop: NoteCanvasImageCrop
+    public var mask: NoteCanvasImageMask
+    public var roundedCornerFraction: Double
+    public var rotationQuarterTurns: Int
+    public var originalAssetId: UUID?
+
+    public init(
+        crop: NoteCanvasImageCrop = .full,
+        mask: NoteCanvasImageMask = .none,
+        roundedCornerFraction: Double = 0.12,
+        rotationQuarterTurns: Int = 0,
+        originalAssetId: UUID? = nil
+    ) {
+        self.crop = crop.sanitized
+        self.mask = mask
+        self.roundedCornerFraction = min(max(
+            roundedCornerFraction.isFinite ? roundedCornerFraction : 0.12,
+            0.02
+        ), 0.5)
+        self.rotationQuarterTurns = ((rotationQuarterTurns % 4) + 4) % 4
+        self.originalAssetId = originalAssetId
+    }
+
+    public var sanitized: NoteCanvasImageConfiguration {
+        NoteCanvasImageConfiguration(
+            crop: crop,
+            mask: mask,
+            roundedCornerFraction: roundedCornerFraction,
+            rotationQuarterTurns: rotationQuarterTurns,
+            originalAssetId: originalAssetId
+        )
+    }
+}
+
 /// The spatial presentation of one note. Measurements use document points (72 per inch),
 /// independent of device scale and zoom. Infinite canvases share the same origin as fixed
 /// paper and allow negative coordinates in every direction.
@@ -517,7 +597,7 @@ public struct NotePayload: EntityPayload, Equatable {
 
 public struct NoteBlockPayload: EntityPayload, Equatable {
     public static let entityType = EntityType.noteBlock
-    public var schemaVersion = "note-block/v6"
+    public var schemaVersion = "note-block/v7"
     public var noteId: UUID
     public var blockType: NoteBlockKind
     public var orderKey: String
@@ -533,6 +613,8 @@ public struct NoteBlockPayload: EntityPayload, Equatable {
     public var canvasRole: NoteBlockCanvasRole?
     /// Vector geometry for durable canvas shapes. Missing for older and non-shape records.
     public var canvasShape: NoteCanvasShape?
+    /// Non-destructive crop, mask, rotation, and original-reference metadata for image blocks.
+    public var imageConfiguration: NoteCanvasImageConfiguration?
     /// Page-local records use a zero-based index. A missing value is legacy page zero.
     public var canvasPageIndex: Int?
     /// Stable page identity. `canvasPageIndex` remains a read-only compatibility fallback for
@@ -545,8 +627,17 @@ public struct NoteBlockPayload: EntityPayload, Equatable {
     /// Stable identity for OCR input bytes. Local database revisions represent synchronized
     /// server state and do not advance for every pending local edit.
     public var ocrInputRevision: Int {
-        guard let drawingData, !drawingData.isEmpty else { return 0 }
-        let prefix = SHA256.hash(data: drawingData).prefix(MemoryLayout<UInt64>.size)
+        let input: Data
+        if let drawingData, !drawingData.isEmpty {
+            input = drawingData
+        } else if blockType == .image, let assetId {
+            // Presentation-only edits do not invalidate recognition. Replacing the immutable
+            // source asset does, even before an image-specific OCR workflow is enabled.
+            input = Data(assetId.uuidString.lowercased().utf8)
+        } else {
+            return 0
+        }
+        let prefix = SHA256.hash(data: input).prefix(MemoryLayout<UInt64>.size)
         let value = prefix.reduce(UInt64(0)) { ($0 << 8) | UInt64($1) }
         return Int(value & UInt64(Int.max))
     }
@@ -570,6 +661,7 @@ public struct NoteBlockPayload: EntityPayload, Equatable {
         canvasPlacement = nil
         canvasRole = nil
         canvasShape = nil
+        imageConfiguration = nil
         canvasPageIndex = nil
         canvasPageId = nil
         tombstone = false

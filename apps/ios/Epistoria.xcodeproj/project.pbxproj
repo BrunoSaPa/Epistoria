@@ -11,6 +11,7 @@
 		0821C0E7CC4CC776C0CC366D /* EpistoriaPortableImportService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58702253F48A1989D3C7C7E4 /* EpistoriaPortableImportService.swift */; };
 		0C13184662CE5717485E8BC1 /* LassoOverlayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 328ED5306D56EEB231FE8184 /* LassoOverlayView.swift */; };
 		13A7DC2EA6C84AD2D52D7630 /* NotePDFExportService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15B5D2C3B60622FA5DE19156 /* NotePDFExportService.swift */; };
+		17076DDF89CCBE9ABCD6C8F6 /* NoteImageEditingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D728728FA6ED995D0FFF0EB /* NoteImageEditingTests.swift */; };
 		1882F53EE20D174002135140 /* TodayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 507800F15F03EF683EB6D003 /* TodayView.swift */; };
 		193F3D8A4B2263820B9EFBA8 /* NoteReviewPreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = F973AB6FF510D8DED2F212BC /* NoteReviewPreview.swift */; };
 		1969E734A69DCBD13E50C0AF /* ContinuousNotebookPages.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4CE73D59B5CC07D158A1310 /* ContinuousNotebookPages.swift */; };
@@ -40,9 +41,11 @@
 		75473A2695DFA6965D56A438 /* ConceptEvidenceMapView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F37F52121145FD6B5212E2C /* ConceptEvidenceMapView.swift */; };
 		791C0EE9B2E6C9BEC5AD000F /* WorkspacePreferences.swift in Sources */ = {isa = PBXBuildFile; fileRef = D94F268BAEFEF2AF2402D634 /* WorkspacePreferences.swift */; };
 		7B47D68D383BA5605CF24828 /* TopicDashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE33F134D1461DBC505B80B8 /* TopicDashboardView.swift */; };
+		7F821565D9E9FF7895AAC960 /* NoteCanvasImageRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = F71473C0BC549E14DF27F39F /* NoteCanvasImageRenderer.swift */; };
 		95F88D19371F947D93F4BC43 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21D6211A0941084661F0FDEA /* SettingsView.swift */; };
 		9608B8B5525AE37248D76356 /* EpistoriaCore in Frameworks */ = {isa = PBXBuildFile; productRef = DBFCA34805D80887859E9A10 /* EpistoriaCore */; };
 		99CD9B1D16B8674E84C0C4A7 /* AccountStorageLocatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D596908EB59446C1A5DE9C2 /* AccountStorageLocatorTests.swift */; };
+		A3579CA6BB5CC1F9266C32BA /* NoteImageEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B791ADD645AD913AB8F4F02 /* NoteImageEditorView.swift */; };
 		A423FEC02233BDC185DF7430 /* AccountConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E6623DB8C75432BEBBCAF11 /* AccountConfiguration.swift */; };
 		A5D94E2534C764EDA8A7B2C9 /* SpatialNotebookCanvas.swift in Sources */ = {isa = PBXBuildFile; fileRef = D375328611A336119E2F55C0 /* SpatialNotebookCanvas.swift */; };
 		AC37C44E07929B7D23EE6A20 /* AIProviderProfileStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9168A7AD8732315016FE923D /* AIProviderProfileStore.swift */; };
@@ -101,6 +104,7 @@
 		21D6211A0941084661F0FDEA /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		22B2DB2C7A2173AC08F7A0DE /* TopicStudioView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TopicStudioView.swift; sourceTree = "<group>"; };
 		296046E5F66D2C6212FE9F27 /* KnowledgeSearchView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KnowledgeSearchView.swift; sourceTree = "<group>"; };
+		2D728728FA6ED995D0FFF0EB /* NoteImageEditingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteImageEditingTests.swift; sourceTree = "<group>"; };
 		30EFB9A31E1C3EF9A2C4938E /* AIProviderSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIProviderSettingsView.swift; sourceTree = "<group>"; };
 		328ED5306D56EEB231FE8184 /* LassoOverlayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LassoOverlayView.swift; sourceTree = "<group>"; };
 		411AD8353E00924FDD329665 /* LocalProcessingSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalProcessingSettingsView.swift; sourceTree = "<group>"; };
@@ -114,6 +118,7 @@
 		639D64932A90F21295231AD9 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
 		6A4D9E067E22ADC8DE6945B5 /* TopicsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TopicsView.swift; sourceTree = "<group>"; };
 		6B327DC563DB084489F94B66 /* EpistoriaTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = EpistoriaTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		6B791ADD645AD913AB8F4F02 /* NoteImageEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteImageEditorView.swift; sourceTree = "<group>"; };
 		6C755E81DF1E06F682506F2E /* Epistoria.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Epistoria.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		6D596908EB59446C1A5DE9C2 /* AccountStorageLocatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountStorageLocatorTests.swift; sourceTree = "<group>"; };
 		6F1E4086C7FDF893EA78CE43 /* AIProviderProfileStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIProviderProfileStoreTests.swift; sourceTree = "<group>"; };
@@ -148,6 +153,7 @@
 		DE33F134D1461DBC505B80B8 /* TopicDashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TopicDashboardView.swift; sourceTree = "<group>"; };
 		E0F3B3FDFBB2BCD218101F2E /* DataHealthView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DataHealthView.swift; sourceTree = "<group>"; };
 		E26C40C6CA3FA05AA8956F9C /* LocalTextOCRService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalTextOCRService.swift; sourceTree = "<group>"; };
+		F71473C0BC549E14DF27F39F /* NoteCanvasImageRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteCanvasImageRenderer.swift; sourceTree = "<group>"; };
 		F88A79D39FA49D05AF885DA9 /* ComputeNodeSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComputeNodeSettingsView.swift; sourceTree = "<group>"; };
 		F973AB6FF510D8DED2F212BC /* NoteReviewPreview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteReviewPreview.swift; sourceTree = "<group>"; };
 		FB0B9C8761588D1DEF763E50 /* NoteQuerySheetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteQuerySheetView.swift; sourceTree = "<group>"; };
@@ -331,8 +337,10 @@
 				50B24792B8487B5D8E5833CD /* MathAssistanceView.swift */,
 				07D6428F2835D5D270587135 /* NotebookView.swift */,
 				D0B720938C61EE02FC5D5A7A /* NotebookVisualStyle.swift */,
+				F71473C0BC549E14DF27F39F /* NoteCanvasImageRenderer.swift */,
 				B279FE27DE285AD320383789 /* NoteEditorView.swift */,
 				D6B09408C06D37900F55E5AC /* NoteFindInNoteView.swift */,
+				6B791ADD645AD913AB8F4F02 /* NoteImageEditorView.swift */,
 				AF1D4227ED61AF474A8A9F9E /* NotePageManagerView.swift */,
 				77B3805565CF9C5E40505BCF /* NoteQueryArtifactsView.swift */,
 				FB0B9C8761588D1DEF763E50 /* NoteQuerySheetView.swift */,
@@ -380,6 +388,7 @@
 				6D596908EB59446C1A5DE9C2 /* AccountStorageLocatorTests.swift */,
 				6F1E4086C7FDF893EA78CE43 /* AIProviderProfileStoreTests.swift */,
 				9DB9152EBDDEC2EE344EF519 /* EpistoriaExportServiceTests.swift */,
+				2D728728FA6ED995D0FFF0EB /* NoteImageEditingTests.swift */,
 				9F5E9EDA6F3C5E53A7A9D068 /* NotePDFExportServiceTests.swift */,
 				A4A9C2EECA501629A0A6DE66 /* PendingSaveRegistryTests.swift */,
 				A36B20FA305B052E3436C24B /* SpatialNotebookCanvasTests.swift */,
@@ -539,8 +548,10 @@
 				E8081700DD0553C4C566DB83 /* LocalProcessingSettingsView.swift in Sources */,
 				38FF542450110EB44BB72227 /* LocalTextOCRService.swift in Sources */,
 				BB890C71994E1892269D508B /* MathAssistanceView.swift in Sources */,
+				7F821565D9E9FF7895AAC960 /* NoteCanvasImageRenderer.swift in Sources */,
 				E8739243E0E6F49401DB4C3F /* NoteEditorView.swift in Sources */,
 				EFD9BBBBB498140A5267BAFC /* NoteFindInNoteView.swift in Sources */,
+				A3579CA6BB5CC1F9266C32BA /* NoteImageEditorView.swift in Sources */,
 				13A7DC2EA6C84AD2D52D7630 /* NotePDFExportService.swift in Sources */,
 				3AF39C22EB1EF78390180475 /* NotePageManagerView.swift in Sources */,
 				C7F469E7A36215F10F524E12 /* NoteQueryArtifactsView.swift in Sources */,
@@ -573,6 +584,7 @@
 				E14B4009C652B01AA6C6E50D /* AIProviderProfileStoreTests.swift in Sources */,
 				99CD9B1D16B8674E84C0C4A7 /* AccountStorageLocatorTests.swift in Sources */,
 				3E66A6A86E116DD30AD26D1B /* EpistoriaExportServiceTests.swift in Sources */,
+				17076DDF89CCBE9ABCD6C8F6 /* NoteImageEditingTests.swift in Sources */,
 				5BA923E33DD56FC8E15298F9 /* NotePDFExportServiceTests.swift in Sources */,
 				4AB03CD64DBD7DD0C95F2E38 /* PendingSaveRegistryTests.swift in Sources */,
 				310DAC23F2F5C4420FAFB8B7 /* SpatialNotebookCanvasTests.swift in Sources */,

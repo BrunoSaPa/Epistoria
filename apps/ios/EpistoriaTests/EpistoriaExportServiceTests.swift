@@ -1,4 +1,5 @@
 import EpistoriaCore
+import UIKit
 import XCTest
 
 @testable import Epistoria
@@ -158,6 +159,25 @@ final class EpistoriaExportServiceTests: XCTestCase {
             filename: importedImage.filename,
             placement: NoteCanvasPlacement(x: 40, y: 80, width: 240, height: 180, zIndex: 2),
             pageIndex: 1
+        )
+        let replacementPNG = UIGraphicsImageRenderer(size: CGSize(width: 2, height: 1)).pngData {
+            UIColor.black.setFill()
+            $0.fill(CGRect(x: 0, y: 0, width: 1, height: 1))
+            UIColor.white.setFill()
+            $0.fill(CGRect(x: 1, y: 0, width: 1, height: 1))
+        }
+        let replacementImageURL = fixture.root.appendingPathComponent("diagram-replacement.png")
+        try replacementPNG.write(to: replacementImageURL, options: .atomic)
+        let replacementImage = try await fixture.assetManager.importImage(from: replacementImageURL)
+        _ = try await fixture.store.updateCanvasImage(
+            id: imageItemId,
+            configuration: NoteCanvasImageConfiguration(
+                crop: NoteCanvasImageCrop(x: 0.25, y: 0, width: 0.75, height: 1),
+                mask: .ellipse,
+                rotationQuarterTurns: 1
+            ),
+            replacementAssetId: replacementImage.assetId,
+            replacementFilename: replacementImage.filename
         )
 
         let pdf = Data("%PDF-1.4\n% Epistoria portability test\n%%EOF\n".utf8)
@@ -351,6 +371,13 @@ final class EpistoriaExportServiceTests: XCTestCase {
                 )),
             png
         )
+        XCTAssertEqual(
+            try Data(
+                contentsOf: package.appendingPathComponent(
+                    "notes/images/\(replacementImage.assetId.uuidString.lowercased()).png"
+                )),
+            replacementPNG
+        )
         let canvasAssets = try String(
             contentsOf: package.appendingPathComponent("notes/canvas-assets.json"),
             encoding: .utf8
@@ -358,6 +385,10 @@ final class EpistoriaExportServiceTests: XCTestCase {
         XCTAssertTrue(canvasAssets.lowercased().contains(imageItemId.uuidString.lowercased()))
         XCTAssertTrue(
             canvasAssets.lowercased().contains(importedImage.assetId.uuidString.lowercased()))
+        XCTAssertTrue(
+            canvasAssets.lowercased().contains(replacementImage.assetId.uuidString.lowercased()))
+        XCTAssertTrue(canvasAssets.contains("DISPLAYED_IMAGE"))
+        XCTAssertTrue(canvasAssets.contains("FIRST_IMAGE"))
         XCTAssertTrue(canvasAssets.contains("notes/images/"))
         let noteRecord = try String(
             contentsOf: package.appendingPathComponent(
@@ -367,6 +398,8 @@ final class EpistoriaExportServiceTests: XCTestCase {
         )
         XCTAssertTrue(noteRecord.contains("\"pageCount\" : 2"))
         XCTAssertTrue(noteRecord.contains("\"canvasPageIndex\" : 1"))
+        XCTAssertTrue(noteRecord.contains("\"schemaVersion\" : \"note-block/v7\""))
+        XCTAssertTrue(noteRecord.contains("\"imageConfiguration\""))
         let metadata = try String(
             contentsOf: package.appendingPathComponent("metadata.json"), encoding: .utf8)
         let taxonomy = try String(
@@ -375,7 +408,7 @@ final class EpistoriaExportServiceTests: XCTestCase {
             contentsOf: package.appendingPathComponent("knowledge.json"), encoding: .utf8)
         let learning = try String(
             contentsOf: package.appendingPathComponent("learning.json"), encoding: .utf8)
-        XCTAssertTrue(metadata.contains("epistoria-export/6"))
+        XCTAssertTrue(metadata.contains("epistoria-export/7"))
         let entities = try String(
             contentsOf: package.appendingPathComponent("entities.json"),
             encoding: .utf8
@@ -515,7 +548,7 @@ final class EpistoriaExportServiceTests: XCTestCase {
         XCTAssertTrue(knowledge.contains("Owner-corrected transcript text."))
     }
 
-    func testVersionFiveExportRestoresStableRecordsAndHistoricalAssetsIntoCleanAccount()
+    func testCurrentExportRestoresStableRecordsAndHistoricalAssetsIntoCleanAccount()
         async throws
     {
         let source = try makeFixture()

@@ -31,6 +31,8 @@ following options:
 - Plain, ruled, grid, or dotted paper.
 - Stable fixed pages with page-local PencilKit ink, or one infinite canvas.
 - Movable, resizable, rotatable, and layered text and image items.
+- Non-destructive image crop, quarter-turn rotation, rounded and oval masks, replacement, and
+  restoration of the first encrypted image.
 
 The app also provides:
 
@@ -47,7 +49,8 @@ The app also provides:
 - Optional encrypted synchronization through a private server.
 - Explicit conflict review that preserves concurrent versions.
 - A readable ZIP export with JSON, original files, PencilKit data, and SHA-256 checksums.
-- Validated version 5 and 6 export import into an empty notebook under a new local encryption key.
+- Validated version 5, 6, and 7 export import into an empty notebook under a new local encryption
+  key.
 - AI provider management for OpenAI, Anthropic, Gemini, and OpenAI-compatible local or hosted
   endpoints, with device-only Keychain storage.
 - An Adaptive Tutor that keeps durable encrypted transcripts, cites frozen Source Versions, and
@@ -159,8 +162,8 @@ The repository is a personal beta candidate. The following automated checks pass
 
 - `make verify`
 - Full unsigned iOS Simulator bundle build, including assets and the privacy manifest
-- 118 Swift Core tests
-- 53 iOS app tests and 2 accessibility UI tests on an iPad Pro 11-inch Simulator
+- 119 Swift Core tests
+- 56 iOS app tests and 2 accessibility UI tests on an iPad Pro 13-inch Simulator
 - 7 API unit tests
 - 89 optional Compute Node worker tests
 

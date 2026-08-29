@@ -441,8 +441,22 @@ public extension EpistoriaStore {
     }
 
     func markOCRArtifactsStale(targetId: UUID, exceptInputRevision: Int) async throws {
+        let writes = try await ocrArtifactWritesMarkingStale(
+            targetId: targetId,
+            exceptInputRevision: exceptInputRevision
+        )
+        try await database.saveLocalBatch(writes)
+    }
+
+    /// Builds stale-artifact writes so a content replacement can save its new reference and
+    /// remove obsolete recognition from derived search in one local transaction.
+    func ocrArtifactWritesMarkingStale(
+        targetId: UUID,
+        exceptInputRevision: Int,
+        modifiedAt: Date = .now
+    ) async throws -> [LocalEntityWrite] {
         let entities = try await database.entities(type: .recognitionArtifact)
-        var artifacts: [(UUID, OCRArtifactPayload)] = []
+        var writes: [LocalEntityWrite] = []
         for entity in entities {
             guard var artifact = try? CanonicalJSON.decode(
                 OCRArtifactPayload.self,
@@ -452,20 +466,21 @@ public extension EpistoriaStore {
                 artifact.state == .current
             else { continue }
             artifact.state = .stale
-            artifacts.append((entity.id, artifact))
-        }
-        for (id, artifact) in artifacts {
             let content = try CanonicalJSON.encode(artifact)
-            _ = try await database.saveLocal(
-                id: id,
+            writes.append(LocalEntityWrite(
+                id: entity.id,
                 entityType: .recognitionArtifact,
                 parentId: artifact.parentId,
                 relationIds: [artifact.targetId, artifact.noteId, artifact.sourceVersionId].compactMap(\.self),
                 content: content,
-                searchProjection: Self.ocrSearchProjection(artifactId: id, artifact: artifact),
-                modifiedAt: artifact.updatedAt
-            )
+                searchProjection: Self.ocrSearchProjection(
+                    artifactId: entity.id,
+                    artifact: artifact
+                ),
+                modifiedAt: modifiedAt
+            ))
         }
+        return writes
     }
 
     func reviewOCRArtifact(id: UUID, state: AIArtifactReviewState) async throws {
@@ -632,7 +647,7 @@ public extension EpistoriaStore {
         _ = try await database.rebuildSemanticSearchIndex(batchLimit: 256)
     }
 
-    private static func ocrSearchProjection(
+    static func ocrSearchProjection(
         artifactId: UUID,
         artifact: OCRArtifactPayload,
         resolvedRegions: [ResolvedOCRRegion]? = nil

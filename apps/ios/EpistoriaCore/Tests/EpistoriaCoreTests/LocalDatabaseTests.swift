@@ -338,6 +338,112 @@ final class LocalDatabaseTests: XCTestCase {
         XCTAssertNil(encrypted.range(of: png))
     }
 
+    func testCanvasImageEditsRemainNonDestructiveAndDurable() async throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let databaseURL = directory.appendingPathComponent("image-edits.sqlite")
+        let key = Data(repeating: 73, count: 32)
+        let database = try SQLCipherDatabase(url: databaseURL, key: key)
+        let store = EpistoriaStore(database: database)
+        let originalAssetId = UUID()
+        let replacementAssetId = UUID()
+        for (id, filename) in [
+            (originalAssetId, "original.png"),
+            (replacementAssetId, "replacement.png"),
+        ] {
+            _ = try await store.save(
+                id: id,
+                payload: AssetPayload(
+                    mimeType: "image/png",
+                    plaintextByteSize: 100,
+                    encryptedByteSize: 140,
+                    dedupeTag: id.uuidString.lowercased(),
+                    assetKey: "fixture/\(id.uuidString.lowercased())",
+                    originalFilename: filename
+                )
+            )
+        }
+        let noteId = try await store.createNote(title: "Non-destructive image")
+        let imageId = try await store.appendCanvasImage(
+            noteId: noteId,
+            assetId: originalAssetId,
+            filename: "original.png",
+            placement: NoteCanvasPlacement(x: 30, y: 40, width: 400, height: 300)
+        )
+        let originalOCRRevision = try await store.payload(NoteBlockPayload.self, id: imageId)
+            .payload.ocrInputRevision
+        let artifactId = try await store.saveOCRArtifact(
+            request: LocalOCRRequest(
+                accountId: UUID(),
+                targetKind: .notebookRegion,
+                targetId: imageId,
+                parentId: noteId,
+                noteId: noteId,
+                inputRevision: originalOCRRevision,
+                imageData: Data("original image crop".utf8),
+                mode: .text
+            ),
+            response: LocalOCRResponse(
+                engine: .deterministic,
+                engineVersion: "fixture/v1",
+                regions: [
+                    LocalOCRRegion(
+                        kind: .text,
+                        text: "recognition that must become stale"
+                    ),
+                ]
+            )
+        )
+        let configuration = NoteCanvasImageConfiguration(
+            crop: NoteCanvasImageCrop(x: 0.12, y: 0.18, width: 0.72, height: 0.64),
+            mask: .roundedRectangle,
+            roundedCornerFraction: 0.2,
+            rotationQuarterTurns: -1
+        )
+        _ = try await store.updateCanvasImage(
+            id: imageId,
+            configuration: configuration,
+            replacementAssetId: replacementAssetId,
+            replacementFilename: "replacement.png"
+        )
+
+        let reopened = EpistoriaStore(database: try SQLCipherDatabase(url: databaseURL, key: key))
+        var image = try await reopened.payload(NoteBlockPayload.self, id: imageId)
+        let storedConfiguration = try XCTUnwrap(image.payload.imageConfiguration)
+        XCTAssertEqual(image.payload.schemaVersion, "note-block/v7")
+        XCTAssertEqual(image.payload.assetId, replacementAssetId)
+        XCTAssertEqual(image.payload.plainText, "replacement.png")
+        XCTAssertEqual(storedConfiguration.crop, configuration.crop)
+        XCTAssertEqual(storedConfiguration.mask, .roundedRectangle)
+        XCTAssertEqual(storedConfiguration.roundedCornerFraction, 0.2)
+        XCTAssertEqual(storedConfiguration.rotationQuarterTurns, 3)
+        XCTAssertEqual(storedConfiguration.originalAssetId, originalAssetId)
+        XCTAssertNotEqual(image.payload.ocrInputRevision, originalOCRRevision)
+        let staleArtifact = try await reopened.payload(OCRArtifactPayload.self, id: artifactId)
+        let staleSearch = try await reopened.database.search("must become stale")
+        XCTAssertEqual(staleArtifact.payload.state, .stale)
+        XCTAssertTrue(staleSearch.isEmpty)
+        let storedEntity = try await reopened.database.entity(id: imageId)
+        let entity = try XCTUnwrap(storedEntity)
+        XCTAssertTrue(entity.relationIds.contains(originalAssetId))
+        XCTAssertTrue(entity.relationIds.contains(replacementAssetId))
+
+        _ = try await reopened.updateCanvasImage(
+            id: imageId,
+            configuration: NoteCanvasImageConfiguration(originalAssetId: originalAssetId),
+            replacementAssetId: originalAssetId,
+            replacementFilename: "original.png"
+        )
+        image = try await reopened.payload(NoteBlockPayload.self, id: imageId)
+        XCTAssertEqual(image.payload.assetId, originalAssetId)
+        XCTAssertEqual(image.payload.imageConfiguration?.originalAssetId, originalAssetId)
+        XCTAssertTrue(image.payload.imageConfiguration?.crop.isFullFrame == true)
+        XCTAssertEqual(image.payload.ocrInputRevision, originalOCRRevision)
+        let storedRestoredEntity = try await reopened.database.entity(id: imageId)
+        let restoredEntity = try XCTUnwrap(storedRestoredEntity)
+        XCTAssertEqual(restoredEntity.relationIds, [noteId, originalAssetId])
+    }
+
     func testSpatialSchemasDecodeLegacyNotesWithoutDiscardingContent() throws {
         let legacyNote = """
         {
@@ -1530,7 +1636,7 @@ final class LocalDatabaseTests: XCTestCase {
         let allEvidence = try await store.list(EvidencePayload.self)
         let backlinks = try await store.evidenceBacklinks(evidenceId: evidenceId)
 
-        XCTAssertEqual(block.payload.schemaVersion, "note-block/v6")
+        XCTAssertEqual(block.payload.schemaVersion, "note-block/v7")
         XCTAssertEqual(block.payload.evidenceId, evidenceId)
         XCTAssertEqual(evidence.payload.sourceVersionId, versionId)
         XCTAssertEqual(allEvidence.count, 1)

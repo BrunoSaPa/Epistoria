@@ -583,7 +583,7 @@ public actor EpistoriaStore {
         for identified in blocks {
             var block = identified.payload
             let index = min(max(block.canvasPageIndex ?? 0, 0), count - 1)
-            block.schemaVersion = "note-block/v6"
+            block.schemaVersion = "note-block/v7"
             block.canvasPageId = pageIds[index]
             block.updatedAt = .now
             writes.append(try localWrite(
@@ -714,7 +714,7 @@ public actor EpistoriaStore {
         var writes = try pageOrderWrites(pages, at: date)
         for source in sourceBlocks {
             var copy = source.payload
-            copy.schemaVersion = "note-block/v6"
+            copy.schemaVersion = "note-block/v7"
             copy.canvasPageId = newPageId
             copy.createdAt = date
             copy.updatedAt = date
@@ -911,7 +911,7 @@ public actor EpistoriaStore {
             }
             throw StoreError.entityNotFound
         }
-        block.payload.schemaVersion = "note-block/v6"
+        block.payload.schemaVersion = "note-block/v7"
         block.payload.tombstone = true
         block.payload.updatedAt = date
         let trashId = UUID()
@@ -1086,7 +1086,14 @@ public actor EpistoriaStore {
     }
 
     private func noteBlockRelationIds(_ block: NoteBlockPayload, pageId: UUID?) -> [UUID] {
-        [block.noteId, pageId, block.assetId, block.evidenceId].compactMap(\ .self)
+        var seen = Set<UUID>()
+        return [
+            block.noteId,
+            pageId,
+            block.assetId,
+            block.imageConfiguration?.originalAssetId,
+            block.evidenceId,
+        ].compactMap(\ .self).filter { seen.insert($0).inserted }
     }
 
     private static func notePageOrderKey(_ index: Int) -> String {
@@ -1338,14 +1345,69 @@ public actor EpistoriaStore {
             plainText: filename
         )
         block.assetId = assetId
+        block.imageConfiguration = NoteCanvasImageConfiguration()
         block.canvasPlacement = placement
         block.canvasPageIndex = max(pageIndex, 0)
         block.canvasPageId = pageId
         return try await save(
             payload: block,
             parentId: noteId,
-            relationIds: [noteId, pageId, assetId].compactMap(\ .self)
+            relationIds: noteBlockRelationIds(block, pageId: pageId)
         )
+    }
+
+    /// Updates only image presentation metadata and, when requested, changes the immutable asset
+    /// reference. The first asset remains related to the block so replacement is reversible.
+    @discardableResult
+    public func updateCanvasImage(
+        id: UUID,
+        configuration: NoteCanvasImageConfiguration,
+        replacementAssetId: UUID? = nil,
+        replacementFilename: String? = nil,
+        at date: Date = .now
+    ) async throws -> UUID {
+        var block = try await payload(NoteBlockPayload.self, id: id)
+        guard block.payload.blockType == .image,
+              let currentAssetId = block.payload.assetId
+        else { throw StoreError.entityNotFound }
+
+        var changedConfiguration = configuration.sanitized
+        var replacesRecognitionInput = false
+        if let replacementAssetId {
+            _ = try await payload(AssetPayload.self, id: replacementAssetId)
+            replacesRecognitionInput = replacementAssetId != currentAssetId
+            if changedConfiguration.originalAssetId == nil,
+               replacementAssetId != currentAssetId
+            {
+                changedConfiguration.originalAssetId = currentAssetId
+            }
+            block.payload.assetId = replacementAssetId
+            if let replacementFilename {
+                let trimmed = replacementFilename.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty { block.payload.plainText = String(trimmed.prefix(240)) }
+            }
+        }
+        if let originalAssetId = changedConfiguration.originalAssetId {
+            _ = try await payload(AssetPayload.self, id: originalAssetId)
+        }
+        block.payload.schemaVersion = "note-block/v7"
+        block.payload.imageConfiguration = changedConfiguration.sanitized
+        block.payload.updatedAt = date
+        var writes = try [localWrite(
+            id: id,
+            payload: block.payload,
+            parentId: block.payload.noteId,
+            relationIds: noteBlockRelationIds(block.payload, pageId: block.payload.canvasPageId)
+        )]
+        if replacesRecognitionInput {
+            writes.append(contentsOf: try await ocrArtifactWritesMarkingStale(
+                targetId: id,
+                exceptInputRevision: block.payload.ocrInputRevision,
+                modifiedAt: date
+            ))
+        }
+        try await database.saveLocalBatch(writes)
+        return id
     }
 
     @discardableResult

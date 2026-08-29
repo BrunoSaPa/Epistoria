@@ -51,7 +51,7 @@ actor EpistoriaExportService {
     }
 
     private struct Metadata: Codable {
-        var formatVersion = "epistoria-export/6"
+        var formatVersion = "epistoria-export/7"
         var exportedAt: Date
         var accountId: UUID
         var mode = "DECRYPTED"
@@ -134,6 +134,7 @@ actor EpistoriaExportService {
     }
 
     private struct CanvasAssetRecord: Codable {
+        var role: String
         var noteId: UUID
         var itemId: UUID
         var assetId: UUID
@@ -430,30 +431,44 @@ actor EpistoriaExportService {
                     )
                 }
                 if block.payload.blockType == .image, let assetId = block.payload.assetId {
-                    let metadata = try await store.payload(AssetPayload.self, id: assetId).payload
-                    let relativePath: String
-                    if let existing = exportedAssetPaths[assetId] {
-                        relativePath = existing
-                    } else {
-                        let filename = "\(assetId.uuidString.lowercased()).\(imageExtension(for: metadata.mimeType))"
-                        relativePath = "notes/images/\(filename)"
-                        let plaintext = try await assetManager.decryptedData(assetId: assetId)
-                        try protectedWrite(
-                            plaintext,
-                            to: imagesDirectory.appendingPathComponent(filename)
-                        )
-                        exportedAssetPaths[assetId] = relativePath
+                    var referencedAssets = [(assetId: assetId, role: "DISPLAYED_IMAGE")]
+                    if let originalAssetId = block.payload.imageConfiguration?.originalAssetId,
+                       originalAssetId != assetId
+                    {
+                        referencedAssets.append((assetId: originalAssetId, role: "FIRST_IMAGE"))
                     }
-                    canvasAssets.append(
-                        CanvasAssetRecord(
-                            noteId: note.id,
-                            itemId: block.id,
-                            assetId: assetId,
-                            originalFilename: metadata.originalFilename,
-                            mimeType: metadata.mimeType,
-                            relativePath: relativePath
+                    for reference in referencedAssets {
+                        let metadata = try await store.payload(
+                            AssetPayload.self,
+                            id: reference.assetId
+                        ).payload
+                        let relativePath: String
+                        if let existing = exportedAssetPaths[reference.assetId] {
+                            relativePath = existing
+                        } else {
+                            let filename = "\(reference.assetId.uuidString.lowercased()).\(imageExtension(for: metadata.mimeType))"
+                            relativePath = "notes/images/\(filename)"
+                            let plaintext = try await assetManager.decryptedData(
+                                assetId: reference.assetId
+                            )
+                            try protectedWrite(
+                                plaintext,
+                                to: imagesDirectory.appendingPathComponent(filename)
+                            )
+                            exportedAssetPaths[reference.assetId] = relativePath
+                        }
+                        canvasAssets.append(
+                            CanvasAssetRecord(
+                                role: reference.role,
+                                noteId: note.id,
+                                itemId: block.id,
+                                assetId: reference.assetId,
+                                originalFilename: metadata.originalFilename,
+                                mimeType: metadata.mimeType,
+                                relativePath: relativePath
+                            )
                         )
-                    )
+                    }
                 }
             }
         }
@@ -880,6 +895,7 @@ actor EpistoriaExportService {
         guard [
             "epistoria-export/1", "epistoria-export/2", "epistoria-export/3",
             "epistoria-export/4", "epistoria-export/5", "epistoria-export/6",
+            "epistoria-export/7",
         ].contains(metadata.formatVersion),
               metadata.mode == "DECRYPTED",
               (!requireMatchingAccount || metadata.accountId == accountId)
@@ -888,15 +904,19 @@ actor EpistoriaExportService {
         }
         if [
             "epistoria-export/2", "epistoria-export/3", "epistoria-export/4",
-            "epistoria-export/5", "epistoria-export/6",
+            "epistoria-export/5", "epistoria-export/6", "epistoria-export/7",
         ].contains(metadata.formatVersion) {
             required.append("notes/canvas-assets.json")
         }
-        if ["epistoria-export/3", "epistoria-export/4", "epistoria-export/5", "epistoria-export/6"]
+        if [
+            "epistoria-export/3", "epistoria-export/4", "epistoria-export/5",
+            "epistoria-export/6", "epistoria-export/7",
+        ]
             .contains(metadata.formatVersion) {
             required.append(contentsOf: ["taxonomy.json", "knowledge.json", "learning.json"])
         }
-        if ["epistoria-export/5", "epistoria-export/6"].contains(metadata.formatVersion) {
+        if ["epistoria-export/5", "epistoria-export/6", "epistoria-export/7"]
+            .contains(metadata.formatVersion) {
             required.append("entities.json")
         }
         for path in required where !fileManager.fileExists(

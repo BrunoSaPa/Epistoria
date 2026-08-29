@@ -65,7 +65,11 @@ struct SpatialNotebookItem: Identifiable {
     enum Content {
         case text(NSAttributedString)
         case evidence(NSAttributedString, citation: String)
-        case image(UIImage, filename: String)
+        case image(
+            UIImage,
+            filename: String,
+            configuration: NoteCanvasImageConfiguration?
+        )
         case legacyDrawing(PKDrawing)
         case shape(NoteCanvasShape)
         case unsupported(String)
@@ -709,11 +713,12 @@ final class SpatialNotebookHostView: UIView, UIScrollViewDelegate, PKCanvasViewD
                 if let image = cropDrawing(drawing, to: local) {
                     drawingImages[item.id] = image
                 }
-            } else if case let .image(image, _) = item.content {
+            } else if case let .image(image, _, configuration) = item.content {
                 let intersection = itemRect.intersection(worldRect)
                 let local = intersection.offsetBy(dx: -itemRect.minX, dy: -itemRect.minY)
                 if let encoded = selectionPNG(
                     from: image,
+                    configuration: configuration,
                     itemSize: itemRect.size,
                     cropRect: local
                 )
@@ -885,10 +890,16 @@ final class SpatialNotebookHostView: UIView, UIScrollViewDelegate, PKCanvasViewD
 
     private func selectionPNG(
         from image: UIImage,
+        configuration: NoteCanvasImageConfiguration?,
         itemSize: CGSize,
         cropRect: CGRect
     ) -> Data? {
         guard itemSize.width > 0, itemSize.height > 0, !cropRect.isEmpty else { return nil }
+        let image = NoteCanvasImageRenderer.transformedImage(
+            image,
+            configuration: configuration,
+            maximumDimension: 1_600
+        )
         var maximumDimension: CGFloat = 1_600
         for _ in 0 ..< 5 {
             let selectionScale = min(
@@ -1238,9 +1249,12 @@ private final class CanvasItemView: UIView, UITextViewDelegate, UIGestureRecogni
                 isApplyingText = false
             }
             accessibilityLabel = "Evidence from \(citation)"
-        case let .image(image, filename):
+        case let .image(image, filename, configuration):
             imageView.isHidden = false
-            imageView.image = image
+            imageView.image = NoteCanvasImageRenderer.transformedImage(
+                image,
+                configuration: configuration
+            )
             accessibilityLabel = "Image, \(filename)"
         case let .legacyDrawing(drawing):
             imageView.isHidden = false
