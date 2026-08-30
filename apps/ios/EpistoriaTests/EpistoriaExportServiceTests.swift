@@ -83,6 +83,52 @@ final class EpistoriaExportServiceTests: XCTestCase {
         XCTAssertFalse(entities.contains("unreviewed OCR text"))
     }
 
+    func testDailyEvidenceReviewResponseExportsWithoutQueueText() async throws {
+        let fixture = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let topicId = try await fixture.store.createTopic(name: "Geometry")
+        let sourceId = try await fixture.store.save(
+            payload: SourcePayload(
+                sourceType: .pdf,
+                title: "Synthetic geometry source",
+                primaryTopicId: topicId
+            ),
+            parentId: topicId,
+            relationIds: [topicId]
+        )
+        let queueOnlyText = "A triangle's interior angles total 180 degrees."
+        let evidenceId = try await fixture.store.save(
+            payload: EvidencePayload(
+                sourceId: sourceId,
+                sourceVersionId: UUID(),
+                kind: .excerpt,
+                locator: SourceLocator(kind: .pdf, page: 3),
+                excerpt: queueOnlyText
+            ),
+            parentId: sourceId,
+            relationIds: [sourceId]
+        )
+        let responseId = try await fixture.store.recordDailyReviewResponse(
+            itemKind: .evidence,
+            targetId: evidenceId,
+            action: .difficult,
+            at: Date(timeIntervalSince1970: 1_788_000_000)
+        )
+
+        let package = try await fixture.service.prepareDecryptedDirectoryForTesting(
+            includingDerivedAI: false
+        )
+        defer { try? FileManager.default.removeItem(at: package.deletingLastPathComponent()) }
+        let learning = try String(
+            contentsOf: package.appendingPathComponent("learning.json"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(learning.lowercased().contains(responseId.uuidString.lowercased()))
+        XCTAssertTrue(learning.contains(DailyReviewAction.difficult.rawValue))
+        XCTAssertFalse(learning.contains(queueOnlyText))
+    }
+
     func testDecryptedExportIsCompleteExcludesKeysAndIsRemovable() async throws {
         let fixture = try makeFixture()
         defer { try? FileManager.default.removeItem(at: fixture.root) }

@@ -100,6 +100,7 @@ actor EpistoriaExportService {
         var testQuestions: [Record<TestQuestionPayload>]
         var testAttempts: [Record<TestAttemptPayload>]
         var testResponses: [Record<TestResponsePayload>]
+        var dailyReviewResponses: [Record<DailyReviewResponsePayload>]
         var recommendations: [Record<StudyRecommendationPayload>]
         var recommendationResponses: [Record<RecommendationResponsePayload>]
         var automationGrants: [Record<AutomationGrantPayload>]
@@ -706,6 +707,7 @@ actor EpistoriaExportService {
         async let questions = store.list(TestQuestionPayload.self)
         async let attempts = store.list(TestAttemptPayload.self)
         async let responses = store.list(TestResponsePayload.self)
+        async let dailyReviewResponses = store.list(DailyReviewResponsePayload.self)
         async let recommendations = store.list(StudyRecommendationPayload.self)
         async let recommendationResponses = store.list(RecommendationResponsePayload.self)
         async let grants = store.list(AutomationGrantPayload.self)
@@ -726,6 +728,7 @@ actor EpistoriaExportService {
             testQuestions: questions.map { Record(id: $0.id, payload: $0.payload) },
             testAttempts: attempts.map { Record(id: $0.id, payload: $0.payload) },
             testResponses: responses.map { Record(id: $0.id, payload: $0.payload) },
+            dailyReviewResponses: dailyReviewResponses.map { Record(id: $0.id, payload: $0.payload) },
             recommendations: recommendations.map { Record(id: $0.id, payload: $0.payload) },
             recommendationResponses: recommendationResponses.map { Record(id: $0.id, payload: $0.payload) },
             automationGrants: grants.map { Record(id: $0.id, payload: $0.payload) },

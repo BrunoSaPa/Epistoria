@@ -322,6 +322,14 @@ require representative device validation.
 - Open each weekly review row at the related Topic, goal, unresolved question, or recommended work
   item. Difficult-material signals remain separate counts for card ratings, incorrect answers,
   and low-confidence answers.
+- Open **Learning → Overview → Daily Evidence Review** to review saved Evidence, difficult
+  Concepts, and earlier test mistakes without AI.
+- Use **Remembered**, **Difficult**, or **Later** to add an encrypted review response and schedule
+  the item again. The response does not change the original Evidence, Concept, or test attempt.
+- Reveal the saved Concept description or frozen test answer, then open supporting Evidence at the
+  exact Source Version and location.
+- Open a due Daily Evidence Review directly from Today. Nothing appears on Today when no item is
+  due.
 - Use Topic Studio to review the exact Topic scope before requesting cited synthesis, flashcard
   drafts, test work, Concept suggestions, or a weekly review.
 - Run those manual Topic Studio requests directly from the iPad without a Compute Node. Invalid

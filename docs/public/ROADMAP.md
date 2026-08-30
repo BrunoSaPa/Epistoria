@@ -134,6 +134,9 @@ Completed:
 30. Optional deadline-aware learning plans extend dated goals with owner-managed coverage,
    selected study days, preferred daily minutes, missed-work catch-up, linked test evidence, and
    explained local readiness. Simple goals remain unchanged.
+31. Daily Evidence Review selects saved Evidence, difficult Concepts, and the latest unresolved
+   test mistakes on the iPad. Review responses are encrypted and append-only. Supporting Evidence
+   opens at the frozen Source Version and locator. No provider or Compute Node is used.
 
 Next stages:
 
@@ -149,9 +152,9 @@ the app.
 
 ### Next
 
-- Add a daily Evidence review that can resurface highlights, difficult Concepts, and earlier
-  mistakes without AI. Add reusable Studio recipes defined by the notebook owner. This direction
-  is informed by Readwise.
+- Add reusable Studio recipes defined by the notebook owner. A recipe must keep an explicit scope,
+  provider disclosure, output schema, and review requirement. This direction is informed by
+  Readwise.
 
 ### Later
 

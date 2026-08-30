@@ -71,6 +71,17 @@ Epistoria remains in personal beta. The following limits apply to the current pr
 - Calendar, locale, two-device conflict, and large-plan interaction still require physical-iPad
   validation.
 
+## Daily Evidence Review
+
+- The review uses fixed local intervals. Custom schedules and per-Topic queue limits are not
+  available.
+- A difficult Concept appears only when linked Evidence also appears in the latest difficult card
+  or test result. Epistoria does not infer Concept difficulty from names or generated mastery.
+- Earlier mistakes come from the latest submitted response for a frozen test question. A later
+  correct response removes the older mistake from the queue.
+- Queue interaction, exact Source return, VoiceOver order, calendar changes, and concurrent review
+  responses still require physical-iPad validation.
+
 ## Device validation
 
 - Physical iPad Pencil, large-file, accessibility, rotation, multitasking, keyboard, and pointer

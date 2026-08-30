@@ -94,6 +94,7 @@ struct StudyView: View {
     @State private var unresolved: [IdentifiedPayload<UnresolvedQuestionPayload>] = []
     @State private var recommendations: [IdentifiedPayload<StudyRecommendationPayload>] = []
     @State private var recommendationResponses: [IdentifiedPayload<RecommendationResponsePayload>] = []
+    @State private var dailyReviewQueue = DailyEvidenceReviewQueue.empty
     @State private var openedRecommendationDestination: StudyRecommendationDestination?
     @State private var errorMessage: String?
 
@@ -135,6 +136,7 @@ struct StudyView: View {
                     switch section {
                     case .overview:
                         studyNextContent
+                        dailyEvidenceReviewContent
                         weeklyReviewContent
                     case .sessions: sessionsContent
                     case .review:
@@ -493,6 +495,25 @@ struct StudyView: View {
         }
     }
 
+    @ViewBuilder private var dailyEvidenceReviewContent: some View {
+        Section("Daily Evidence Review") {
+            NavigationLink {
+                DailyEvidenceReviewView(model: model)
+            } label: {
+                StudyRow(
+                    title: dailyReviewQueue.totalDueCount == 0
+                        ? "Nothing due"
+                        : "Review \(dailyReviewQueue.totalDueCount) item\(dailyReviewQueue.totalDueCount == 1 ? "" : "s")",
+                    detail: dailyReviewDetail,
+                    symbol: dailyReviewQueue.totalDueCount == 0 ? "checkmark.circle" : "quote.bubble"
+                )
+            }
+            Text("Selected locally from saved Evidence, difficult Concepts, and earlier mistakes. No AI or Compute Node is used.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
     @ViewBuilder private var sessionsContent: some View {
         Section {
             NavigationLink {
@@ -613,6 +634,17 @@ struct StudyView: View {
         )
     }
 
+    private var dailyReviewDetail: String {
+        guard dailyReviewQueue.totalDueCount > 0 else {
+            return "Saved material will appear here when it is due"
+        }
+        return [
+            dailyReviewQueue.evidenceDueCount == 0 ? nil : "\(dailyReviewQueue.evidenceDueCount) Evidence",
+            dailyReviewQueue.conceptDueCount == 0 ? nil : "\(dailyReviewQueue.conceptDueCount) Concept\(dailyReviewQueue.conceptDueCount == 1 ? "" : "s")",
+            dailyReviewQueue.mistakeDueCount == 0 ? nil : "\(dailyReviewQueue.mistakeDueCount) mistake\(dailyReviewQueue.mistakeDueCount == 1 ? "" : "s")",
+        ].compactMap { $0 }.joined(separator: " · ")
+    }
+
     private var rankedRecommendations: [LocalStudyRecommendation] {
         let ranked = StudyNextEngine.rank(
             topics: topics,
@@ -722,7 +754,8 @@ struct StudyView: View {
             async let j = store.list(StudyRecommendationPayload.self)
             async let k = store.list(RecommendationResponsePayload.self)
             async let l = store.list(TestResponsePayload.self)
-            let value = try await (a, b, c, d, e, f, g, h, i, j, k, l)
+            async let m = store.dailyEvidenceReviewQueue(now: .now)
+            let value = try await (a, b, c, d, e, f, g, h, i, j, k, l, m)
             topics = value.0
             sessions = value.1.sorted { $0.payload.startedAt > $1.payload.startedAt }
             cards = value.2
@@ -735,6 +768,7 @@ struct StudyView: View {
             recommendations = value.9
             recommendationResponses = value.10
             testResponses = value.11
+            dailyReviewQueue = value.12
             errorMessage = nil
         } catch { errorMessage = error.localizedDescription }
     }

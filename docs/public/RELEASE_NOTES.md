@@ -1,5 +1,16 @@
 # Release notes
 
+## Daily Evidence Review
+
+- Added a local daily queue for saved Evidence, difficult Concepts, and earlier test mistakes.
+- Added Remembered, Difficult, and Later responses with deterministic local rescheduling.
+- Added exact Source navigation through the Evidence and frozen Source Version already stored by
+  the notebook.
+- Added a Learning overview entry and a Today entry that appears only when review work is due.
+- Added encrypted append-only review responses to synchronization, conflict handling, recovery,
+  and readable export.
+- Kept queue selection offline and independent of AI providers and Compute Nodes.
+
 ## Deadline-aware learning plans
 
 - Added optional daily plans to dated goals without changing simple goal behavior.

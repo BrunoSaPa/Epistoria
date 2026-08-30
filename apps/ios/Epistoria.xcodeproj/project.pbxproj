@@ -61,6 +61,7 @@
 		BAB08214CBCE00873ABBA85C /* ComputeNodeSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F88A79D39FA49D05AF885DA9 /* ComputeNodeSettingsView.swift */; };
 		BB890C71994E1892269D508B /* MathAssistanceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 50B24792B8487B5D8E5833CD /* MathAssistanceView.swift */; };
 		C020D783090ACF29E186284D /* KnowledgeSearchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 296046E5F66D2C6212FE9F27 /* KnowledgeSearchView.swift */; };
+		C55C55E8089852624B41DB15 /* DailyEvidenceReviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F19943511355B89A7C215565 /* DailyEvidenceReviewView.swift */; };
 		C5F82045B47F32CFF46D15CE /* LibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7931BB0B2776308E4D8C7656 /* LibraryView.swift */; };
 		C7F469E7A36215F10F524E12 /* NoteQueryArtifactsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77B3805565CF9C5E40505BCF /* NoteQueryArtifactsView.swift */; };
 		CB403C1D8E202DF92989A5EA /* TopicsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A4D9E067E22ADC8DE6945B5 /* TopicsView.swift */; };
@@ -189,6 +190,7 @@
 		E5977CF78153E17017C6608F /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		E88BD724499FB7F121239719 /* ShareViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
 		EB4B13B11DAEDECBBF30F409 /* SharedCaptureImporterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedCaptureImporterTests.swift; sourceTree = "<group>"; };
+		F19943511355B89A7C215565 /* DailyEvidenceReviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DailyEvidenceReviewView.swift; sourceTree = "<group>"; };
 		F71473C0BC549E14DF27F39F /* NoteCanvasImageRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteCanvasImageRenderer.swift; sourceTree = "<group>"; };
 		F88A79D39FA49D05AF885DA9 /* ComputeNodeSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComputeNodeSettingsView.swift; sourceTree = "<group>"; };
 		F973AB6FF510D8DED2F212BC /* NoteReviewPreview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteReviewPreview.swift; sourceTree = "<group>"; };
@@ -252,6 +254,7 @@
 			isa = PBXGroup;
 			children = (
 				8935DE5EF28714C1897ECF7F /* AdaptiveTutorView.swift */,
+				F19943511355B89A7C215565 /* DailyEvidenceReviewView.swift */,
 				9F587C85FB9CDBD4AD20B0D1 /* LearningDetailViews.swift */,
 				CB7D498397579BAB468C3052 /* LearningManagementView.swift */,
 				08B89468624166AB5B132D9F /* StudyView.swift */,
@@ -644,6 +647,7 @@
 				75473A2695DFA6965D56A438 /* ConceptEvidenceMapView.swift in Sources */,
 				DF9CD341ABD3A514D2FF6BB3 /* ConflictResolutionView.swift in Sources */,
 				1969E734A69DCBD13E50C0AF /* ContinuousNotebookPages.swift in Sources */,
+				C55C55E8089852624B41DB15 /* DailyEvidenceReviewView.swift in Sources */,
 				426067C698D45A2AD8D2CED3 /* DataHealthView.swift in Sources */,
 				B9DACEB1B0ED2EA6FAB4734C /* DeveloperNotebookResetView.swift in Sources */,
 				2C79FFC1C80EB3DC2F7958CD /* EpistoriaApp.swift in Sources */,

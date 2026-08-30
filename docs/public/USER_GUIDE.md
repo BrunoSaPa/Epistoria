@@ -319,6 +319,23 @@ shows those counts separately and may recommend review. A test, Tutor, provider,
 review never marks an objective complete automatically. Plans work offline and do not require a
 Compute Node.
 
+### Complete the Daily Evidence Review
+
+1. Open **Learning → Overview → Daily Evidence Review**. Today also shows a direct action when an
+   item is due.
+2. Read the saved Evidence, Concept prompt, or earlier test question.
+3. For a Concept or test mistake, select **Reveal saved answer** after recalling the material.
+4. Select **Show exact Source** when supporting Evidence is available. Epistoria opens the frozen
+   Source Version at the saved page, timestamp, or region.
+5. Select **Remembered** when recall was comfortable, **Difficult** when the item needs an earlier
+   return, or **Later** to defer it until the next day.
+6. Continue until the current queue is empty.
+
+The queue contains up to five items at a time and is rebuilt from encrypted notebook records.
+Only the response is stored as a new record. Epistoria does not copy or modify the original
+Evidence, Concept, test question, answer, or attempt. This review works offline and does not use a
+provider or Compute Node.
+
 ### Use the Adaptive Tutor
 
 1. Open **Learning → Tutor → Start or resume Tutor**, or select **Learn → Tutor** from a Topic or

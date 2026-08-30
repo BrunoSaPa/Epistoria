@@ -60,6 +60,8 @@ public enum EntityPayloadValidator {
         case .testQuestion: _ = try CanonicalJSON.decode(TestQuestionPayload.self, from: content)
         case .testAttempt: _ = try CanonicalJSON.decode(TestAttemptPayload.self, from: content)
         case .testResponse: _ = try CanonicalJSON.decode(TestResponsePayload.self, from: content)
+        case .dailyReviewResponse:
+            _ = try CanonicalJSON.decode(DailyReviewResponsePayload.self, from: content)
         case .studyRecommendation:
             _ = try CanonicalJSON.decode(StudyRecommendationPayload.self, from: content)
         case .recommendationResponse:
@@ -138,6 +140,7 @@ public enum EntityPayloadValidator {
         case .testQuestion: ["test-question/v1"]
         case .testAttempt: ["test-attempt/v1"]
         case .testResponse: ["test-response/v1", "test-response/v2"]
+        case .dailyReviewResponse: ["daily-review-response/v1"]
         case .studyRecommendation: ["study-recommendation/v1"]
         case .recommendationResponse: ["recommendation-response/v1", "recommendation-response/v2"]
         case .automationGrant: ["automation-grant/v1", "automation-grant/v2", "automation-grant/v3"]

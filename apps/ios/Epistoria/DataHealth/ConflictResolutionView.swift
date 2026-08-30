@@ -279,7 +279,7 @@ struct ConflictResolutionView: View {
             value = (try? CanonicalJSON.decode(LearningSignalPayload.self, from: content).objective) ?? "Learning signal"
         case .sourceVersion, .sessionActivity, .flashcardDeck, .flashcard, .flashcardReview,
              .topicScopeSnapshot, .testBlueprint, .testAttempt, .testResponse,
-             .recommendationResponse, .automationGrant:
+             .dailyReviewResponse, .recommendationResponse, .automationGrant:
             value = typeLabel(type)
         }
         return String(value.prefix(1_000))

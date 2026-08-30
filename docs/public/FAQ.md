@@ -146,6 +146,15 @@ This calculation does not use AI. Objective completion is controlled by you. Lin
 can show incorrect and low-confidence evidence, but they cannot complete an objective
 automatically.
 
+## Does the Daily Evidence Review use AI?
+
+No. Open **Learning → Overview → Daily Evidence Review**. Epistoria selects saved Evidence,
+difficult Concepts connected to recorded card or test difficulty, and the latest unresolved test
+mistakes from encrypted records on the iPad.
+
+Remembered, Difficult, and Later responses set the next local review date. They do not alter the
+original material. Supporting Evidence opens at its saved Source Version and location.
+
 ## Does the weekly review use AI?
 
 No. Open **Learning → Overview** to calculate the review from durable sessions, card reviews, test

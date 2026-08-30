@@ -24,6 +24,7 @@ public enum StoreError: Error, Equatable {
     case invalidFeedbackReview
     case invalidAutomationGrant
     case invalidLearningPlan
+    case invalidDailyReviewItem
     case invalidConceptLink
     case invalidTranscriptCorrection
     case transcriptReviewRequired
@@ -66,6 +67,8 @@ extension StoreError: LocalizedError {
             "The automation permission is invalid, inactive, expired, over budget, or outside its Topic and task scope."
         case .invalidLearningPlan:
             "A learning plan needs a target date, at least one study day, and valid objectives."
+        case .invalidDailyReviewItem:
+            "This daily review item is no longer eligible. Reload the review and try again."
         case .invalidConceptLink:
             "Choose two different Concepts and valid supporting Evidence for this connection."
         case .invalidTranscriptCorrection:
@@ -182,7 +185,7 @@ public enum EntitySearchIndexer {
             case .topicArea, .collectionItem, .sessionNote, .sessionResource, .sourceVersion,
                  .conceptEvidence, .conceptLink, .knowledgeMap, .sessionActivity, .flashcardDeck, .flashcard,
                  .flashcardReview, .topicScopeSnapshot, .testBlueprint, .testAttempt,
-                 .testResponse, .recommendationResponse, .automationGrant:
+                 .testResponse, .dailyReviewResponse, .recommendationResponse, .automationGrant:
                 return nil
             }
         } catch {
@@ -426,6 +429,82 @@ public actor EpistoriaStore {
             payload: goal.payload,
             parentId: goal.payload.topicId,
             relationIds: [goal.payload.topicId]
+        )
+    }
+
+    /// Records one owner response without storing a second copy of the reviewed content.
+    /// The queue is rebuilt locally from the referenced authoritative records.
+    @discardableResult
+    public func recordDailyReviewResponse(
+        itemKind: DailyReviewItemKind,
+        targetId: UUID,
+        action: DailyReviewAction,
+        at date: Date = .now
+    ) async throws -> UUID {
+        let currentQueue = try await dailyEvidenceReviewQueue(now: date, limit: .max)
+        guard let currentItem = currentQueue.items.first(where: {
+            $0.kind == itemKind && $0.targetId == targetId
+        }) else { throw StoreError.invalidDailyReviewItem }
+        let topicId = currentItem.topicId
+        let targetUpdatedAt = currentItem.targetUpdatedAt
+        let evidenceIds = currentItem.evidenceIds
+        let previous = try await list(DailyReviewResponsePayload.self).filter {
+            $0.payload.itemKind == itemKind && $0.payload.targetId == targetId
+        }
+        let nextReviewAt = DailyEvidenceReviewEngine.nextReviewDate(
+            action: action,
+            previousResponses: previous,
+            now: date
+        )
+        let response = DailyReviewResponsePayload(
+            itemKind: itemKind,
+            targetId: targetId,
+            topicId: topicId,
+            evidenceIds: evidenceIds,
+            action: action,
+            targetUpdatedAt: targetUpdatedAt,
+            reviewedAt: date,
+            nextReviewAt: nextReviewAt
+        )
+        let relationIds = Array(Set([targetId, topicId].compactMap { $0 } + evidenceIds)).sorted {
+            $0.uuidString < $1.uuidString
+        }
+        return try await save(
+            payload: response,
+            parentId: topicId,
+            relationIds: relationIds
+        )
+    }
+
+    public func dailyEvidenceReviewQueue(
+        now: Date = .now,
+        limit: Int = 5
+    ) async throws -> DailyEvidenceReviewQueue {
+        async let topicValues = topics()
+        async let sourceValues = list(SourcePayload.self)
+        async let evidenceValues = list(EvidencePayload.self)
+        async let conceptValues = list(ConceptPayload.self)
+        async let relationValues = list(ConceptEvidenceRelationPayload.self)
+        async let cardValues = list(FlashcardPayload.self)
+        async let revisionValues = list(FlashcardRevisionPayload.self)
+        async let cardReviewValues = list(FlashcardReviewPayload.self)
+        async let attemptValues = list(TestAttemptPayload.self)
+        async let testResponseValues = list(TestResponsePayload.self)
+        async let dailyResponseValues = list(DailyReviewResponsePayload.self)
+        return try await DailyEvidenceReviewEngine.buildQueue(
+            topics: topicValues,
+            sources: sourceValues,
+            evidence: evidenceValues,
+            concepts: conceptValues,
+            conceptEvidence: relationValues,
+            cards: cardValues,
+            cardRevisions: revisionValues,
+            cardReviews: cardReviewValues,
+            attempts: attemptValues,
+            testResponses: testResponseValues,
+            reviewResponses: dailyResponseValues,
+            now: now,
+            limit: limit
         )
     }
 

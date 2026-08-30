@@ -42,6 +42,7 @@ public enum EntityType: String, Codable, CaseIterable, Sendable {
     case testQuestion = "TEST_QUESTION"
     case testAttempt = "TEST_ATTEMPT"
     case testResponse = "TEST_RESPONSE"
+    case dailyReviewResponse = "DAILY_REVIEW_RESPONSE"
     case studyRecommendation = "STUDY_RECOMMENDATION"
     case recommendationResponse = "RECOMMENDATION_RESPONSE"
     case automationGrant = "AUTOMATION_GRANT"

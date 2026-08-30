@@ -6,6 +6,7 @@ private enum TodayDestination: Hashable {
     case note(UUID)
     case session(UUID)
     case resource(UUID)
+    case dailyReview
 }
 
 struct TodayView: View {
@@ -24,6 +25,7 @@ struct TodayView: View {
     @State private var goals: [IdentifiedPayload<StudyGoalPayload>] = []
     @State private var unresolved: [IdentifiedPayload<UnresolvedQuestionPayload>] = []
     @State private var recommendations: [IdentifiedPayload<StudyRecommendationPayload>] = []
+    @State private var dailyReviewDueCount = 0
     @State private var destination: TodayDestination?
     @State private var showNewSession = false
     @State private var isImporting = false
@@ -87,6 +89,8 @@ struct TodayView: View {
                     SessionDetailView(model: model, sessionId: id)
                 case let .resource(id):
                     ResourceDetailView(model: model, resourceId: id)
+                case .dailyReview:
+                    DailyEvidenceReviewView(model: model)
                 }
             }
             .sheet(isPresented: $showNewSession) {
@@ -259,6 +263,11 @@ struct TodayView: View {
                     model.learningLaunchContext = LearningLaunchContext(destination: .review)
                     model.selectedSection = .learning
                 }
+                if dailyReviewDueCount > 0 {
+                    Button("\(dailyReviewDueCount) daily review") {
+                        destination = .dailyReview
+                    }
+                }
                 Button("\(sourceInboxCount) in Source Inbox") { model.selectedSection = .library }
             }
             .font(.subheadline.weight(.medium))
@@ -268,6 +277,7 @@ struct TodayView: View {
 
     private var hasLearningActivity: Bool {
         nextRecommendation != nil || !dueCards.isEmpty || !unfinishedAttempts.isEmpty
+            || dailyReviewDueCount > 0
     }
 
     @ViewBuilder
@@ -510,7 +520,8 @@ struct TodayView: View {
             async let loadedUnresolved = store.list(UnresolvedQuestionPayload.self)
             async let loadedRecommendations = store.list(StudyRecommendationPayload.self)
             async let loadedTrash = store.trashedTargetIds()
-            let result = try await (loadedNotes, loadedSessions, loadedResources, loadedCourses, loadedTopics, loadedSources, loadedCards, loadedReviews, loadedTests, loadedAttempts, loadedGoals, loadedUnresolved, loadedRecommendations, loadedTrash)
+            async let loadedDailyReview = store.dailyEvidenceReviewQueue(now: .now)
+            let result = try await (loadedNotes, loadedSessions, loadedResources, loadedCourses, loadedTopics, loadedSources, loadedCards, loadedReviews, loadedTests, loadedAttempts, loadedGoals, loadedUnresolved, loadedRecommendations, loadedTrash, loadedDailyReview)
             notes = result.0
                 .filter { $0.payload.archivedAt == nil && !result.13.contains($0.id) }
                 .sorted {
@@ -536,6 +547,7 @@ struct TodayView: View {
             goals = result.10
             unresolved = result.11
             recommendations = result.12
+            dailyReviewDueCount = result.14.totalDueCount
             errorMessage = nil
         } catch {
             errorMessage = error.localizedDescription
