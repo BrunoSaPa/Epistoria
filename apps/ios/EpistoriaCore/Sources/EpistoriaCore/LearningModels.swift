@@ -6,25 +6,84 @@ public enum LearningRecordState: String, Codable, Sendable {
     case archived = "ARCHIVED"
 }
 
+public enum LearningPlanObjectiveState: String, Codable, Sendable {
+    case remaining = "REMAINING"
+    case completed = "COMPLETED"
+}
+
+public struct LearningPlanObjective: Codable, Equatable, Sendable, Identifiable {
+    public var id: UUID
+    public var title: String
+    public var estimatedMinutes: Int
+    public var sourceObjectiveId: UUID?
+    public var state: LearningPlanObjectiveState
+    public var completedAt: Date?
+
+    public init(
+        id: UUID = UUID(),
+        title: String,
+        estimatedMinutes: Int = 60,
+        sourceObjectiveId: UUID? = nil,
+        state: LearningPlanObjectiveState = .remaining,
+        completedAt: Date? = nil
+    ) {
+        self.id = id
+        self.title = title
+        self.estimatedMinutes = min(max(estimatedMinutes, 5), 1_440)
+        self.sourceObjectiveId = sourceObjectiveId
+        self.state = state
+        self.completedAt = state == .completed ? completedAt : nil
+    }
+}
+
+public struct LearningPlanConfiguration: Codable, Equatable, Sendable {
+    public var startedAt: Date
+    public var minutesPerStudyDay: Int
+    /// Gregorian weekday numbers. Sunday is 1 and Saturday is 7.
+    public var studyWeekdays: [Int]
+    public var objectives: [LearningPlanObjective]
+
+    public init(
+        startedAt: Date = .now,
+        minutesPerStudyDay: Int = 30,
+        studyWeekdays: [Int] = Array(1...7),
+        objectives: [LearningPlanObjective] = []
+    ) {
+        self.startedAt = startedAt
+        self.minutesPerStudyDay = min(max(minutesPerStudyDay, 5), 720)
+        self.studyWeekdays = Array(Set(studyWeekdays.filter { (1...7).contains($0) })).sorted()
+        self.objectives = objectives
+    }
+}
+
 public struct StudyGoalPayload: EntityPayload, Equatable {
     public static let entityType = EntityType.studyGoal
-    public var schemaVersion = "study-goal/v1"
+    public var schemaVersion = "study-goal/v2"
     public var topicId: UUID
     public var title: String
     public var details: String?
     public var targetDate: Date?
     public var priority: Int
     public var state: LearningRecordState
+    public var learningPlan: LearningPlanConfiguration?
     public var createdAt: Date
     public var updatedAt: Date
 
-    public init(topicId: UUID, title: String, targetDate: Date? = nil, priority: Int = 0, now: Date = .now) {
+    public init(
+        topicId: UUID,
+        title: String,
+        targetDate: Date? = nil,
+        priority: Int = 0,
+        learningPlan: LearningPlanConfiguration? = nil,
+        now: Date = .now
+    ) {
         self.topicId = topicId
         self.title = title
         details = nil
         self.targetDate = targetDate
         self.priority = min(max(priority, 0), 3)
         state = .active
+        self.learningPlan = learningPlan
         createdAt = now
         updatedAt = now
     }

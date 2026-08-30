@@ -299,6 +299,26 @@ Sessions, Review, Tutor, Knowledge, and History. Select **Learn** from Today, a 
 open the hub with the current Topic or note context. Learning can be pinned in the sidebar from
 **Settings → Interface and Controls**.
 
+### Plan a dated goal
+
+1. Open **Learning → Knowledge → Learning records** and select a goal. You can also create a goal
+   from a Topic.
+2. Set a target date, then turn on **Plan daily work**.
+3. Set the preferred minutes per study day and choose the days when study can occur.
+4. Add each objective the goal must cover. If the Topic already has a test blueprint, select
+   **Import test objectives** to reuse the most recent blueprint's objective list.
+5. Set an estimated number of minutes for each objective. The estimate controls workload only. It
+   is not a mastery score.
+6. Mark an objective complete when you have reviewed the work and consider it covered.
+7. Review the current state, remaining minutes, available study days, daily workload, and catch-up
+   estimate at the top of the plan.
+8. Open **Learning → Knowledge** or Today to see the same plan in local Study Next.
+
+Submitted tests can add incorrect and low-confidence evidence to imported objectives. Epistoria
+shows those counts separately and may recommend review. A test, Tutor, provider, session, or card
+review never marks an objective complete automatically. Plans work offline and do not require a
+Compute Node.
+
 ### Use the Adaptive Tutor
 
 1. Open **Learning → Tutor → Start or resume Tutor**, or select **Learn → Tutor** from a Topic or

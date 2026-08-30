@@ -136,6 +136,16 @@ flashcard results, confidence, unresolved questions, source coverage, and recent
 Each recommendation states its reason. The base queue works on the iPad without a paid AI request.
 You can pin it, snooze it for one day, dismiss it, or mark it as irrelevant.
 
+## Can Epistoria plan daily work for an exam or deadline?
+
+Yes. Add a target date to a goal and turn on **Plan daily work**. Choose the study days, preferred
+daily minutes, and coverage objectives. Epistoria calculates remaining work, required minutes per
+study day, catch-up, and an explained readiness state on the iPad.
+
+This calculation does not use AI. Objective completion is controlled by you. Linked test results
+can show incorrect and low-confidence evidence, but they cannot complete an objective
+automatically.
+
 ## Does the weekly review use AI?
 
 No. Open **Learning → Overview** to calculate the review from durable sessions, card reviews, test

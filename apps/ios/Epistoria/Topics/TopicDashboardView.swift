@@ -359,6 +359,9 @@ private struct NewStudyGoalView: View {
     @State private var hasDeadline = false
     @State private var targetDate = Date.now.addingTimeInterval(7 * 86_400)
     @State private var priority = 1
+    @State private var planDailyWork = false
+    @State private var minutesPerStudyDay = 30
+    @State private var firstObjective = ""
     @State private var errorMessage: String?
 
     var body: some View {
@@ -371,7 +374,24 @@ private struct NewStudyGoalView: View {
                     Text("Critical").tag(3)
                 }
                 Toggle("Set a target date", isOn: $hasDeadline)
+                    .disabled(planDailyWork)
                 if hasDeadline { DatePicker("Target date", selection: $targetDate, displayedComponents: .date) }
+                Toggle("Plan daily work", isOn: $planDailyWork)
+                    .onChange(of: planDailyWork) { _, enabled in
+                        if enabled { hasDeadline = true }
+                    }
+                if planDailyWork {
+                    Stepper(
+                        "Preferred workload: \(minutesPerStudyDay) min",
+                        value: $minutesPerStudyDay,
+                        in: 5...720,
+                        step: 5
+                    )
+                    TextField("First coverage objective (optional)", text: $firstObjective, axis: .vertical)
+                    Text("You can add objectives and choose study days after creating the goal.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 if let errorMessage { Text(errorMessage).foregroundStyle(.red) }
             }
             .navigationTitle("New study goal")
@@ -393,7 +413,15 @@ private struct NewStudyGoalView: View {
                     topicId: topicId,
                     title: title.trimmingCharacters(in: .whitespacesAndNewlines),
                     targetDate: hasDeadline ? targetDate : nil,
-                    priority: priority
+                    priority: priority,
+                    learningPlan: planDailyWork ? LearningPlanConfiguration(
+                        minutesPerStudyDay: minutesPerStudyDay,
+                        objectives: firstObjective.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                            ? []
+                            : [LearningPlanObjective(
+                                title: firstObjective.trimmingCharacters(in: .whitespacesAndNewlines)
+                            )]
+                    ) : nil
                 ),
                 parentId: topicId,
                 relationIds: [topicId]

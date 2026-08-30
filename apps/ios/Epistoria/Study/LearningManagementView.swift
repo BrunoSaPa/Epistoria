@@ -304,6 +304,15 @@ private struct GoalEditorView: View {
     @State private var targetDate: Date
     @State private var priority: Int
     @State private var state: LearningRecordState
+    @State private var planEnabled: Bool
+    @State private var planStartedAt: Date
+    @State private var minutesPerStudyDay: Int
+    @State private var studyWeekdays: Set<Int>
+    @State private var objectives: [LearningPlanObjective]
+    @State private var blueprints: [IdentifiedPayload<TestBlueprintPayload>] = []
+    @State private var attempts: [IdentifiedPayload<TestAttemptPayload>] = []
+    @State private var responses: [IdentifiedPayload<TestResponsePayload>] = []
+    @State private var showNewObjective = false
     @State private var errorMessage: String?
 
     init(model: AppModel, goal: IdentifiedPayload<StudyGoalPayload>, onSaved: @escaping () -> Void) {
@@ -313,27 +322,246 @@ private struct GoalEditorView: View {
         _title = State(initialValue: goal.payload.title)
         _details = State(initialValue: goal.payload.details ?? "")
         _hasTargetDate = State(initialValue: goal.payload.targetDate != nil)
-        _targetDate = State(initialValue: goal.payload.targetDate ?? .now)
+        _targetDate = State(initialValue: goal.payload.targetDate ?? Date.now.addingTimeInterval(7 * 86_400))
         _priority = State(initialValue: goal.payload.priority)
         _state = State(initialValue: goal.payload.state)
+        _planEnabled = State(initialValue: goal.payload.learningPlan != nil)
+        _planStartedAt = State(initialValue: goal.payload.learningPlan?.startedAt ?? .now)
+        _minutesPerStudyDay = State(initialValue: goal.payload.learningPlan?.minutesPerStudyDay ?? 30)
+        _studyWeekdays = State(initialValue: Set(goal.payload.learningPlan?.studyWeekdays ?? Array(1...7)))
+        _objectives = State(initialValue: goal.payload.learningPlan?.objectives ?? [])
     }
 
     var body: some View {
         Form {
-            TextField("Goal", text: $title)
-            TextField("Details", text: $details, axis: .vertical)
-            Toggle("Target date", isOn: $hasTargetDate)
-            if hasTargetDate { DatePicker("Due", selection: $targetDate, displayedComponents: .date) }
-            Picker("Priority", selection: $priority) { ForEach(0...3, id: \.self) { Text("\($0)").tag($0) } }
-            Picker("Status", selection: $state) {
-                Text("Active").tag(LearningRecordState.active)
-                Text("Completed").tag(LearningRecordState.completed)
-                Text("Archived").tag(LearningRecordState.archived)
+            Section("Goal") {
+                TextField("Goal", text: $title)
+                TextField("Details", text: $details, axis: .vertical)
+                Toggle("Target date", isOn: $hasTargetDate)
+                    .disabled(planEnabled)
+                if hasTargetDate { DatePicker("Due", selection: $targetDate, displayedComponents: .date) }
+                Picker("Priority", selection: $priority) { ForEach(0...3, id: \.self) { Text("\($0)").tag($0) } }
+                Picker("Status", selection: $state) {
+                    Text("Active").tag(LearningRecordState.active)
+                    Text("Completed").tag(LearningRecordState.completed)
+                    Text("Archived").tag(LearningRecordState.archived)
+                }
+            }
+
+            Section("Learning plan") {
+                Toggle("Plan daily work", isOn: $planEnabled)
+                    .onChange(of: planEnabled) { _, enabled in
+                        if enabled { hasTargetDate = true }
+                    }
+                if planEnabled {
+                    if let projection = draftProjection {
+                        learningPlanSummary(projection)
+                    }
+                    Stepper(
+                        "Preferred workload: \(minutesPerStudyDay) min",
+                        value: $minutesPerStudyDay,
+                        in: 5...720,
+                        step: 5
+                    )
+                    Text("Readiness is calculated on this iPad from your target date, completed objectives, and test history. It is not an AI mastery score.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("Use a plan when a goal has a deadline. Simple goals remain available without a schedule.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            if planEnabled {
+                Section("Study days") {
+                    ForEach(1...7, id: \.self) { weekday in
+                        Toggle(weekdayName(weekday), isOn: weekdayBinding(weekday))
+                    }
+                }
+
+                Section("Objective coverage") {
+                    if objectives.isEmpty {
+                        Text("Add the material this goal must cover. The plan cannot report readiness until it has objectives.")
+                            .foregroundStyle(.secondary)
+                    }
+                    ForEach($objectives) { $objective in
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                                Button {
+                                    objective.state = objective.state == .completed ? .remaining : .completed
+                                    objective.completedAt = objective.state == .completed ? .now : nil
+                                } label: {
+                                    Image(systemName: objective.state == .completed ? "checkmark.circle.fill" : "circle")
+                                        .foregroundStyle(objective.state == .completed ? EpistoriaDesign.ink : .secondary)
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel(objective.state == .completed ? "Mark remaining" : "Mark complete")
+                                TextField("Objective", text: $objective.title, axis: .vertical)
+                            }
+                            Stepper(
+                                "Estimated work: \(objective.estimatedMinutes) min",
+                                value: $objective.estimatedMinutes,
+                                in: 5...1_440,
+                                step: 5
+                            )
+                            .font(.caption)
+                            if let evidence = draftProjection?.objectives.first(where: { $0.id == objective.id }),
+                               evidence.assessedResponses > 0 {
+                                Text(assessmentDetail(evidence))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .padding(.vertical, 4)
+                    }
+                    .onDelete { objectives.remove(atOffsets: $0) }
+
+                    Button("Add objective", systemImage: "plus") { showNewObjective = true }
+                    Button("Import test objectives", systemImage: "square.and.arrow.down") {
+                        importTestObjectives()
+                    }
+                    .disabled(availableTestObjectives.isEmpty)
+                }
             }
             lifecycleError(errorMessage)
         }
         .navigationTitle("Edit Goal")
-        .toolbar { Button("Save") { Task { await save() } }.disabled(title.trimmed.isEmpty) }
+        .toolbar {
+            Button("Save") { Task { await save() } }
+                .disabled(!canSave)
+        }
+        .task { await loadLearningEvidence() }
+        .sheet(isPresented: $showNewObjective) {
+            NewLearningPlanObjectiveView { objective in
+                objectives.append(objective)
+                showNewObjective = false
+            }
+        }
+    }
+
+    private var canSave: Bool {
+        !title.trimmed.isEmpty
+            && (!planEnabled || (hasTargetDate
+                && !studyWeekdays.isEmpty
+                && objectives.allSatisfy { !$0.title.trimmed.isEmpty }))
+    }
+
+    private var draftGoal: StudyGoalPayload {
+        var value = goal.payload
+        value.targetDate = hasTargetDate ? targetDate : nil
+        value.learningPlan = planEnabled ? LearningPlanConfiguration(
+            startedAt: planStartedAt,
+            minutesPerStudyDay: minutesPerStudyDay,
+            studyWeekdays: Array(studyWeekdays),
+            objectives: objectives
+        ) : nil
+        return value
+    }
+
+    private var draftProjection: LearningPlanProjection? {
+        LearningPlanEngine.project(
+            goalId: goal.id,
+            goal: draftGoal,
+            attempts: attempts,
+            responses: responses,
+            now: .now
+        )
+    }
+
+    @ViewBuilder
+    private func learningPlanSummary(_ projection: LearningPlanProjection) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Label(readinessTitle(projection.readiness), systemImage: readinessSymbol(projection.readiness))
+                .font(.headline)
+            Text("\(projection.completedObjectiveCount) of \(projection.objectiveCount) objectives complete")
+            if projection.remainingMinutes > 0 {
+                Text("\(projection.remainingMinutes) estimated minutes across \(projection.studyDaysRemaining) remaining study days · \(projection.minutesRequiredPerStudyDay) min per study day")
+            }
+            if projection.catchUpMinutes > 0 {
+                Text("Catch-up estimate: \(projection.catchUpMinutes) min")
+            }
+            if projection.incorrectResponseCount > 0 || projection.lowConfidenceResponseCount > 0 {
+                Text("Recorded evidence: \(projection.incorrectResponseCount) incorrect and \(projection.lowConfidenceResponseCount) low-confidence responses")
+            }
+        }
+        .font(.subheadline)
+        .foregroundStyle(.secondary)
+        .accessibilityElement(children: .combine)
+    }
+
+    private var availableTestObjectives: [TestObjective] {
+        let existing = Set(objectives.compactMap(\.sourceObjectiveId))
+        return (blueprints.first?.payload.objectives ?? [])
+            .filter { !existing.contains($0.id) }
+    }
+
+    private func importTestObjectives() {
+        objectives.append(contentsOf: availableTestObjectives.map {
+            LearningPlanObjective(
+                title: $0.title,
+                estimatedMinutes: max(30, Int(($0.weight * 60).rounded())),
+                sourceObjectiveId: $0.id
+            )
+        })
+    }
+
+    private func weekdayBinding(_ weekday: Int) -> Binding<Bool> {
+        Binding(
+            get: { studyWeekdays.contains(weekday) },
+            set: { selected in
+                if selected { studyWeekdays.insert(weekday) } else { studyWeekdays.remove(weekday) }
+            }
+        )
+    }
+
+    private func weekdayName(_ weekday: Int) -> String {
+        let names = Calendar.current.weekdaySymbols
+        return names.indices.contains(weekday - 1) ? names[weekday - 1] : "Day \(weekday)"
+    }
+
+    private func readinessTitle(_ readiness: LearningPlanReadiness) -> String {
+        switch readiness {
+        case .needsDeadline: "Needs a target date"
+        case .needsObjectives: "Needs coverage objectives"
+        case .onTrack: "On track"
+        case .catchUpNeeded: "Catch-up needed"
+        case .atRisk: "At risk"
+        case .reviewRecommended: "Review recommended"
+        case .ready: "Ready to finish"
+        case .overdue: "Target date passed"
+        }
+    }
+
+    private func readinessSymbol(_ readiness: LearningPlanReadiness) -> String {
+        switch readiness {
+        case .ready: "checkmark.circle"
+        case .onTrack: "calendar.badge.checkmark"
+        case .needsDeadline, .needsObjectives: "calendar"
+        case .catchUpNeeded, .atRisk, .reviewRecommended, .overdue: "exclamationmark.circle"
+        }
+    }
+
+    private func assessmentDetail(_ evidence: LearningPlanObjectiveProjection) -> String {
+        "Test evidence: \(evidence.correctResponses) correct, \(evidence.incorrectResponses) incorrect, \(evidence.lowConfidenceResponses) low confidence"
+    }
+
+    private func loadLearningEvidence() async {
+        guard let store = model.store else { return }
+        do {
+            async let loadedBlueprints = store.list(TestBlueprintPayload.self)
+            async let loadedAttempts = store.list(TestAttemptPayload.self)
+            async let loadedResponses = store.list(TestResponsePayload.self)
+            let values = try await (loadedBlueprints, loadedAttempts, loadedResponses)
+            blueprints = values.0
+                .filter { $0.payload.topicId == goal.payload.topicId }
+                .sorted { $0.payload.updatedAt > $1.payload.updatedAt }
+            attempts = values.1.filter { $0.payload.topicId == goal.payload.topicId }
+            let attemptIds = Set(attempts.map(\.id))
+            responses = values.2.filter { attemptIds.contains($0.payload.attemptId) }
+        } catch {
+            errorMessage = error.localizedDescription
+        }
     }
 
     private func save() async {
@@ -345,10 +573,56 @@ private struct GoalEditorView: View {
                 details: details,
                 targetDate: hasTargetDate ? targetDate : nil,
                 priority: priority,
-                state: state
+                state: state,
+                learningPlan: planEnabled ? LearningPlanConfiguration(
+                    startedAt: planStartedAt,
+                    minutesPerStudyDay: minutesPerStudyDay,
+                    studyWeekdays: Array(studyWeekdays),
+                    objectives: objectives
+                ) : nil
             )
             model.noteLocalMutation(); onSaved()
         } catch { errorMessage = error.localizedDescription }
+    }
+}
+
+private struct NewLearningPlanObjectiveView: View {
+    @Environment(\.dismiss) private var dismiss
+    let onCreate: (LearningPlanObjective) -> Void
+    @State private var title = ""
+    @State private var estimatedMinutes = 60
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                TextField("Objective", text: $title, axis: .vertical)
+                Stepper(
+                    "Estimated work: \(estimatedMinutes) min",
+                    value: $estimatedMinutes,
+                    in: 5...1_440,
+                    step: 5
+                )
+                Text("Use one objective for each area the goal must cover. Estimates only determine workload; they are not a mastery score.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .navigationTitle("New Objective")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Add") {
+                        onCreate(LearningPlanObjective(
+                            title: title.trimmed,
+                            estimatedMinutes: estimatedMinutes
+                        ))
+                        dismiss()
+                    }
+                    .disabled(title.trimmed.isEmpty)
+                }
+            }
+        }
     }
 }
 

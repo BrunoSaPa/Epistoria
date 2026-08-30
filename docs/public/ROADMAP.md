@@ -131,6 +131,9 @@ Completed:
    from the iPad. The optional Compute Node remains available only when explicitly selected.
 29. Recurring automation permissions freeze the approved provider route and execute due work from
    the iPad under the saved Topic, task, cadence, expiration, and spending limits.
+30. Optional deadline-aware learning plans extend dated goals with owner-managed coverage,
+   selected study days, preferred daily minutes, missed-work catch-up, linked test evidence, and
+   explained local readiness. Simple goals remain unchanged.
 
 Next stages:
 
@@ -146,9 +149,6 @@ the app.
 
 ### Next
 
-- Add deadline-aware learning plans. A plan should use an exam or target date, remaining coverage,
-  daily workload, missed-day catch-up, and an explanation of readiness. This direction is informed
-  by RemNote.
 - Add a daily Evidence review that can resurface highlights, difficult Concepts, and earlier
   mistakes without AI. Add reusable Studio recipes defined by the notebook owner. This direction
   is informed by Readwise.

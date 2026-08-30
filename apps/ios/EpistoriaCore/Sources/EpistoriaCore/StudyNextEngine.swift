@@ -48,6 +48,7 @@ public enum StudyNextEngine {
         tests: [IdentifiedPayload<PracticeTestPayload>],
         attempts: [IdentifiedPayload<TestAttemptPayload>],
         dueCardCounts: [UUID: Int],
+        learningPlanProjections: [UUID: LearningPlanProjection] = [:],
         storedRecommendations: [IdentifiedPayload<StudyRecommendationPayload>] = [],
         now: Date
     ) -> [LocalStudyRecommendation] {
@@ -65,18 +66,30 @@ public enum StudyNextEngine {
         }
 
         for goal in goals where goal.payload.state == .active && activeTopics[goal.payload.topicId] != nil {
+            let plan = learningPlanProjections[goal.id]
             let days = goal.payload.targetDate.map {
                 Calendar(identifier: .gregorian).dateComponents([.day], from: now, to: $0).day ?? 365
             } ?? 365
-            let urgency = days <= 0 ? 120 : days <= 3 ? 105 : days <= 7 ? 90 : 60
+            let deadlineUrgency = days <= 0 ? 120 : days <= 3 ? 105 : days <= 7 ? 90 : 60
+            let planUrgency = plan.map { projection in
+                switch projection.readiness {
+                case .overdue: 125
+                case .atRisk: 115
+                case .catchUpNeeded: 100
+                case .reviewRecommended: 95
+                case .onTrack: 85
+                case .needsDeadline, .needsObjectives: 70
+                case .ready: 55
+                }
+            } ?? 0
             values.append(LocalStudyRecommendation(
                 topicId: goal.payload.topicId,
                 kind: .goalDeadline,
                 title: goal.payload.title,
-                explanation: goal.payload.targetDate == nil
+                explanation: plan.map(planExplanation) ?? (goal.payload.targetDate == nil
                     ? "This active goal has no deadline."
-                    : "Target date: \(goal.payload.targetDate!.formatted(date: .abbreviated, time: .omitted)).",
-                score: Double(urgency + goal.payload.priority * 5),
+                    : "Target date: \(goal.payload.targetDate!.formatted(date: .abbreviated, time: .omitted))."),
+                score: Double(max(deadlineUrgency, planUrgency) + goal.payload.priority * 5),
                 targetId: goal.id
             ))
         }
@@ -136,6 +149,27 @@ public enum StudyNextEngine {
         return values.sorted {
             if $0.score == $1.score { return $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
             return $0.score > $1.score
+        }
+    }
+
+    private static func planExplanation(_ projection: LearningPlanProjection) -> String {
+        switch projection.readiness {
+        case .needsDeadline:
+            return "Add a target date before calculating daily work."
+        case .needsObjectives:
+            return "Add the objectives this plan needs to cover."
+        case .ready:
+            return "All \(projection.objectiveCount) objectives are marked complete. Review and finish the goal."
+        case .reviewRecommended:
+            return "Coverage is complete, but recorded test errors or low-confidence answers still need review."
+        case .overdue:
+            return "The target date has passed with \(projection.remainingMinutes) estimated minutes remaining."
+        case .atRisk:
+            return "\(projection.remainingMinutes) minutes remain; the plan requires \(projection.minutesRequiredPerStudyDay) minutes per study day."
+        case .catchUpNeeded:
+            return "\(projection.completedObjectiveCount) of \(projection.objectiveCount) objectives complete. Catch up by about \(projection.catchUpMinutes) minutes."
+        case .onTrack:
+            return "\(projection.completedObjectiveCount) of \(projection.objectiveCount) objectives complete · \(projection.minutesRequiredPerStudyDay) minutes per study day."
         }
     }
 }

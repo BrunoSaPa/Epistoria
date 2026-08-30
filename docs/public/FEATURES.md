@@ -213,6 +213,21 @@ Learning tools are grouped in one hub. Open **Learn** from Today, a Topic, or a 
 current context into Sessions, Review, Tutor, Knowledge, or History. The default notebook workflow
 does not require an AI provider or Compute Node.
 
+### Deadline-aware learning plans
+
+- Turn any dated goal into an optional learning plan. Simple goals remain unchanged.
+- Choose study days, a preferred number of minutes per study day, and the objectives the goal must
+  cover.
+- Import coverage objectives from existing Topic test blueprints or add them manually.
+- Mark objective completion explicitly. Sessions, providers, and test scores do not complete an
+  objective automatically.
+- See remaining coverage, estimated minutes, eligible study days, daily workload, missed-work
+  catch-up, and an explained readiness state.
+- Use the most recent submitted test evidence to see separate incorrect and low-confidence counts
+  for linked objectives.
+- Receive the current planned workload through local Study Next without an AI request, provider
+  charge, or Compute Node.
+
 ### Concept and Evidence map
 
 - Open a Topic's knowledge map from its dashboard.

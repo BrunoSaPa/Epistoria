@@ -439,9 +439,21 @@ struct TodayView: View {
             tests: tests,
             attempts: attempts,
             dueCardCounts: Dictionary(grouping: dueCards, by: \.payload.topicId).mapValues(\.count),
+            learningPlanProjections: learningPlanProjections,
             storedRecommendations: recommendations,
             now: .now
         ).first
+    }
+
+    private var learningPlanProjections: [UUID: LearningPlanProjection] {
+        Dictionary(uniqueKeysWithValues: goals.compactMap { goal in
+            LearningPlanEngine.project(
+                goalId: goal.id,
+                goal: goal.payload,
+                attempts: attempts,
+                now: .now
+            ).map { (goal.id, $0) }
+        })
     }
 
     private var greeting: String {

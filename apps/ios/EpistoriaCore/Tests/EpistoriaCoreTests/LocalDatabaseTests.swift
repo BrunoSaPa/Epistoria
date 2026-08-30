@@ -1790,6 +1790,38 @@ final class LocalDatabaseTests: XCTestCase {
         XCTAssertEqual(goal.payload.state, .completed)
         XCTAssertEqual(goal.payload.priority, 3)
 
+        let planObjective = LearningPlanObjective(title: "Mixed practice", estimatedMinutes: 90)
+        let planTarget = Date.now.addingTimeInterval(7 * 86_400)
+        try await store.updateStudyGoal(
+            id: goalId,
+            title: "Master factoring",
+            details: "Complete mixed practice",
+            targetDate: planTarget,
+            priority: 3,
+            state: .active,
+            learningPlan: LearningPlanConfiguration(
+                minutesPerStudyDay: 25,
+                studyWeekdays: [2, 3, 4, 5, 6],
+                objectives: [planObjective]
+            )
+        )
+        let plannedGoal = try await store.payload(StudyGoalPayload.self, id: goalId)
+        XCTAssertEqual(plannedGoal.payload.schemaVersion, "study-goal/v2")
+        XCTAssertEqual(plannedGoal.payload.learningPlan?.minutesPerStudyDay, 25)
+        XCTAssertEqual(plannedGoal.payload.learningPlan?.studyWeekdays, [2, 3, 4, 5, 6])
+        XCTAssertEqual(plannedGoal.payload.learningPlan?.objectives.first?.title, "Mixed practice")
+        await XCTAssertThrowsErrorAsync(try await store.updateStudyGoal(
+            id: goalId,
+            title: "Master factoring",
+            details: nil,
+            targetDate: nil,
+            priority: 3,
+            state: .active,
+            learningPlan: LearningPlanConfiguration(objectives: [planObjective])
+        )) { error in
+            XCTAssertEqual(error as? StoreError, .invalidLearningPlan)
+        }
+
         let questionId = try await store.save(
             payload: UnresolvedQuestionPayload(topicId: topicId, question: "Why does grouping work?"),
             parentId: topicId,

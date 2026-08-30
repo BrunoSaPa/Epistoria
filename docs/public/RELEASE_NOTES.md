@@ -1,5 +1,17 @@
 # Release notes
 
+## Deadline-aware learning plans
+
+- Added optional daily plans to dated goals without changing simple goal behavior.
+- Added owner-managed coverage objectives, selected study days, preferred daily minutes, and
+  objective import from existing test blueprints.
+- Added local calculations for remaining work, required daily minutes, catch-up, and explained
+  readiness.
+- Added separate incorrect and low-confidence assessment evidence for linked objectives. Test
+  results do not complete objectives automatically.
+- Added plan summaries in Learning and plan-aware Study Next recommendations on Today.
+- Kept planning offline and independent of AI providers and Compute Nodes.
+
 ## Encrypted Share Sheet capture
 
 - Added **Save to Epistoria** for supported images, files, selected text, and HTTPS links on iPad.

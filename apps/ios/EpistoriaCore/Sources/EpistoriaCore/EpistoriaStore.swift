@@ -23,6 +23,7 @@ public enum StoreError: Error, Equatable {
     case invalidDraftReview
     case invalidFeedbackReview
     case invalidAutomationGrant
+    case invalidLearningPlan
     case invalidConceptLink
     case invalidTranscriptCorrection
     case transcriptReviewRequired
@@ -63,6 +64,8 @@ extension StoreError: LocalizedError {
             "The reviewed feedback is incomplete or cites material outside this request."
         case .invalidAutomationGrant:
             "The automation permission is invalid, inactive, expired, over budget, or outside its Topic and task scope."
+        case .invalidLearningPlan:
+            "A learning plan needs a target date, at least one study day, and valid objectives."
         case .invalidConceptLink:
             "Choose two different Concepts and valid supporting Evidence for this connection."
         case .invalidTranscriptCorrection:
@@ -127,7 +130,11 @@ public enum EntitySearchIndexer {
                 return SearchDocument(title: value.name, body: ([value.conceptDescription] + value.aliases).joined(separator: "\n"))
             case .studyGoal:
                 let value = try CanonicalJSON.decode(StudyGoalPayload.self, from: content)
-                return SearchDocument(title: value.title, body: value.details ?? "")
+                return SearchDocument(
+                    title: value.title,
+                    body: ([value.details].compactMap(\ .self) + (value.learningPlan?.objectives.map(\.title) ?? []))
+                        .joined(separator: "\n")
+                )
             case .unresolvedQuestion:
                 let value = try CanonicalJSON.decode(UnresolvedQuestionPayload.self, from: content)
                 return SearchDocument(title: "Unresolved question", body: value.question)
@@ -397,6 +404,7 @@ public actor EpistoriaStore {
         targetDate: Date?,
         priority: Int,
         state: LearningRecordState,
+        learningPlan: LearningPlanConfiguration? = nil,
         at date: Date = .now
     ) async throws {
         var goal = try await payload(StudyGoalPayload.self, id: id)
@@ -404,11 +412,14 @@ public actor EpistoriaStore {
         guard !cleanTitle.isEmpty else {
             throw LocalDatabaseError.queryFailed("a goal needs a title")
         }
+        let cleanPlan = try normalizedLearningPlan(learningPlan, targetDate: targetDate, at: date)
+        goal.payload.schemaVersion = "study-goal/v2"
         goal.payload.title = cleanTitle
         goal.payload.details = details?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
         goal.payload.targetDate = targetDate
         goal.payload.priority = min(max(priority, 0), 3)
         goal.payload.state = state
+        goal.payload.learningPlan = cleanPlan
         goal.payload.updatedAt = date
         _ = try await save(
             id: id,
@@ -416,6 +427,30 @@ public actor EpistoriaStore {
             parentId: goal.payload.topicId,
             relationIds: [goal.payload.topicId]
         )
+    }
+
+    private func normalizedLearningPlan(
+        _ plan: LearningPlanConfiguration?,
+        targetDate: Date?,
+        at date: Date
+    ) throws -> LearningPlanConfiguration? {
+        guard var plan else { return nil }
+        guard targetDate != nil else { throw StoreError.invalidLearningPlan }
+        plan.minutesPerStudyDay = min(max(plan.minutesPerStudyDay, 5), 720)
+        plan.studyWeekdays = Array(Set(plan.studyWeekdays.filter { (1...7).contains($0) })).sorted()
+        guard !plan.studyWeekdays.isEmpty else { throw StoreError.invalidLearningPlan }
+        var objectiveIds = Set<UUID>()
+        plan.objectives = try plan.objectives.map { value in
+            var objective = value
+            objective.title = objective.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !objective.title.isEmpty, objectiveIds.insert(objective.id).inserted else {
+                throw StoreError.invalidLearningPlan
+            }
+            objective.estimatedMinutes = min(max(objective.estimatedMinutes, 5), 1_440)
+            objective.completedAt = objective.state == .completed ? (objective.completedAt ?? date) : nil
+            return objective
+        }
+        return plan
     }
 
     public func updateUnresolvedQuestion(

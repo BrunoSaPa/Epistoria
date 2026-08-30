@@ -212,6 +212,24 @@ struct StudyView: View {
                 )
             }
         }
+        Section("Learning plans") {
+            let plannedGoals = goals.filter { $0.payload.state == .active && $0.payload.learningPlan != nil }
+            if plannedGoals.isEmpty {
+                Text("Add a target date and plan to a goal when you need a daily schedule.")
+                    .foregroundStyle(.secondary)
+            }
+            ForEach(plannedGoals.prefix(8), id: \.id) { goal in
+                NavigationLink {
+                    LearningManagementView(model: model, initialTarget: .goal(goal.id))
+                } label: {
+                    StudyRow(
+                        title: goal.payload.title,
+                        detail: learningPlanDetail(goal),
+                        symbol: learningPlanSymbol(goal)
+                    )
+                }
+            }
+        }
         Section("Open goals") {
             if goals.filter({ $0.payload.state == .active }).isEmpty {
                 Text("No active goals.").foregroundStyle(.secondary)
@@ -337,9 +355,9 @@ struct StudyView: View {
                 } label: {
                     StudyRow(
                         title: goal.payload.title,
-                        detail: goal.payload.targetDate.map {
+                        detail: goal.payload.learningPlan == nil ? goal.payload.targetDate.map {
                             "\(topicName(goal.payload.topicId)) · \(goalDueLabel($0))"
-                        } ?? topicName(goal.payload.topicId),
+                        } ?? topicName(goal.payload.topicId) : learningPlanDetail(goal),
                         symbol: "target"
                     )
                 }
@@ -604,6 +622,7 @@ struct StudyView: View {
             tests: tests,
             attempts: attempts,
             dueCardCounts: Dictionary(grouping: dueCards, by: \.payload.topicId).mapValues(\.count),
+            learningPlanProjections: learningPlanProjections,
             storedRecommendations: recommendations,
             now: .now
         )
@@ -637,6 +656,41 @@ struct StudyView: View {
             if leftPinned != rightPinned { return leftPinned }
             if $0.score != $1.score { return $0.score > $1.score }
             return $0.title < $1.title
+        }
+    }
+
+    private var learningPlanProjections: [UUID: LearningPlanProjection] {
+        Dictionary(uniqueKeysWithValues: goals.compactMap { goal in
+            LearningPlanEngine.project(
+                goalId: goal.id,
+                goal: goal.payload,
+                attempts: attempts,
+                responses: testResponses,
+                now: .now
+            ).map { (goal.id, $0) }
+        })
+    }
+
+    private func learningPlanDetail(_ goal: IdentifiedPayload<StudyGoalPayload>) -> String {
+        guard let projection = learningPlanProjections[goal.id] else { return topicName(goal.payload.topicId) }
+        switch projection.readiness {
+        case .needsDeadline: return "Needs a target date"
+        case .needsObjectives: return "Add coverage objectives"
+        case .ready: return "All objectives complete"
+        case .reviewRecommended: return "Complete · review recorded weak answers"
+        case .overdue: return "Overdue · \(projection.remainingMinutes) min remaining"
+        case .atRisk: return "At risk · \(projection.minutesRequiredPerStudyDay) min per study day"
+        case .catchUpNeeded: return "Catch up \(projection.catchUpMinutes) min · \(projection.minutesRequiredPerStudyDay) min per study day"
+        case .onTrack: return "On track · \(projection.minutesRequiredPerStudyDay) min per study day"
+        }
+    }
+
+    private func learningPlanSymbol(_ goal: IdentifiedPayload<StudyGoalPayload>) -> String {
+        switch learningPlanProjections[goal.id]?.readiness {
+        case .ready: "checkmark.circle"
+        case .onTrack: "calendar.badge.checkmark"
+        case .catchUpNeeded, .atRisk, .overdue, .reviewRecommended: "exclamationmark.circle"
+        case .needsDeadline, .needsObjectives, nil: "calendar"
         }
     }
 

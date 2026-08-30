@@ -62,6 +62,15 @@ Epistoria remains in personal beta. The following limits apply to the current pr
   remain on disk after an item is permanently removed.
 - Some undo actions remain available only while the current screen is open.
 
+## Learning plans
+
+- Learning plans use owner-supplied time estimates and explicit objective completion. They do not
+  infer completed coverage from time spent in a session.
+- Test evidence appears only when a plan objective was imported from a matching test blueprint.
+  Manually written objectives are not matched by title.
+- Calendar, locale, two-device conflict, and large-plan interaction still require physical-iPad
+  validation.
+
 ## Device validation
 
 - Physical iPad Pencil, large-file, accessibility, rotation, multitasking, keyboard, and pointer

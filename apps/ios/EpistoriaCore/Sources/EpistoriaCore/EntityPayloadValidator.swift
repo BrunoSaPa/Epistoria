@@ -125,7 +125,7 @@ public enum EntityPayloadValidator {
         case .conceptEvidence: ["concept-evidence/v1"]
         case .conceptLink: ["concept-link/v1"]
         case .knowledgeMap: ["knowledge-map/v1"]
-        case .studyGoal: ["study-goal/v1"]
+        case .studyGoal: ["study-goal/v1", "study-goal/v2"]
         case .unresolvedQuestion: ["unresolved-question/v1"]
         case .sessionActivity: ["session-activity/v1"]
         case .flashcardDeck: ["flashcard-deck/v1"]
