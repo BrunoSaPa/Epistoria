@@ -10,7 +10,7 @@ change after personal use and beta testing.
 - Complete two-device synchronization and concurrent-version testing.
 - Complete fresh-device recovery and independent backup drills.
 - Complete private installation and update testing.
-- Test version 7 clean-notebook import on a physical spare iPad with representative data.
+- Test version 8 clean-notebook import on a physical spare iPad with representative data.
 
 ## Portability and file access
 

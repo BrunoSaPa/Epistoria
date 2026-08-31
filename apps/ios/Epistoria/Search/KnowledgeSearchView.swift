@@ -5,7 +5,7 @@ struct KnowledgeSearchView: View {
     private enum Scope: String, CaseIterable, Identifiable {
         case all = "All"
         case notes = "Notes"
-        case resources = "Resources"
+        case sources = "Sources"
         case evidence = "Evidence"
         case sessions = "Sessions"
 
@@ -17,6 +17,7 @@ struct KnowledgeSearchView: View {
     @State private var hits: [SearchHit] = []
     @State private var scope = Scope.all
     @State private var isSearching = false
+    @State private var isSearchingRelated = false
     @State private var errorMessage: String?
 
     var body: some View {
@@ -28,8 +29,12 @@ struct KnowledgeSearchView: View {
                         systemImage: "text.magnifyingglass",
                         description: Text("Titles, notes, transcriptions, annotations, Sources, and labeled local OCR are indexed only inside the encrypted database.")
                     )
-                } else if isSearching {
-                    ProgressView("Searching locally…")
+                } else if isSearching || (hits.isEmpty && isSearchingRelated) {
+                    ProgressView(
+                        isSearching
+                            ? "Searching locally…"
+                            : "Finding related results on this iPad…"
+                    )
                 } else if hits.isEmpty {
                     ContentUnavailableView {
                         Label("No matches", systemImage: "magnifyingglass")
@@ -61,6 +66,15 @@ struct KnowledgeSearchView: View {
                                 Text("Matched by meaning on this iPad. Related results never use your AI provider.")
                             }
                         }
+                        if isSearchingRelated {
+                            Section("Related") {
+                                HStack(spacing: 10) {
+                                    ProgressView()
+                                    Text("Finding related results on this iPad…")
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -88,20 +102,37 @@ struct KnowledgeSearchView: View {
             return
         }
         isSearching = true
+        isSearchingRelated = false
         if !skipDelay { try? await Task.sleep(for: .milliseconds(220)) }
         guard !Task.isCancelled else { return }
         do {
-            async let searchResults = database.search(clean, entityTypes: scopedEntityTypes)
+            async let searchResults = database.search(
+                clean,
+                entityTypes: scopedEntityTypes,
+                includeRelated: false
+            )
             async let trashedTargets = store.trashedTargetIds()
             let result = try await (searchResults, trashedTargets)
             guard !Task.isCancelled else { return }
-            hits = result.0.filter {
+            let visibleExact = result.0.filter {
                 !result.1.contains($0.entity.id)
                     && !($0.entity.parentId.map { result.1.contains($0) } ?? false)
             }
+            hits = visibleExact
             isSearching = false
+
+            guard visibleExact.count < 50 else { return }
+            isSearchingRelated = true
+            let hybrid = try await database.search(clean, entityTypes: scopedEntityTypes)
+            guard !Task.isCancelled else { return }
+            hits = hybrid.filter {
+                !result.1.contains($0.entity.id)
+                    && !($0.entity.parentId.map { result.1.contains($0) } ?? false)
+            }
+            isSearchingRelated = false
         } catch {
             isSearching = false
+            isSearchingRelated = false
             errorMessage = error.localizedDescription
         }
     }
@@ -112,8 +143,8 @@ struct KnowledgeSearchView: View {
             nil
         case .notes:
             [.note, .noteBlock]
-        case .resources:
-            [.resource, .asset, .annotation, .transcriptCorrection]
+        case .sources:
+            [.source, .asset, .annotation, .transcriptCorrection]
         case .evidence:
             [.evidence]
         case .sessions:
@@ -170,14 +201,10 @@ struct KnowledgeSearchView: View {
             return (try? CanonicalJSON.decode(NotePayload.self, from: content).title) ?? "Note"
         case .studySession:
             return (try? CanonicalJSON.decode(StudySessionPayload.self, from: content).title) ?? "Session"
-        case .resource:
-            return (try? CanonicalJSON.decode(ResourcePayload.self, from: content).title) ?? "Resource"
-        case .course:
-            return (try? CanonicalJSON.decode(CoursePayload.self, from: content).name) ?? "Course"
-        case .institution:
-            return (try? CanonicalJSON.decode(InstitutionPayload.self, from: content).name) ?? "Institution"
-        case .academicTerm:
-            return (try? CanonicalJSON.decode(AcademicTermPayload.self, from: content).name) ?? "Academic term"
+        case .source:
+            return (try? CanonicalJSON.decode(SourcePayload.self, from: content).title) ?? "Source"
+        case .topic:
+            return (try? CanonicalJSON.decode(TopicPayload.self, from: content).name) ?? "Topic"
         case .noteBlock: return "Note excerpt"
         case .annotation: return "Annotation"
         case .transcriptCorrection: return "Transcript correction"
@@ -201,8 +228,8 @@ struct KnowledgeSearchView: View {
         return switch hit.entity.entityType {
         case .note, .noteBlock: "doc.text"
         case .studySession: "timer"
-        case .resource, .asset: "books.vertical"
-        case .course, .institution, .academicTerm: "building.columns"
+        case .source, .asset: "books.vertical"
+        case .topic: "square.grid.2x2"
         case .annotation, .transcriptCorrection: "note.text"
         case .aiArtifact: "sparkles"
         default: "link"
@@ -260,10 +287,10 @@ private struct SearchDestination: View {
             }
         case .studySession:
             SessionDetailView(model: model, sessionId: hit.entity.id)
-        case .resource:
-            ResourceDetailView(
+        case .source:
+            SourceDetailView(
                 model: model,
-                resourceId: hit.entity.id,
+                sourceId: hit.entity.id,
                 initialSourceVersionId: hit.locator?.sourceVersionId,
                 initialPageNumber: hit.locator?.pageNumber,
                 highlightText: navigationSearchText(for: hit),
@@ -272,9 +299,9 @@ private struct SearchDestination: View {
             )
         case .annotation:
             if let annotation = try? CanonicalJSON.decode(AnnotationPayload.self, from: hit.entity.content) {
-                ResourceDetailView(
+                SourceDetailView(
                     model: model,
-                    resourceId: annotation.resourceId,
+                    sourceId: annotation.sourceId,
                     sessionId: annotation.studySessionId,
                     initialPageNumber: annotation.pageNumber,
                     focusedAnnotationId: hit.entity.id,
@@ -288,9 +315,9 @@ private struct SearchDestination: View {
                 TranscriptCorrectionPayload.self,
                 from: hit.entity.content
             ) {
-                ResourceDetailView(
+                SourceDetailView(
                     model: model,
-                    resourceId: correction.sourceId,
+                    sourceId: correction.sourceId,
                     initialSourceVersionId: correction.sourceVersionId,
                     highlightText: correction.correctedText,
                     initialMediaTimeSeconds: correction.startSeconds
@@ -300,9 +327,9 @@ private struct SearchDestination: View {
             }
         case .evidence:
             if let evidence = try? CanonicalJSON.decode(EvidencePayload.self, from: hit.entity.content) {
-                ResourceDetailView(
+                SourceDetailView(
                     model: model,
-                    resourceId: evidence.sourceId,
+                    sourceId: evidence.sourceId,
                     initialSourceVersionId: evidence.sourceVersionId,
                     initialPageNumber: evidence.locator.page,
                     highlightText: evidence.excerpt,
@@ -325,9 +352,9 @@ private struct SearchDestination: View {
                         focusRectangles: ocr.locator?.rectangles ?? ocr.response.regions.flatMap(\.rectangles)
                     )
                 } else {
-                    ResourceDetailView(
+                    SourceDetailView(
                         model: model,
-                        resourceId: ocr.parentId,
+                        sourceId: ocr.parentId,
                         initialSourceVersionId: ocr.sourceVersionId,
                         initialPageNumber: ocr.pageNumber,
                         highlightText: navigationSearchText(for: hit) ?? ocr.recognizedText,
@@ -343,19 +370,19 @@ private struct SearchDestination: View {
                 SessionDetailView(model: model, sessionId: artifact.sessionId)
             } else if let chunk = try? CanonicalJSON.decode(PDFExtractionChunk.self, from: hit.entity.content) {
                 let term = navigationSearchText(for: hit)
-                ResourceDetailView(
+                SourceDetailView(
                     model: model,
-                    resourceId: chunk.resourceId,
+                    sourceId: chunk.sourceId,
                     initialPageNumber: matchingPage(in: chunk, term: term),
                     highlightText: term
                 )
             } else if let manifest = try? CanonicalJSON.decode(PDFExtractionManifest.self, from: hit.entity.content) {
-                ResourceDetailView(model: model, resourceId: manifest.resourceId)
+                SourceDetailView(model: model, sourceId: manifest.sourceId)
             } else if let manifest = try? CanonicalJSON.decode(
                 MediaTranscriptionManifest.self,
                 from: hit.entity.content
             ) {
-                ResourceDetailView(model: model, resourceId: manifest.sourceId)
+                SourceDetailView(model: model, sourceId: manifest.sourceId)
             } else {
                 SearchRecordView(hit: hit)
             }

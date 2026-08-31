@@ -320,7 +320,7 @@ extension PackagedDocumentAdapter {
 }
 
 public struct DOCXSourceAdapter: PackagedDocumentAdapter {
-    public let sourceType = ResourceKind.docx
+    public let sourceType = SourceKind.docx
     public let supportedExtensions: Set<String> = ["docx"]
     fileprivate let requiredPaths: Set<String> = ["[Content_Types].xml", "word/document.xml"]
     fileprivate let limits = ArchiveSafetyLimits.document
@@ -345,7 +345,7 @@ public struct DOCXSourceAdapter: PackagedDocumentAdapter {
 }
 
 public struct PPTXSourceAdapter: PackagedDocumentAdapter {
-    public let sourceType = ResourceKind.pptx
+    public let sourceType = SourceKind.pptx
     public let supportedExtensions: Set<String> = ["pptx"]
     fileprivate let requiredPaths: Set<String> = [
         "[Content_Types].xml",
@@ -386,7 +386,7 @@ public struct PPTXSourceAdapter: PackagedDocumentAdapter {
 }
 
 public struct ODTSourceAdapter: PackagedDocumentAdapter {
-    public let sourceType = ResourceKind.odt
+    public let sourceType = SourceKind.odt
     public let supportedExtensions: Set<String> = ["odt"]
     fileprivate let requiredPaths: Set<String> = ["mimetype", "content.xml"]
     fileprivate let limits = ArchiveSafetyLimits.document
@@ -408,7 +408,7 @@ public struct ODTSourceAdapter: PackagedDocumentAdapter {
 }
 
 public struct ODPSourceAdapter: PackagedDocumentAdapter {
-    public let sourceType = ResourceKind.odp
+    public let sourceType = SourceKind.odp
     public let supportedExtensions: Set<String> = ["odp"]
     fileprivate let requiredPaths: Set<String> = ["mimetype", "content.xml"]
     fileprivate let limits = ArchiveSafetyLimits.document
@@ -475,7 +475,7 @@ private final class EPUBPackageParser: NSObject, XMLParserDelegate {
 }
 
 public struct EPUBSourceAdapter: PackagedDocumentAdapter {
-    public let sourceType = ResourceKind.epub
+    public let sourceType = SourceKind.epub
     public let supportedExtensions: Set<String> = ["epub"]
     fileprivate let requiredPaths: Set<String> = ["mimetype", "META-INF/container.xml"]
     fileprivate let limits = ArchiveSafetyLimits.epub
@@ -585,7 +585,7 @@ private final class XLSXWorksheetParser: NSObject, XMLParserDelegate {
 }
 
 public struct XLSXSourceAdapter: PackagedDocumentAdapter {
-    public let sourceType = ResourceKind.xlsx
+    public let sourceType = SourceKind.xlsx
     public let supportedExtensions: Set<String> = ["xlsx"]
     fileprivate let requiredPaths: Set<String> = [
         "[Content_Types].xml",

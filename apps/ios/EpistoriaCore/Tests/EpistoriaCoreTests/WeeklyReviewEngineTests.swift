@@ -12,7 +12,7 @@ final class WeeklyReviewEngineTests: XCTestCase {
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!
 
         let topic = identified(topicId, TopicPayload(name: "Algebra", now: now))
-        var session = StudySessionPayload(title: "Factorization", courseId: topicId, now: now.addingTimeInterval(-7_200))
+        var session = StudySessionPayload(title: "Factorization", topicId: topicId, now: now.addingTimeInterval(-7_200))
         session.state = .ended
         session.endedAt = now.addingTimeInterval(-3_600)
 
@@ -102,14 +102,14 @@ final class WeeklyReviewEngineTests: XCTestCase {
         archivedTopic.archived = true
         var oldSession = StudySessionPayload(
             title: "Old session",
-            courseId: activeTopicId,
+            topicId: activeTopicId,
             now: now.addingTimeInterval(-86_400 * 10)
         )
         oldSession.state = .ended
         oldSession.endedAt = now.addingTimeInterval(-86_400 * 9)
         var archivedSession = StudySessionPayload(
             title: "Archived Topic session",
-            courseId: archivedTopicId,
+            topicId: archivedTopicId,
             now: now.addingTimeInterval(-3_600)
         )
         archivedSession.state = .ended

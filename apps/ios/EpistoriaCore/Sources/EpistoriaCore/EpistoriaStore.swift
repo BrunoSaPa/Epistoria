@@ -14,6 +14,96 @@ public struct IdentifiedPayload<Payload: EntityPayload>: Sendable {
     }
 }
 
+public struct IdentifiedPayloadPage<Payload: EntityPayload>: Sendable {
+    public var items: [IdentifiedPayload<Payload>]
+    public var nextCursor: EntityPageCursor?
+
+    public init(items: [IdentifiedPayload<Payload>], nextCursor: EntityPageCursor?) {
+        self.items = items
+        self.nextCursor = nextCursor
+    }
+}
+
+public struct WorkspaceReadLimits: Equatable, Sendable {
+    public var notes: Int
+    public var lists: Int
+    public var sources: Int
+    public var topics: Int
+    public var sessions: Int
+
+    public init(notes: Int = 50, lists: Int = 50, sources: Int = 50, topics: Int = 50, sessions: Int = 25) {
+        self.notes = notes
+        self.lists = lists
+        self.sources = sources
+        self.topics = topics
+        self.sessions = sessions
+    }
+}
+
+public struct WorkspaceReadSnapshot: Sendable {
+    public var readAt: Date
+    public var notes: IdentifiedPayloadPage<NotePayload>
+    public var lists: IdentifiedPayloadPage<ListPayload>
+    public var sources: IdentifiedPayloadPage<SourcePayload>
+    public var topics: IdentifiedPayloadPage<TopicPayload>
+    public var sessions: IdentifiedPayloadPage<StudySessionPayload>
+}
+
+public struct LearningReadLimits: Equatable, Sendable {
+    public var topics: Int
+    public var sessions: Int
+    public var cards: Int
+    public var reviews: Int
+    public var tests: Int
+    public var attempts: Int
+    public var goals: Int
+    public var questions: Int
+    public var recommendations: Int
+    public var recommendationResponses: Int
+    public var testResponses: Int
+
+    public init(
+        topics: Int = 100,
+        sessions: Int = 50,
+        cards: Int = 50,
+        reviews: Int = 200,
+        tests: Int = 50,
+        attempts: Int = 50,
+        goals: Int = 50,
+        questions: Int = 50,
+        recommendations: Int = 100,
+        recommendationResponses: Int = 200,
+        testResponses: Int = 200
+    ) {
+        self.topics = topics
+        self.sessions = sessions
+        self.cards = cards
+        self.reviews = reviews
+        self.tests = tests
+        self.attempts = attempts
+        self.goals = goals
+        self.questions = questions
+        self.recommendations = recommendations
+        self.recommendationResponses = recommendationResponses
+        self.testResponses = testResponses
+    }
+}
+
+public struct LearningReadSnapshot: Sendable {
+    public var readAt: Date
+    public var topics: IdentifiedPayloadPage<TopicPayload>
+    public var sessions: IdentifiedPayloadPage<StudySessionPayload>
+    public var cards: IdentifiedPayloadPage<FlashcardPayload>
+    public var reviews: IdentifiedPayloadPage<FlashcardReviewPayload>
+    public var tests: IdentifiedPayloadPage<PracticeTestPayload>
+    public var attempts: IdentifiedPayloadPage<TestAttemptPayload>
+    public var goals: IdentifiedPayloadPage<StudyGoalPayload>
+    public var questions: IdentifiedPayloadPage<UnresolvedQuestionPayload>
+    public var recommendations: IdentifiedPayloadPage<StudyRecommendationPayload>
+    public var recommendationResponses: IdentifiedPayloadPage<RecommendationResponsePayload>
+    public var testResponses: IdentifiedPayloadPage<TestResponsePayload>
+}
+
 public enum StoreError: Error, Equatable {
     case entityNotFound
     case entityTypeMismatch
@@ -90,20 +180,14 @@ public enum EntitySearchIndexer {
             case .area:
                 let value = try CanonicalJSON.decode(AreaPayload.self, from: content)
                 return SearchDocument(title: value.name, body: value.areaDescription ?? "")
-            case .collection:
-                let value = try CanonicalJSON.decode(CollectionPayload.self, from: content)
+            case .list:
+                let value = try CanonicalJSON.decode(ListPayload.self, from: content)
                 return SearchDocument(title: value.name, body: "")
-            case .institution:
-                let value = try CanonicalJSON.decode(InstitutionPayload.self, from: content)
-                return SearchDocument(title: value.name, body: "")
-            case .academicTerm:
-                let value = try CanonicalJSON.decode(AcademicTermPayload.self, from: content)
-                return SearchDocument(title: value.name, body: "")
-            case .course:
+            case .topic:
                 let value = try CanonicalJSON.decode(TopicPayload.self, from: content)
                 return SearchDocument(
                     title: value.name,
-                    body: [value.officialClassName, value.code, value.professor, value.topicDescription]
+                    body: [value.institution, value.term, value.officialClassName, value.code, value.professor, value.topicDescription]
                         .compactMap(\ .self).joined(separator: "\n")
                 )
             case .studySession:
@@ -122,7 +206,7 @@ public enum EntitySearchIndexer {
                     body: [value.plainText, value.transcription].compactMap(\ .self)
                         .joined(separator: "\n")
                 )
-            case .resource:
+            case .source:
                 let value = try CanonicalJSON.decode(SourcePayload.self, from: content)
                 return SearchDocument(title: value.title, body: value.authors.joined(separator: "\n"))
             case .evidence:
@@ -182,7 +266,7 @@ public enum EntitySearchIndexer {
                 return nil
             case .recognitionArtifact, .recognitionDecision:
                 return nil
-            case .topicArea, .collectionItem, .sessionNote, .sessionResource, .sourceVersion,
+            case .topicArea, .listItem, .sessionNote, .sessionSource, .sourceVersion,
                  .conceptEvidence, .conceptLink, .knowledgeMap, .sessionActivity, .flashcardDeck, .flashcard,
                  .flashcardReview, .topicScopeSnapshot, .testBlueprint, .testAttempt,
                  .testResponse, .dailyReviewResponse, .recommendationResponse, .automationGrant:
@@ -210,35 +294,14 @@ public actor EpistoriaStore {
         try await payload(TopicPayload.self, id: id)
     }
 
-    /// Writes the upgraded Topic representation only after preserving the legacy encrypted
-    /// payload locally for recovery. The server transport type remains `COURSE`.
     @discardableResult
     public func saveTopic(id: UUID = UUID(), payload: TopicPayload) async throws -> UUID {
-        var migration: LocalMigrationBatch?
-        if let existing = try await database.entity(id: id),
-           existing.entityType == .course,
-           let object = try? JSONSerialization.jsonObject(with: existing.content) as? [String: Any],
-           object["schemaVersion"] as? String == "course/v1" {
-            migration = LocalMigrationBatch(
-                name: "course-to-topic/v1",
-                backupEntityId: id,
-                backupContent: existing.content
-            )
-        }
-        var upgraded = payload
-        upgraded.schemaVersion = "topic/v1"
-        let write = try localWrite(
+        try await save(
             id: id,
-            payload: upgraded,
-            parentId: upgraded.primaryAreaId,
-            relationIds: [
-                upgraded.primaryAreaId,
-                upgraded.institutionId,
-                upgraded.academicTermId,
-            ].compactMap(\ .self)
+            payload: payload,
+            parentId: payload.primaryAreaId,
+            relationIds: [payload.primaryAreaId].compactMap(\ .self)
         )
-        try await database.saveLocalBatch([write], migration: migration)
-        return id
     }
 
     @discardableResult
@@ -306,62 +369,31 @@ public actor EpistoriaStore {
             .map(\.payload.areaId)
     }
 
-    /// Lists are the presentation name for the existing Collection record. IDs and links do not
-    /// change, so synced notebooks require no destructive migration.
-    public func lists() async throws -> [IdentifiedPayload<CollectionPayload>] {
-        try await list(CollectionPayload.self)
+    public func lists() async throws -> [IdentifiedPayload<ListPayload>] {
+        try await list(ListPayload.self)
     }
 
     @discardableResult
-    public func createList(name: String, parentListId: UUID? = nil) async throws -> UUID {
-        try await save(
-            payload: CollectionPayload(name: name, parentCollectionId: parentListId),
-            parentId: parentListId,
-            relationIds: [parentListId].compactMap(\ .self)
-        )
+    public func createList(name: String) async throws -> UUID {
+        try await save(payload: ListPayload(name: name))
     }
 
     public func updateList(
         id: UUID,
         name: String,
-        parentListId: UUID?,
         archived: Bool,
         at date: Date = .now
     ) async throws {
-        if let parentListId {
-            guard parentListId != id else {
-                throw LocalDatabaseError.queryFailed("a List cannot contain itself")
-            }
-            _ = try await payload(CollectionPayload.self, id: parentListId)
-        }
-        var list = try await payload(CollectionPayload.self, id: id)
+        var list = try await payload(ListPayload.self, id: id)
         let cleanName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleanName.isEmpty else {
             throw LocalDatabaseError.queryFailed("a List needs a name")
         }
-        let migration: LocalMigrationBatch? = list.payload.schemaVersion == "collection/v1"
-            ? try await database.entity(id: id).map {
-                LocalMigrationBatch(
-                    name: "collection-to-list/v2",
-                    backupEntityId: id,
-                    backupContent: $0.content
-                )
-            }
-            : nil
-        list.payload.schemaVersion = "collection/v2"
+        list.payload.schemaVersion = "list/v1"
         list.payload.name = cleanName
-        list.payload.parentCollectionId = parentListId
         list.payload.archivedAt = archived ? (list.payload.archivedAt ?? date) : nil
         list.payload.updatedAt = date
-        try await database.saveLocalBatch(
-            try [localWrite(
-                id: id,
-                payload: list.payload,
-                parentId: parentListId,
-                relationIds: [parentListId].compactMap(\ .self)
-            )],
-            migration: migration
-        )
+        _ = try await save(id: id, payload: list.payload)
     }
 
     @discardableResult
@@ -598,6 +630,17 @@ public actor EpistoriaStore {
         )
     }
 
+    public func payloads<Payload: EntityPayload>(
+        _ type: Payload.Type,
+        ids: [UUID]
+    ) async throws -> [IdentifiedPayload<Payload>] {
+        let entities = try await database.entities(ids: ids)
+        guard entities.allSatisfy({ $0.entityType == Payload.entityType }) else {
+            throw StoreError.entityTypeMismatch
+        }
+        return try decode(entities, as: type)
+    }
+
     public func list<Payload: EntityPayload>(
         _ type: Payload.Type,
         parentId: UUID? = nil,
@@ -617,30 +660,164 @@ public actor EpistoriaStore {
         }
     }
 
+    public func list<Payload: EntityPayload>(
+        _ type: Payload.Type,
+        parentIds: [UUID],
+        limit: Int = 500
+    ) async throws -> [IdentifiedPayload<Payload>] {
+        let entities = try await database.entities(
+            type: Payload.entityType,
+            parentIds: parentIds,
+            limit: limit
+        )
+        return try decode(entities, as: type)
+    }
+
+    public func listPage<Payload: EntityPayload>(
+        _ type: Payload.Type,
+        parentId: UUID? = nil,
+        entityTypeOverride: EntityType? = nil,
+        limit: Int = 50,
+        after cursor: EntityPageCursor? = nil
+    ) async throws -> IdentifiedPayloadPage<Payload> {
+        let page = try await database.entitiesPage(
+            type: entityTypeOverride ?? Payload.entityType,
+            parentId: parentId,
+            limit: limit,
+            after: cursor
+        )
+        return IdentifiedPayloadPage(
+            items: try decode(page.entities, as: type),
+            nextCursor: page.nextCursor
+        )
+    }
+
+    public func workspaceSnapshot(
+        limits: WorkspaceReadLimits = WorkspaceReadLimits()
+    ) async throws -> WorkspaceReadSnapshot {
+        let snapshot = try await database.boundedSnapshot([
+            EntitySnapshotRequest(type: .note, limit: limits.notes),
+            EntitySnapshotRequest(type: .list, limit: limits.lists),
+            EntitySnapshotRequest(type: .source, limit: limits.sources),
+            EntitySnapshotRequest(type: .topic, limit: limits.topics),
+            EntitySnapshotRequest(type: .studySession, limit: limits.sessions),
+        ])
+        func page(for type: EntityType) throws -> StoredEntityPage {
+            guard let page = snapshot.slices.first(where: { $0.request.type == type })?.page
+            else { throw LocalDatabaseError.invalidRow }
+            return page
+        }
+        let notePage = try page(for: .note)
+        let listPage = try page(for: .list)
+        let sourcePage = try page(for: .source)
+        let topicPage = try page(for: .topic)
+        let sessionPage = try page(for: .studySession)
+        return WorkspaceReadSnapshot(
+            readAt: snapshot.readAt,
+            notes: IdentifiedPayloadPage(
+                items: try decode(notePage.entities, as: NotePayload.self),
+                nextCursor: notePage.nextCursor
+            ),
+            lists: IdentifiedPayloadPage(
+                items: try decode(listPage.entities, as: ListPayload.self),
+                nextCursor: listPage.nextCursor
+            ),
+            sources: IdentifiedPayloadPage(
+                items: try decode(sourcePage.entities, as: SourcePayload.self),
+                nextCursor: sourcePage.nextCursor
+            ),
+            topics: IdentifiedPayloadPage(
+                items: try decode(topicPage.entities, as: TopicPayload.self),
+                nextCursor: topicPage.nextCursor
+            ),
+            sessions: IdentifiedPayloadPage(
+                items: try decode(sessionPage.entities, as: StudySessionPayload.self),
+                nextCursor: sessionPage.nextCursor
+            )
+        )
+    }
+
+    public func sourceInboxCount() async throws -> Int {
+        try await database.sourceInboxCount()
+    }
+
+    public func learningSnapshot(
+        limits: LearningReadLimits = LearningReadLimits()
+    ) async throws -> LearningReadSnapshot {
+        let requests = [
+            EntitySnapshotRequest(type: .topic, limit: limits.topics),
+            EntitySnapshotRequest(type: .studySession, limit: limits.sessions),
+            EntitySnapshotRequest(type: .flashcard, limit: limits.cards),
+            EntitySnapshotRequest(type: .flashcardReview, limit: limits.reviews),
+            EntitySnapshotRequest(type: .practiceTest, limit: limits.tests),
+            EntitySnapshotRequest(type: .testAttempt, limit: limits.attempts),
+            EntitySnapshotRequest(type: .studyGoal, limit: limits.goals),
+            EntitySnapshotRequest(type: .unresolvedQuestion, limit: limits.questions),
+            EntitySnapshotRequest(type: .studyRecommendation, limit: limits.recommendations),
+            EntitySnapshotRequest(type: .recommendationResponse, limit: limits.recommendationResponses),
+            EntitySnapshotRequest(type: .testResponse, limit: limits.testResponses),
+        ]
+        let snapshot = try await database.boundedSnapshot(requests)
+        func page<Payload: EntityPayload>(
+            _ type: EntityType,
+            as payloadType: Payload.Type
+        ) throws -> IdentifiedPayloadPage<Payload> {
+            guard let stored = snapshot.slices.first(where: { $0.request.type == type })?.page
+            else { throw LocalDatabaseError.invalidRow }
+            return IdentifiedPayloadPage(
+                items: try decode(stored.entities, as: payloadType),
+                nextCursor: stored.nextCursor
+            )
+        }
+        return try LearningReadSnapshot(
+            readAt: snapshot.readAt,
+            topics: page(.topic, as: TopicPayload.self),
+            sessions: page(.studySession, as: StudySessionPayload.self),
+            cards: page(.flashcard, as: FlashcardPayload.self),
+            reviews: page(.flashcardReview, as: FlashcardReviewPayload.self),
+            tests: page(.practiceTest, as: PracticeTestPayload.self),
+            attempts: page(.testAttempt, as: TestAttemptPayload.self),
+            goals: page(.studyGoal, as: StudyGoalPayload.self),
+            questions: page(.unresolvedQuestion, as: UnresolvedQuestionPayload.self),
+            recommendations: page(.studyRecommendation, as: StudyRecommendationPayload.self),
+            recommendationResponses: page(.recommendationResponse, as: RecommendationResponsePayload.self),
+            testResponses: page(.testResponse, as: TestResponsePayload.self)
+        )
+    }
+
+    public func dueFlashcards(now: Date = .now, limit: Int = 100) async throws -> [IdentifiedPayload<FlashcardPayload>] {
+        let ids = try await database.dueFlashcardIds(now: now, limit: limit)
+        return try await payloads(FlashcardPayload.self, ids: ids)
+    }
+
+    public func dueFlashcardCountsByTopic(now: Date = .now) async throws -> [UUID: Int] {
+        try await database.dueFlashcardCountsByTopic(now: now)
+    }
+
     @discardableResult
     public func createNote(
         title: String,
-        courseId: UUID? = nil,
+        topicId: UUID? = nil,
         sessionId: UUID? = nil,
         canvas: NoteCanvasConfiguration = NoteCanvasConfiguration()
     ) async throws -> UUID {
         let noteId = UUID()
         let note = NotePayload(
             title: title,
-            courseId: courseId,
+            topicId: topicId,
             studySessionId: sessionId,
             canvas: canvas
         )
         var writes = try [localWrite(
             id: noteId,
             payload: note,
-            parentId: courseId ?? sessionId,
-            relationIds: [courseId, sessionId].compactMap(\ .self)
+            parentId: topicId ?? sessionId,
+            relationIds: [topicId, sessionId].compactMap(\ .self)
         )]
-        for pageIndex in 0 ..< canvas.effectivePageCount {
+        if canvas.pageFormat != .infinite {
             let page = NotePagePayload(
                 noteId: noteId,
-                orderKey: Self.notePageOrderKey(pageIndex),
+                orderKey: Self.notePageOrderKey(0),
                 configuration: canvas
             )
             writes.append(try localWrite(
@@ -669,52 +846,25 @@ public actor EpistoriaStore {
         return noteId
     }
 
-    /// Returns stable pages in visual order. Legacy notes are upgraded atomically on first open;
-    /// their block IDs, content, and zero-based order remain unchanged.
+    /// Returns stable pages in visual order. Fixed-page notes always have at least one page;
+    /// infinite canvases do not create page records.
     public func ensureNotePages(noteId: UUID) async throws -> [IdentifiedPayload<NotePagePayload>] {
         let existing = try await notePages(noteId: noteId, includeTrashed: true)
         guard existing.isEmpty else { return existing.filter { $0.payload.trashedAt == nil } }
 
         let note = try await payload(NotePayload.self, id: noteId)
         let configuration = note.payload.canvas ?? NoteCanvasConfiguration()
-        let count = configuration.effectivePageCount
-        let pageIds = (0 ..< count).map { _ in UUID() }
-        let blocks = try await list(NoteBlockPayload.self, parentId: noteId)
-        var writes: [LocalEntityWrite] = []
-
-        for index in 0 ..< count {
-            writes.append(try localWrite(
-                id: pageIds[index],
-                payload: NotePagePayload(
-                    noteId: noteId,
-                    orderKey: Self.notePageOrderKey(index),
-                    configuration: configuration
-                ),
-                parentId: noteId,
-                relationIds: [noteId]
-            ))
-        }
-        for identified in blocks {
-            var block = identified.payload
-            let index = min(max(block.canvasPageIndex ?? 0, 0), count - 1)
-            block.schemaVersion = "note-block/v7"
-            block.canvasPageId = pageIds[index]
-            block.updatedAt = .now
-            writes.append(try localWrite(
-                id: identified.id,
-                payload: block,
-                parentId: noteId,
-                relationIds: noteBlockRelationIds(block, pageId: pageIds[index])
-            ))
-        }
-        let backup = try await database.entity(id: noteId)?.content ?? CanonicalJSON.encode(note.payload)
-        try await database.saveLocalBatch(
-            writes,
-            migration: LocalMigrationBatch(
-                name: "indexed-pages-to-stable-pages/v1",
-                backupEntityId: noteId,
-                backupContent: backup
-            )
+        guard configuration.pageFormat != .infinite else { return [] }
+        let pageId = UUID()
+        _ = try await save(
+            id: pageId,
+            payload: NotePagePayload(
+                noteId: noteId,
+                orderKey: Self.notePageOrderKey(0),
+                configuration: configuration
+            ),
+            parentId: noteId,
+            relationIds: [noteId]
         )
         return try await notePages(noteId: noteId)
     }
@@ -742,6 +892,9 @@ public actor EpistoriaStore {
     ) async throws -> UUID {
         var pages = try await ensureNotePages(noteId: noteId)
         let note = try await payload(NotePayload.self, id: noteId)
+        guard note.payload.canvas?.pageFormat != .infinite else {
+            throw LocalDatabaseError.queryFailed("infinite canvases do not contain fixed pages")
+        }
         let insertionIndex = pageId.flatMap { id in pages.firstIndex { $0.id == id }.map { $0 + 1 } }
             ?? pages.count
         let newId = UUID()
@@ -762,7 +915,7 @@ public actor EpistoriaStore {
             syncState: .pending
         )
         pages.insert(page, at: min(max(insertionIndex, 0), pages.count))
-        try await savePageOrderAndCount(note: note, pages: pages, at: date)
+        try await savePageOrder(pages: pages, at: date)
         return newId
     }
 
@@ -778,6 +931,9 @@ public actor EpistoriaStore {
             throw StoreError.entityNotFound
         }
         let note = try await payload(NotePayload.self, id: noteId)
+        guard note.payload.canvas?.pageFormat != .infinite else {
+            throw LocalDatabaseError.queryFailed("infinite canvases do not contain fixed pages")
+        }
         let newId = UUID()
         let inherited = configuration ?? pages[insertionIndex].payload.configuration
         pages.insert(
@@ -794,7 +950,7 @@ public actor EpistoriaStore {
             ),
             at: insertionIndex
         )
-        try await savePageOrderAndCount(note: note, pages: pages, at: date)
+        try await savePageOrder(pages: pages, at: date)
         return newId
     }
 
@@ -821,15 +977,14 @@ public actor EpistoriaStore {
             at: sourceIndex + 1
         )
 
-        let note = try await payload(NotePayload.self, id: noteId)
         let sourceBlocks = try await list(NoteBlockPayload.self, parentId: noteId).filter {
-            !$0.payload.tombstone && $0.payload.canvasPageId == pageId
+            !$0.payload.tombstone && $0.payload.pageId == pageId
         }
         var writes = try pageOrderWrites(pages, at: date)
         for source in sourceBlocks {
             var copy = source.payload
-            copy.schemaVersion = "note-block/v7"
-            copy.canvasPageId = newPageId
+            copy.schemaVersion = "note-block/v8"
+            copy.pageId = newPageId
             copy.createdAt = date
             copy.updatedAt = date
             writes.append(try localWrite(
@@ -839,18 +994,6 @@ public actor EpistoriaStore {
                 relationIds: noteBlockRelationIds(copy, pageId: newPageId)
             ))
         }
-        var changedNote = note.payload
-        changedNote.schemaVersion = "note/v4"
-        var canvas = changedNote.canvas ?? NoteCanvasConfiguration()
-        canvas.pageCount = pages.count
-        changedNote.canvas = canvas
-        changedNote.updatedAt = date
-        writes.append(try localWrite(
-            id: noteId,
-            payload: changedNote,
-            parentId: changedNote.courseId ?? changedNote.studySessionId,
-            relationIds: [changedNote.courseId, changedNote.studySessionId].compactMap(\ .self)
-        ))
         try await database.saveLocalBatch(writes)
         return newPageId
     }
@@ -867,8 +1010,7 @@ public actor EpistoriaStore {
         }
         let page = pages.remove(at: sourceIndex)
         pages.insert(page, at: min(max(destinationIndex, 0), pages.count))
-        let note = try await payload(NotePayload.self, id: noteId)
-        try await savePageOrderAndCount(note: note, pages: pages, at: date)
+        try await savePageOrder(pages: pages, at: date)
     }
 
     public func updateNotePageConfiguration(
@@ -881,9 +1023,10 @@ public actor EpistoriaStore {
         guard page.payload.noteId == noteId, page.payload.trashedAt == nil else {
             throw StoreError.entityNotFound
         }
-        var pageConfiguration = configuration
-        pageConfiguration.pageCount = 1
-        page.payload.configuration = pageConfiguration
+        guard configuration.pageFormat != .infinite else {
+            throw LocalDatabaseError.queryFailed("fixed pages cannot use the infinite format")
+        }
+        page.payload.configuration = configuration
         page.payload.thumbnailRevision += 1
         page.payload.updatedAt = date
         _ = try await save(
@@ -892,6 +1035,109 @@ public actor EpistoriaStore {
             parentId: noteId,
             relationIds: [noteId]
         )
+    }
+
+    /// Changes the active page configuration and the note's default in one local transaction.
+    /// Switching between fixed paper and an infinite canvas also rewrites block page references
+    /// atomically, so content can never be stranded between the two page models.
+    public func updateNoteCanvasConfiguration(
+        noteId: UUID,
+        pageId: UUID?,
+        configuration: NoteCanvasConfiguration,
+        at date: Date = .now
+    ) async throws {
+        var note = try await payload(NotePayload.self, id: noteId)
+        let previous = note.payload.canvas ?? NoteCanvasConfiguration()
+        let wasInfinite = previous.pageFormat == .infinite
+        let becomesInfinite = configuration.pageFormat == .infinite
+        var writes: [LocalEntityWrite] = []
+        var deletionIds: [UUID] = []
+
+        note.payload.schemaVersion = "note/v5"
+        note.payload.canvas = configuration
+        note.payload.updatedAt = date
+        writes.append(try localWrite(
+            id: note.id,
+            payload: note.payload,
+            parentId: note.payload.topicId ?? note.payload.studySessionId,
+            relationIds: [note.payload.topicId, note.payload.studySessionId].compactMap(\ .self)
+        ))
+
+        if !wasInfinite, becomesInfinite {
+            let activePages = try await notePages(noteId: noteId)
+            guard activePages.count == 1,
+                  let fixedPage = activePages.first,
+                  pageId == nil || pageId == fixedPage.id
+            else {
+                throw LocalDatabaseError.queryFailed(
+                    "a multi-page note must stay on fixed paper"
+                )
+            }
+            let blocks = try await list(NoteBlockPayload.self, parentId: noteId)
+            for identified in blocks where identified.payload.pageId == fixedPage.id {
+                var block = identified.payload
+                block.schemaVersion = "note-block/v8"
+                block.pageId = nil
+                block.updatedAt = date
+                writes.append(try localWrite(
+                    id: identified.id,
+                    payload: block,
+                    parentId: noteId,
+                    relationIds: noteBlockRelationIds(block, pageId: nil)
+                ))
+            }
+            deletionIds = [fixedPage.id]
+        } else if wasInfinite, !becomesInfinite {
+            let activePages = try await notePages(noteId: noteId)
+            guard activePages.isEmpty else {
+                throw LocalDatabaseError.queryFailed(
+                    "an infinite canvas cannot already contain fixed pages"
+                )
+            }
+            let newPageId = UUID()
+            let page = NotePagePayload(
+                noteId: noteId,
+                orderKey: Self.notePageOrderKey(0),
+                configuration: configuration,
+                now: date
+            )
+            writes.append(try localWrite(
+                id: newPageId,
+                payload: page,
+                parentId: noteId,
+                relationIds: [noteId]
+            ))
+            let blocks = try await list(NoteBlockPayload.self, parentId: noteId)
+            for identified in blocks where identified.payload.pageId == nil {
+                var block = identified.payload
+                block.schemaVersion = "note-block/v8"
+                block.pageId = newPageId
+                block.updatedAt = date
+                writes.append(try localWrite(
+                    id: identified.id,
+                    payload: block,
+                    parentId: noteId,
+                    relationIds: noteBlockRelationIds(block, pageId: newPageId)
+                ))
+            }
+        } else if !becomesInfinite {
+            guard let pageId else { throw StoreError.entityNotFound }
+            var page = try await payload(NotePagePayload.self, id: pageId)
+            guard page.payload.noteId == noteId, page.payload.trashedAt == nil else {
+                throw StoreError.entityNotFound
+            }
+            page.payload.configuration = configuration
+            page.payload.thumbnailRevision += 1
+            page.payload.updatedAt = date
+            writes.append(try localWrite(
+                id: page.id,
+                payload: page.payload,
+                parentId: noteId,
+                relationIds: [noteId]
+            ))
+        }
+
+        try await database.saveLocalBatch(writes, deleting: deletionIds, deletedAt: date)
     }
 
     @discardableResult
@@ -909,7 +1155,7 @@ public actor EpistoriaStore {
         page.payload.trashedAt = date
         page.payload.updatedAt = date
         let blocks = try await list(NoteBlockPayload.self, parentId: noteId).filter {
-            !$0.payload.tombstone && $0.payload.canvasPageId == pageId
+            !$0.payload.tombstone && $0.payload.pageId == pageId
         }
         var writes = try [localWrite(
             id: pageId,
@@ -944,18 +1190,6 @@ public actor EpistoriaStore {
             parentId: noteId,
             relationIds: [noteId, pageId] + blocks.map(\.id)
         ))
-        var changedNote = try await payload(NotePayload.self, id: noteId)
-        var canvas = changedNote.payload.canvas ?? NoteCanvasConfiguration()
-        canvas.pageCount = pages.count - 1
-        changedNote.payload.schemaVersion = "note/v4"
-        changedNote.payload.canvas = canvas
-        changedNote.payload.updatedAt = date
-        writes.append(try localWrite(
-            id: noteId,
-            payload: changedNote.payload,
-            parentId: changedNote.payload.courseId ?? changedNote.payload.studySessionId,
-            relationIds: [changedNote.payload.courseId, changedNote.payload.studySessionId].compactMap(\ .self)
-        ))
         try await database.saveLocalBatch(writes)
         return trashId
     }
@@ -977,16 +1211,10 @@ public actor EpistoriaStore {
             $0.payload.targetId == targetId
         }) { return existing.id }
         var protectedDependencies = Set(dependencyIds)
-        if targetType == .resource {
+        if targetType == .source {
             protectedDependencies.formUnion(
                 try await list(EvidencePayload.self)
                     .filter { $0.payload.sourceId == targetId }
-                    .map(\.id)
-            )
-        } else if targetType == .collection {
-            protectedDependencies.formUnion(
-                try await list(CollectionPayload.self)
-                    .filter { $0.payload.parentCollectionId == targetId }
                     .map(\.id)
             )
         }
@@ -1025,7 +1253,7 @@ public actor EpistoriaStore {
             }
             throw StoreError.entityNotFound
         }
-        block.payload.schemaVersion = "note-block/v7"
+        block.payload.schemaVersion = "note-block/v8"
         block.payload.tombstone = true
         block.payload.updatedAt = date
         let trashId = UUID()
@@ -1042,7 +1270,7 @@ public actor EpistoriaStore {
                 id: id,
                 payload: block.payload,
                 parentId: block.payload.noteId,
-                relationIds: noteBlockRelationIds(block.payload, pageId: block.payload.canvasPageId)
+                relationIds: noteBlockRelationIds(block.payload, pageId: block.payload.pageId)
             ),
             try localWrite(
                 id: trashId,
@@ -1076,7 +1304,7 @@ public actor EpistoriaStore {
                 relationIds: [page.payload.noteId]
             ))
             let blocks = try await list(NoteBlockPayload.self, parentId: page.payload.noteId).filter {
-                $0.payload.canvasPageId == page.id
+                $0.payload.pageId == page.id
             }
             for identified in blocks {
                 var block = identified.payload
@@ -1089,20 +1317,6 @@ public actor EpistoriaStore {
                     relationIds: noteBlockRelationIds(block, pageId: page.id)
                 ))
             }
-            var note = try await payload(NotePayload.self, id: page.payload.noteId)
-            let activeCount = try await notePages(noteId: page.payload.noteId, includeTrashed: true)
-                .filter { $0.id == page.id || $0.payload.trashedAt == nil }.count
-            var canvas = note.payload.canvas ?? NoteCanvasConfiguration()
-            canvas.pageCount = activeCount
-            note.payload.schemaVersion = "note/v4"
-            note.payload.canvas = canvas
-            note.payload.updatedAt = date
-            writes.append(try localWrite(
-                id: note.id,
-                payload: note.payload,
-                parentId: note.payload.courseId ?? note.payload.studySessionId,
-                relationIds: [note.payload.courseId, note.payload.studySessionId].compactMap(\ .self)
-            ))
         } else if entry.payload.targetType == .noteBlock {
             var block = try await payload(NoteBlockPayload.self, id: entry.payload.targetId)
             block.payload.tombstone = false
@@ -1111,7 +1325,7 @@ public actor EpistoriaStore {
                 id: block.id,
                 payload: block.payload,
                 parentId: block.payload.noteId,
-                relationIds: noteBlockRelationIds(block.payload, pageId: block.payload.canvasPageId)
+                relationIds: noteBlockRelationIds(block.payload, pageId: block.payload.pageId)
             ))
         }
         try await database.saveLocalBatch(writes, deleting: [id], deletedAt: date)
@@ -1151,35 +1365,21 @@ public actor EpistoriaStore {
     /// Evidence, learning history, and owner-authored records are intentionally excluded.
     private static let permanentlyOwnedTrashTypes: Set<EntityType> = [
         .notePage, .noteBlock, .sourceVersion, .annotation,
-        .collectionItem, .sessionNote, .sessionResource,
+        .listItem, .sessionNote, .sessionSource,
         .aiArtifact, .recognitionArtifact, .recognitionDecision, .transcriptCorrection,
     ]
 
     private static let permanentlyLinkedTrashTypes: Set<EntityType> = [
         .notePage, .noteBlock,
-        .collectionItem, .sessionNote, .sessionResource,
+        .listItem, .sessionNote, .sessionSource,
         .aiArtifact, .recognitionArtifact, .recognitionDecision, .transcriptCorrection,
     ]
 
-    private func savePageOrderAndCount(
-        note: IdentifiedPayload<NotePayload>,
+    private func savePageOrder(
         pages: [IdentifiedPayload<NotePagePayload>],
         at date: Date
     ) async throws {
-        var writes = try pageOrderWrites(pages, at: date)
-        var changed = note.payload
-        changed.schemaVersion = "note/v4"
-        var canvas = changed.canvas ?? NoteCanvasConfiguration()
-        canvas.pageCount = max(pages.count, 1)
-        changed.canvas = canvas
-        changed.updatedAt = date
-        writes.append(try localWrite(
-            id: note.id,
-            payload: changed,
-            parentId: changed.courseId ?? changed.studySessionId,
-            relationIds: [changed.courseId, changed.studySessionId].compactMap(\ .self)
-        ))
-        try await database.saveLocalBatch(writes)
+        try await database.saveLocalBatch(try pageOrderWrites(pages, at: date))
     }
 
     private func pageOrderWrites(
@@ -1217,29 +1417,29 @@ public actor EpistoriaStore {
     /// Adds an existing note to a topic collection without moving or duplicating the note.
     /// The relationship is idempotent so repeated taps cannot create duplicate membership.
     @discardableResult
-    public func linkNote(_ noteId: UUID, toCollection collectionId: UUID) async throws -> UUID {
+    public func linkNote(_ noteId: UUID, toList listId: UUID) async throws -> UUID {
         _ = try await payload(NotePayload.self, id: noteId)
-        _ = try await payload(CollectionPayload.self, id: collectionId)
+        _ = try await payload(ListPayload.self, id: listId)
         let existing = try await list(
             RelationPayload.self,
-            parentId: collectionId,
-            entityTypeOverride: .collectionItem
+            parentId: listId,
+            entityTypeOverride: .listItem
         ).first {
-            $0.payload.schemaVersion == .collectionItem
-                && $0.payload.leftId == collectionId
+            $0.payload.schemaVersion == .listItem
+                && $0.payload.leftId == listId
                 && $0.payload.rightId == noteId
         }
         if let existing { return existing.id }
         let relation = RelationPayload(
-            kind: .collectionItem,
-            leftId: collectionId,
+            kind: .listItem,
+            leftId: listId,
             rightId: noteId
         )
         return try await save(
             payload: relation,
-            parentId: collectionId,
-            relationIds: [collectionId, noteId],
-            entityTypeOverride: .collectionItem
+            parentId: listId,
+            relationIds: [listId, noteId],
+            entityTypeOverride: .listItem
         )
     }
 
@@ -1247,18 +1447,18 @@ public actor EpistoriaStore {
     /// tombstoned in one local transaction so older duplicate links cannot keep the note visible.
     public func unlinkNote(
         _ noteId: UUID,
-        fromCollection collectionId: UUID,
+        fromList listId: UUID,
         at date: Date = .now
     ) async throws {
         _ = try await payload(NotePayload.self, id: noteId)
-        _ = try await payload(CollectionPayload.self, id: collectionId)
+        _ = try await payload(ListPayload.self, id: listId)
         let matches = try await list(
             RelationPayload.self,
-            parentId: collectionId,
-            entityTypeOverride: .collectionItem
+            parentId: listId,
+            entityTypeOverride: .listItem
         ).filter {
-            $0.payload.schemaVersion == .collectionItem
-                && $0.payload.leftId == collectionId
+            $0.payload.schemaVersion == .listItem
+                && $0.payload.leftId == listId
                 && $0.payload.rightId == noteId
         }
         guard !matches.isEmpty else { throw StoreError.relationshipNotFound }
@@ -1336,8 +1536,8 @@ public actor EpistoriaStore {
             writes.append(try localWrite(
                 id: noteId,
                 payload: note.payload,
-                parentId: note.payload.courseId,
-                relationIds: [note.payload.courseId].compactMap(\ .self)
+                parentId: note.payload.topicId,
+                relationIds: [note.payload.topicId].compactMap(\ .self)
             ))
         }
         try await database.saveLocalBatch(
@@ -1389,7 +1589,6 @@ public actor EpistoriaStore {
         noteId: UUID,
         text: String = "",
         placement: NoteCanvasPlacement,
-        pageIndex: Int = 0,
         pageId: UUID? = nil
     ) async throws -> UUID {
         let count = try await database.entities(type: .noteBlock, parentId: noteId).count
@@ -1400,8 +1599,7 @@ public actor EpistoriaStore {
             plainText: text
         )
         block.canvasPlacement = placement
-        block.canvasPageIndex = max(pageIndex, 0)
-        block.canvasPageId = pageId
+        block.pageId = pageId
         return try await save(
             payload: block,
             parentId: noteId,
@@ -1416,7 +1614,6 @@ public actor EpistoriaStore {
         noteId: UUID,
         evidenceId: UUID,
         placement: NoteCanvasPlacement,
-        pageIndex: Int = 0,
         pageId: UUID? = nil
     ) async throws -> UUID {
         _ = try await payload(NotePayload.self, id: noteId)
@@ -1433,8 +1630,7 @@ public actor EpistoriaStore {
         )
         block.evidenceId = evidenceId
         block.canvasPlacement = placement
-        block.canvasPageIndex = max(pageIndex, 0)
-        block.canvasPageId = pageId
+        block.pageId = pageId
         return try await save(
             payload: block,
             parentId: noteId,
@@ -1448,7 +1644,6 @@ public actor EpistoriaStore {
         assetId: UUID,
         filename: String,
         placement: NoteCanvasPlacement,
-        pageIndex: Int = 0,
         pageId: UUID? = nil
     ) async throws -> UUID {
         let count = try await database.entities(type: .noteBlock, parentId: noteId).count
@@ -1461,8 +1656,7 @@ public actor EpistoriaStore {
         block.assetId = assetId
         block.imageConfiguration = NoteCanvasImageConfiguration()
         block.canvasPlacement = placement
-        block.canvasPageIndex = max(pageIndex, 0)
-        block.canvasPageId = pageId
+        block.pageId = pageId
         return try await save(
             payload: block,
             parentId: noteId,
@@ -1504,14 +1698,14 @@ public actor EpistoriaStore {
         if let originalAssetId = changedConfiguration.originalAssetId {
             _ = try await payload(AssetPayload.self, id: originalAssetId)
         }
-        block.payload.schemaVersion = "note-block/v7"
+        block.payload.schemaVersion = "note-block/v8"
         block.payload.imageConfiguration = changedConfiguration.sanitized
         block.payload.updatedAt = date
         var writes = try [localWrite(
             id: id,
             payload: block.payload,
             parentId: block.payload.noteId,
-            relationIds: noteBlockRelationIds(block.payload, pageId: block.payload.canvasPageId)
+            relationIds: noteBlockRelationIds(block.payload, pageId: block.payload.pageId)
         )]
         if replacesRecognitionInput {
             writes.append(contentsOf: try await ocrArtifactWritesMarkingStale(
@@ -1529,7 +1723,6 @@ public actor EpistoriaStore {
         noteId: UUID,
         shape: NoteCanvasShape,
         placement: NoteCanvasPlacement,
-        pageIndex: Int = 0,
         pageId: UUID? = nil
     ) async throws -> UUID {
         let count = try await database.entities(type: .noteBlock, parentId: noteId).count
@@ -1541,8 +1734,7 @@ public actor EpistoriaStore {
         )
         block.canvasShape = shape
         block.canvasPlacement = placement
-        block.canvasPageIndex = max(pageIndex, 0)
-        block.canvasPageId = pageId
+        block.pageId = pageId
         return try await save(
             payload: block,
             parentId: noteId,
@@ -1555,7 +1747,6 @@ public actor EpistoriaStore {
         noteId: UUID,
         symbol: String,
         placement: NoteCanvasPlacement,
-        pageIndex: Int = 0,
         pageId: UUID? = nil
     ) async throws -> UUID {
         let count = try await database.entities(type: .noteBlock, parentId: noteId).count
@@ -1566,8 +1757,7 @@ public actor EpistoriaStore {
             plainText: symbol
         )
         block.canvasPlacement = placement
-        block.canvasPageIndex = max(pageIndex, 0)
-        block.canvasPageId = pageId
+        block.pageId = pageId
         return try await save(
             payload: block,
             parentId: noteId,
@@ -1578,7 +1768,6 @@ public actor EpistoriaStore {
     @discardableResult
     public func appendCanvasInkLayer(
         noteId: UUID,
-        pageIndex: Int = 0,
         pageId: UUID? = nil
     ) async throws -> UUID {
         let count = try await database.entities(type: .noteBlock, parentId: noteId).count
@@ -1588,8 +1777,7 @@ public actor EpistoriaStore {
             orderKey: String(format: "%012d", count * 1_000)
         )
         block.canvasRole = .inkLayer
-        block.canvasPageIndex = max(pageIndex, 0)
-        block.canvasPageId = pageId
+        block.pageId = pageId
         return try await save(
             payload: block,
             parentId: noteId,
@@ -1615,14 +1803,14 @@ public actor EpistoriaStore {
     @discardableResult
     public func startSession(
         title: String,
-        courseId: UUID? = nil,
+        topicId: UUID? = nil,
         goals: [String] = [],
         state: StudySessionState = .active,
         requireTopic: Bool = false,
         objective: String? = nil,
         startingNotes: String? = nil
     ) async throws -> UUID {
-        if requireTopic, courseId == nil {
+        if requireTopic, topicId == nil {
             throw StoreError.sessionTopicRequired
         }
         if state == .active {
@@ -1631,7 +1819,7 @@ public actor EpistoriaStore {
                 throw StoreError.activeSessionExists
             }
         }
-        var payload = StudySessionPayload(title: title, courseId: courseId, goals: goals)
+        var payload = StudySessionPayload(title: title, topicId: topicId, goals: goals)
         payload.state = state
         payload.objective = objective ?? goals.first
         payload.startingNotes = startingNotes
@@ -1640,8 +1828,8 @@ public actor EpistoriaStore {
         }
         return try await save(
             payload: payload,
-            parentId: courseId,
-            relationIds: [courseId].compactMap(\ .self)
+            parentId: topicId,
+            relationIds: [topicId].compactMap(\ .self)
         )
     }
 
@@ -1653,8 +1841,8 @@ public actor EpistoriaStore {
         _ = try await save(
             id: id,
             payload: identified.payload,
-            parentId: identified.payload.courseId,
-            relationIds: [identified.payload.courseId].compactMap(\ .self)
+            parentId: identified.payload.topicId,
+            relationIds: [identified.payload.topicId].compactMap(\ .self)
         )
     }
 
@@ -1683,8 +1871,8 @@ public actor EpistoriaStore {
         _ = try await save(
             id: id,
             payload: identified.payload,
-            parentId: identified.payload.courseId,
-            relationIds: [identified.payload.courseId].compactMap(\ .self)
+            parentId: identified.payload.topicId,
+            relationIds: [identified.payload.topicId].compactMap(\ .self)
         )
     }
 
@@ -1850,7 +2038,7 @@ public actor EpistoriaStore {
                 let sources = try await list(SourcePayload.self).filter {
                     $0.payload.primaryTopicId == artifact.topicId || $0.payload.relatedTopicIds.contains(artifact.topicId)
                 }
-                let notes = try await list(NotePayload.self).filter { $0.payload.courseId == artifact.topicId }
+                let notes = try await list(NotePayload.self).filter { $0.payload.topicId == artifact.topicId }
                 let concepts = try await list(ConceptPayload.self).filter { $0.payload.topicIds.contains(artifact.topicId) }
                 let scopeId = UUID()
                 let blueprintId = UUID()
@@ -2585,7 +2773,7 @@ public actor EpistoriaStore {
         let sources = try await list(SourcePayload.self).filter {
             $0.payload.primaryTopicId == topicId || $0.payload.relatedTopicIds.contains(topicId)
         }
-        let notes = try await list(NotePayload.self).filter { $0.payload.courseId == topicId }
+        let notes = try await list(NotePayload.self).filter { $0.payload.topicId == topicId }
         let concepts = try await list(ConceptPayload.self).filter { $0.payload.topicIds.contains(topicId) }
         let evidence = try await list(EvidencePayload.self).filter { value in
             sources.contains { $0.id == value.payload.sourceId }
@@ -2684,7 +2872,7 @@ public actor EpistoriaStore {
 
     @discardableResult
     public func createSource(
-        type: ResourceKind,
+        type: SourceKind,
         title: String,
         originalAssetId: UUID? = nil,
         canonicalURL: URL? = nil,
@@ -2731,13 +2919,13 @@ public actor EpistoriaStore {
         ]
         if let sessionId {
             let relationId = UUID()
-            let relation = RelationPayload(kind: .sessionResource, leftId: sessionId, rightId: sourceId, now: date)
+            let relation = RelationPayload(kind: .sessionSource, leftId: sessionId, rightId: sourceId, now: date)
             writes.append(try localWrite(
                 id: relationId,
                 payload: relation,
                 parentId: sessionId,
                 relationIds: [sessionId, sourceId]
-            ).overridingEntityType(.sessionResource))
+            ).overridingEntityType(.sessionSource))
             writes.append(try localWrite(
                 id: UUID(),
                 payload: SessionActivityPayload(sessionId: sessionId, itemId: sourceId, kind: .sourceAdded, now: date),
@@ -2801,7 +2989,7 @@ public actor EpistoriaStore {
         let topicIds = Array(Set(relatedTopicIds).subtracting([primaryTopicId].compactMap(\ .self)))
         if let primaryTopicId { _ = try await topic(id: primaryTopicId) }
         for topicId in topicIds { _ = try await topic(id: topicId) }
-        for listId in Set(listIds) { _ = try await payload(CollectionPayload.self, id: listId) }
+        for listId in Set(listIds) { _ = try await payload(ListPayload.self, id: listId) }
         var source = try await payload(SourcePayload.self, id: id)
         let cleanTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleanTitle.isEmpty else {
@@ -2860,7 +3048,7 @@ public actor EpistoriaStore {
         annotation: AnnotationPayload,
         sourceVersionId: UUID
     ) async throws -> (annotationId: UUID, evidenceId: UUID) {
-        let source = try await payload(SourcePayload.self, id: annotation.resourceId)
+        let source = try await payload(SourcePayload.self, id: annotation.sourceId)
         let version = try await payload(SourceVersionPayload.self, id: sourceVersionId)
         guard version.payload.sourceId == source.id else { throw SourceModelError.sourceVersionMismatch }
         let locator = SourceLocator(
@@ -3525,6 +3713,22 @@ public actor EpistoriaStore {
             search: EntitySearchIndexer.document(for: Payload.entityType, content: content),
             modifiedAt: payload.updatedAt
         )
+    }
+
+    private func decode<Payload: EntityPayload>(
+        _ entities: [StoredEntity],
+        as type: Payload.Type
+    ) throws -> [IdentifiedPayload<Payload>] {
+        try entities.map { entity in
+            guard entity.entityType == Payload.entityType || Payload.self == RelationPayload.self
+            else { throw StoreError.entityTypeMismatch }
+            return IdentifiedPayload(
+                id: entity.id,
+                payload: try CanonicalJSON.decode(type, from: entity.content),
+                revision: entity.revision,
+                syncState: entity.syncState
+            )
+        }
     }
 }
 

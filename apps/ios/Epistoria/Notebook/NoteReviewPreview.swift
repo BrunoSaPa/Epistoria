@@ -19,7 +19,7 @@ struct NoteOrganizationSummary: Equatable {
         if isUnassigned { return "Unassigned · Organize later" }
         var parts: [String] = []
         if let first = collectionNames.first {
-            parts.append(collectionNames.count == 1 ? "Collection · \(first)" : "\(collectionNames.count) collections")
+            parts.append(collectionNames.count == 1 ? "List · \(first)" : "\(collectionNames.count) Lists")
         }
         if let first = sessionTitles.first {
             parts.append(sessionTitles.count == 1 ? "Session · \(first)" : "\(sessionTitles.count) sessions")
@@ -32,12 +32,12 @@ enum NoteOrganizationIndex {
     static func load(
         store: EpistoriaStore,
         notes: [IdentifiedPayload<NotePayload>],
-        collections: [IdentifiedPayload<CollectionPayload>],
+        collections: [IdentifiedPayload<ListPayload>],
         sessions: [IdentifiedPayload<StudySessionPayload>]
     ) async throws -> [UUID: NoteOrganizationSummary] {
         async let collectionLinks = store.list(
             RelationPayload.self,
-            entityTypeOverride: .collectionItem
+            entityTypeOverride: .listItem
         )
         async let sessionLinks = store.list(
             RelationPayload.self,
@@ -50,7 +50,7 @@ enum NoteOrganizationIndex {
         var result = Dictionary(uniqueKeysWithValues: noteIDs.map { ($0, NoteOrganizationSummary()) })
 
         for link in links.0 where noteIDs.contains(link.payload.rightId) {
-            guard link.payload.schemaVersion == .collectionItem,
+            guard link.payload.schemaVersion == .listItem,
                   let name = collectionNames[link.payload.leftId]
             else { continue }
             result[link.payload.rightId, default: NoteOrganizationSummary()].collectionNames.append(name)
@@ -82,6 +82,7 @@ struct NoteReviewPreview: View {
     var context: String?
 
     @State private var blocks: [IdentifiedPayload<NoteBlockPayload>] = []
+    @State private var fixedPageCount = 1
 
     var body: some View {
         HStack(alignment: .top, spacing: 14) {
@@ -152,13 +153,19 @@ struct NoteReviewPreview: View {
 
     private var pageLabel: String {
         if configuration.pageFormat == .infinite { return "Infinite canvas" }
-        let count = configuration.effectivePageCount
+        let count = fixedPageCount
         return "\(count) page\(count == 1 ? "" : "s")"
     }
 
     private func loadPreview() async {
         guard let store = model.store else { return }
-        blocks = (try? await store.list(NoteBlockPayload.self, parentId: note.id)) ?? []
+        async let loadedBlocks = store.list(NoteBlockPayload.self, parentId: note.id)
+        async let loadedPages = store.notePages(noteId: note.id)
+        blocks = (try? await loadedBlocks) ?? []
+        let pages = (try? await loadedPages) ?? []
+        fixedPageCount = configuration.pageFormat == .infinite
+            ? 1
+            : max(pages.count, 1)
     }
 }
 
@@ -268,7 +275,7 @@ struct NoteOrganizationView: View {
     var onChanged: (() -> Void)?
 
     @State private var note: IdentifiedPayload<NotePayload>?
-    @State private var collections: [IdentifiedPayload<CollectionPayload>] = []
+    @State private var collections: [IdentifiedPayload<ListPayload>] = []
     @State private var sessions: [IdentifiedPayload<StudySessionPayload>] = []
     @State private var linkedCollectionIds: Set<UUID> = []
     @State private var linkedSessionIds: Set<UUID> = []
@@ -287,12 +294,12 @@ struct NoteOrganizationView: View {
                         )
                     }
                 } footer: {
-                    Text("Collections organize notes by topic. Sessions collect the notes used during one focused study period. Linking never duplicates the note.")
+                    Text("Lists group related notes across Topics. Sessions collect the notes used during one focused study period. Linking never duplicates the note.")
                 }
 
-                Section("Collections · by topic") {
+                Section("Lists") {
                     if collections.isEmpty {
-                        Text("No collections available")
+                        Text("No Lists available")
                             .foregroundStyle(EpistoriaDesign.mutedInk)
                     }
                     ForEach(collections, id: \.id) { collection in
@@ -395,11 +402,11 @@ struct NoteOrganizationView: View {
         guard let store = model.store else { return }
         do {
             async let loadedNote = store.payload(NotePayload.self, id: noteId)
-            async let loadedCollections = store.list(CollectionPayload.self)
+            async let loadedCollections = store.list(ListPayload.self)
             async let loadedSessions = store.list(StudySessionPayload.self)
             async let collectionLinks = store.list(
                 RelationPayload.self,
-                entityTypeOverride: .collectionItem
+                entityTypeOverride: .listItem
             )
             async let sessionLinks = store.list(
                 RelationPayload.self,
@@ -423,9 +430,9 @@ struct NoteOrganizationView: View {
         } catch { errorMessage = error.localizedDescription }
     }
 
-    private func linkToCollection(_ collectionId: UUID) async throws -> UUID {
+    private func linkToCollection(_ listId: UUID) async throws -> UUID {
         guard let store = model.store else { throw NoteOrganizationError.notebookUnavailable }
-        return try await store.linkNote(noteId, toCollection: collectionId)
+        return try await store.linkNote(noteId, toList: listId)
     }
 
     private func linkToSession(_ sessionId: UUID) async throws -> UUID {
@@ -449,7 +456,7 @@ struct AddNotesToSessionView: View {
         NavigationStack {
             List {
                 Section {
-                    Text("Add existing notes to this focused study period. The original note stays in the notebook and in every collection that already uses it.")
+                    Text("Add existing notes to this focused study period. The original note stays in the notebook and in every List that already uses it.")
                         .font(.subheadline)
                         .foregroundStyle(EpistoriaDesign.mutedInk)
                 }

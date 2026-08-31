@@ -5,7 +5,7 @@ import UniformTypeIdentifiers
 private enum TodayDestination: Hashable {
     case note(UUID)
     case session(UUID)
-    case resource(UUID)
+    case source(UUID)
     case dailyReview
 }
 
@@ -14,12 +14,10 @@ struct TodayView: View {
 
     @State private var notes: [IdentifiedPayload<NotePayload>] = []
     @State private var sessions: [IdentifiedPayload<StudySessionPayload>] = []
-    @State private var resources: [IdentifiedPayload<ResourcePayload>] = []
-    @State private var courses: [IdentifiedPayload<CoursePayload>] = []
+    @State private var resources: [IdentifiedPayload<SourcePayload>] = []
     @State private var topics: [IdentifiedPayload<TopicPayload>] = []
     @State private var sourceInboxCount = 0
-    @State private var cards: [IdentifiedPayload<FlashcardPayload>] = []
-    @State private var reviews: [IdentifiedPayload<FlashcardReviewPayload>] = []
+    @State private var dueCardCountsByTopic: [UUID: Int] = [:]
     @State private var tests: [IdentifiedPayload<PracticeTestPayload>] = []
     @State private var attempts: [IdentifiedPayload<TestAttemptPayload>] = []
     @State private var goals: [IdentifiedPayload<StudyGoalPayload>] = []
@@ -87,14 +85,14 @@ struct TodayView: View {
                     NoteEditorView(model: model, noteId: id)
                 case let .session(id):
                     SessionDetailView(model: model, sessionId: id)
-                case let .resource(id):
-                    ResourceDetailView(model: model, resourceId: id)
+                case let .source(id):
+                    SourceDetailView(model: model, sourceId: id)
                 case .dailyReview:
                     DailyEvidenceReviewView(model: model)
                 }
             }
             .sheet(isPresented: $showNewSession) {
-                NewSessionView(model: model, courses: courses) { id in
+                NewSessionView(model: model, topics: topics.filter { !$0.payload.archived }) { id in
                     Task {
                         await load()
                         destination = .session(id)
@@ -255,7 +253,7 @@ struct TodayView: View {
                 .buttonStyle(EpistoriaPressButtonStyle())
             }
             HStack(spacing: 18) {
-                Button("\(dueCards.count) due") {
+                Button("\(dueCardCount) due") {
                     model.learningLaunchContext = LearningLaunchContext(destination: .review)
                     model.selectedSection = .learning
                 }
@@ -276,7 +274,7 @@ struct TodayView: View {
     }
 
     private var hasLearningActivity: Bool {
-        nextRecommendation != nil || !dueCards.isEmpty || !unfinishedAttempts.isEmpty
+        nextRecommendation != nil || dueCardCount > 0 || !unfinishedAttempts.isEmpty
             || dailyReviewDueCount > 0
     }
 
@@ -322,7 +320,7 @@ struct TodayView: View {
         VStack(alignment: .leading, spacing: 14) {
             EpistoriaSectionHeading(
                 title: "Recent",
-                subtitle: "Open the notes and resources you touched most recently."
+                subtitle: "Open the notes and Sources you touched most recently."
             )
 
             if notes.isEmpty && resources.isEmpty {
@@ -367,12 +365,12 @@ struct TodayView: View {
 
                     ForEach(resources.prefix(4), id: \.id) { resource in
                         Button {
-                            destination = .resource(resource.id)
+                            destination = .source(resource.id)
                         } label: {
                             recentRow(
                                 title: resource.payload.title,
                                 detail: "Imported \(resource.payload.importedAt.formatted(.relative(presentation: .named)))",
-                                symbol: resource.payload.resourceType.epistoriaSymbol,
+                                symbol: resource.payload.sourceType.epistoriaSymbol,
                                 pending: resource.syncState != .synced
                             )
                         }
@@ -428,13 +426,7 @@ struct TodayView: View {
         sessions.first { $0.payload.state == .active || $0.payload.state == .paused }
     }
 
-    private var dueCards: [IdentifiedPayload<FlashcardPayload>] {
-        cards.filter { card in
-            guard card.payload.archivedAt == nil, card.payload.suspendedAt == nil else { return false }
-            let latest = reviews.filter { $0.payload.cardId == card.id }.max { $0.payload.reviewedAt < $1.payload.reviewedAt }
-            return (latest?.payload.resultingState.dueAt ?? card.payload.createdAt) <= .now
-        }
-    }
+    private var dueCardCount: Int { dueCardCountsByTopic.values.reduce(0, +) }
 
     private var unfinishedAttempts: [IdentifiedPayload<TestAttemptPayload>] {
         attempts.filter { $0.payload.state == .inProgress }
@@ -448,7 +440,7 @@ struct TodayView: View {
             sessions: sessions,
             tests: tests,
             attempts: attempts,
-            dueCardCounts: Dictionary(grouping: dueCards, by: \.payload.topicId).mapValues(\.count),
+            dueCardCounts: dueCardCountsByTopic,
             learningPlanProjections: learningPlanProjections,
             storedRecommendations: recommendations,
             now: .now
@@ -506,24 +498,37 @@ struct TodayView: View {
     private func load() async {
         guard let store = model.store else { return }
         do {
-            async let loadedNotes = store.list(NotePayload.self)
-            async let loadedSessions = store.list(StudySessionPayload.self)
-            async let loadedResources = store.list(ResourcePayload.self)
-            async let loadedCourses = store.list(CoursePayload.self)
-            async let loadedTopics = store.topics()
-            async let loadedSources = store.list(SourcePayload.self)
-            async let loadedCards = store.list(FlashcardPayload.self)
-            async let loadedReviews = store.list(FlashcardReviewPayload.self)
-            async let loadedTests = store.list(PracticeTestPayload.self)
-            async let loadedAttempts = store.list(TestAttemptPayload.self)
-            async let loadedGoals = store.list(StudyGoalPayload.self)
-            async let loadedUnresolved = store.list(UnresolvedQuestionPayload.self)
-            async let loadedRecommendations = store.list(StudyRecommendationPayload.self)
-            async let loadedTrash = store.trashedTargetIds()
+            async let loadedWorkspace = store.workspaceSnapshot(
+                limits: WorkspaceReadLimits(notes: 24, lists: 1, sources: 12, topics: 100, sessions: 24)
+            )
+            async let loadedInboxCount = store.sourceInboxCount()
+            async let loadedLearning = store.learningSnapshot(
+                limits: LearningReadLimits(
+                    topics: 1,
+                    sessions: 1,
+                    cards: 1,
+                    reviews: 1,
+                    tests: 50,
+                    attempts: 50,
+                    goals: 50,
+                    questions: 50,
+                    recommendations: 100,
+                    recommendationResponses: 1,
+                    testResponses: 100
+                )
+            )
+            async let loadedDueCounts = store.dueFlashcardCountsByTopic(now: .now)
             async let loadedDailyReview = store.dailyEvidenceReviewQueue(now: .now)
-            let result = try await (loadedNotes, loadedSessions, loadedResources, loadedCourses, loadedTopics, loadedSources, loadedCards, loadedReviews, loadedTests, loadedAttempts, loadedGoals, loadedUnresolved, loadedRecommendations, loadedTrash, loadedDailyReview)
-            notes = result.0
-                .filter { $0.payload.archivedAt == nil && !result.13.contains($0.id) }
+            let result = try await (
+                loadedWorkspace,
+                loadedInboxCount,
+                loadedLearning,
+                loadedDueCounts,
+                loadedDailyReview
+            )
+            let workspace = result.0
+            notes = workspace.notes.items
+                .filter { $0.payload.archivedAt == nil }
                 .sorted {
                     if ($0.payload.pinnedAt != nil) != ($1.payload.pinnedAt != nil) {
                         return $0.payload.pinnedAt != nil
@@ -531,23 +536,18 @@ struct TodayView: View {
                     return ($0.payload.pinnedAt ?? $0.payload.updatedAt)
                         > ($1.payload.pinnedAt ?? $1.payload.updatedAt)
                 }
-            sessions = result.1.sorted { $0.payload.startedAt > $1.payload.startedAt }
-            resources = result.2.sorted { $0.payload.importedAt > $1.payload.importedAt }
-            courses = result.3.filter { !$0.payload.archived }
-            topics = result.4
-            sourceInboxCount = result.5.filter {
-                $0.payload.primaryTopicId == nil
-                    && $0.payload.archivedAt == nil
-                    && !result.13.contains($0.id)
-            }.count
-            cards = result.6
-            reviews = result.7
-            tests = result.8
-            attempts = result.9
-            goals = result.10
-            unresolved = result.11
-            recommendations = result.12
-            dailyReviewDueCount = result.14.totalDueCount
+            sessions = workspace.sessions.items.sorted { $0.payload.startedAt > $1.payload.startedAt }
+            resources = workspace.sources.items.sorted { $0.payload.importedAt > $1.payload.importedAt }
+            topics = workspace.topics.items
+            sourceInboxCount = result.1
+            let learning = result.2
+            tests = learning.tests.items
+            attempts = learning.attempts.items
+            goals = learning.goals.items
+            unresolved = learning.questions.items
+            recommendations = learning.recommendations.items
+            dueCardCountsByTopic = result.3
+            dailyReviewDueCount = result.4.totalDueCount
             errorMessage = nil
         } catch {
             errorMessage = error.localizedDescription
@@ -587,13 +587,13 @@ struct TodayView: View {
             for (index, url) in urls.enumerated() {
                 importProgress = "Encrypting \(index + 1) of \(urls.count): \(url.lastPathComponent)"
                 let imported = try await assetManager.importSource(from: url)
-                lastResourceId = imported.resourceId
+                lastResourceId = imported.sourceId
             }
             model.noteLocalMutation()
             importProgress = nil
             await load()
             if urls.count == 1, let lastResourceId {
-                destination = .resource(lastResourceId)
+                destination = .source(lastResourceId)
             }
         } catch {
             importProgress = nil

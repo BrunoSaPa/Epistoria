@@ -1,6 +1,20 @@
 # Release notes
 
-## Daily Evidence Review
+## 2026-08-30 — Development stabilization
+
+- Started a new development notebook generation with Topic, List, Source, and stable-page records.
+- Changed readable restore to version 8 only. Earlier development exports remain readable archives.
+- Added bounded local loading and explicit pagination for Notebook, Library, Sessions, Learning
+  history, review records, and learning-record management.
+- Added a rebuildable encrypted local summary for lifecycle, pin, recent activity, Source Inbox,
+  and due-card queries. The summary does not synchronize or enter readable exports.
+- Kept authoritative notebook records and append-only learning history unchanged by projection
+  rebuilds.
+- Kept physical-iPad scale, synchronization, recovery, and private TestFlight validation open.
+
+## 2026-08-29 — Personal beta feature history
+
+### Daily Evidence Review
 
 - Added a local daily queue for saved Evidence, difficult Concepts, and earlier test mistakes.
 - Added Remembered, Difficult, and Later responses with deterministic local rescheduling.
@@ -11,7 +25,7 @@
   and readable export.
 - Kept queue selection offline and independent of AI providers and Compute Nodes.
 
-## Deadline-aware learning plans
+### Deadline-aware learning plans
 
 - Added optional daily plans to dated goals without changing simple goal behavior.
 - Added owner-managed coverage objectives, selected study days, preferred daily minutes, and
@@ -23,7 +37,7 @@
 - Added plan summaries in Learning and plan-aware Study Next recommendations on Today.
 - Kept planning offline and independent of AI providers and Compute Nodes.
 
-## Encrypted Share Sheet capture
+### Encrypted Share Sheet capture
 
 - Added **Save to Epistoria** for supported images, files, selected text, and HTTPS links on iPad.
 - Encrypted shared items before writing them to a protected device-local capture inbox.
@@ -35,7 +49,7 @@
 - Saved shared links as offline-safe references. The owner can request a frozen webpage snapshot
   later.
 
-## Non-destructive image editing
+### Non-destructive image editing
 
 - Added direct image cropping with draggable corners and common aspect-ratio presets.
 - Added 90-degree rotation, rounded masks, oval masks, and live previews.
@@ -45,7 +59,7 @@
 - Updated readable export to version 7 so the displayed image and first image reference remain
   portable.
 
-## Direct iPad AI workflows
+### Direct iPad AI workflows
 
 - Moved Tutor turns, note questions, provider-backed math help, session reviews,
   written-response feedback, PDF Source guides, PDF questions, and supported media transcription
@@ -59,7 +73,7 @@
 - Kept the Compute Node as an optional, explicitly selected route for larger local models and
   conversion work.
 
-## Direct Topic Studio processing
+### Direct Topic Studio processing
 
 - Moved manual Topic Studio synthesis, flashcard, test, Concept, and weekly-review generation from
   the Compute Node queue to direct iPad provider execution.
@@ -70,7 +84,7 @@
 - Kept the provider response separate from accepted cards, tests, Concepts, and other learning
   records. Review and acceptance are still required.
 
-## iPad-first processing and search
+### iPad-first processing and search
 
 - Made the iPad authoritative for notebook storage, recognition, search, local processing jobs,
   and provider credentials.
@@ -84,7 +98,7 @@
 - Added a verified downloaded Core ML formula runtime. Release enablement remains gated on a real
   permissively licensed model and physical-iPad validation.
 
-## Local OCR and formula recognition
+### Local OCR and formula recognition
 
 - Added automatic local handwriting recognition after drawing becomes idle, when a page closes,
   and when the app backgrounds.
@@ -95,7 +109,7 @@
 - Added pinned, verified, pausable model installation under Local Processing settings.
 - Added accepted handwriting to searchable note PDF text layers without changing Pencil strokes.
 
-## Handwritten mathematics beta
+### Handwritten mathematics beta
 
 - Added a Math selection tool for handwritten equations and attempted solutions.
 - Added separate recognition, worked-step, graph, and error-diagnosis tasks.
@@ -104,7 +118,7 @@
 - Kept original Pencil strokes unchanged and kept generated results encrypted and removable.
 - Marked physical Apple Pencil quality and interaction validation as open.
 
-## Concept and Evidence map
+### Concept and Evidence map
 
 - Added one interactive knowledge map for each Topic.
 - Added direct node arrangement, pinch and button zoom, typed connection labels, and a linear List
@@ -114,7 +128,7 @@
 - Stored only the encrypted node arrangement. Concepts, Evidence, and typed relationships remain
   independent durable records.
 
-## Adaptive Tutor
+### Adaptive Tutor
 
 - Added durable encrypted Tutor sessions, transcripts, cited responses, confidence, bounded
   provider approval, and reviewed learning signals.
@@ -122,15 +136,15 @@
 - Added the final standalone logo as the canonical app icon and runtime mark.
 - Added Tutor records to readable notebook export.
 
-## Automatic related search
+### Automatic related search
 
 - Kept exact text matches first.
 - Added a separate Related section for material that uses different wording.
 - Kept both search paths on the unlocked iPad without a paired Mac or AI provider request.
-- Applied Notes, Resources, and Sessions filters before ranking results.
+- Applied Notes, Sources, and Sessions filters before ranking results.
 - Preserved exact search when related matching is unavailable for a language or device.
 
-## Native Anthropic and Gemini connections
+### Native Anthropic and Gemini connections
 
 - Added direct Anthropic Messages and Google Gemini `generateContent` connections.
 - Added native structured-output validation and optional image input for both connections.
@@ -139,14 +153,14 @@
 - Limited these native connections to text and optional vision. Timestamped transcription still
   requires the official Responses or a compatible connection.
 
-## Stable provider routing
+### Stable provider routing
 
 - Attached the reviewed provider connection and model to each newly approved AI request.
 - Prevented an active-provider change from redirecting work that was already queued.
 - Added a clear failure when the approved connection was edited or removed before processing.
 - Kept API keys out of queued route details and readable exports.
 
-## PDF source understanding
+### PDF source understanding
 
 - Added PDF Source guides with cited summaries, translated summaries, key topics, suggested
   questions, and detected figure notes.
@@ -155,7 +169,7 @@
 - Added explicit approval before selected text or figure input reaches the configured provider.
 - Added visible page and passage coverage limits for large or partially readable PDFs.
 
-## AI provider choice
+### AI provider choice
 
 - Added provider management in Settings.
 - Added the official Responses service and a compatible connection for local or hosted model
@@ -167,7 +181,7 @@
 - Kept provider keys and connections out of readable notebook exports.
 - Recorded the actual provider connection and model on completed generated results.
 
-## Portable import
+### Portable import
 
 - Added readable export version 5 with one complete sanitized record manifest.
 - Added ZIP and unpacked-directory validation before import.
@@ -176,13 +190,13 @@
 - Added a review screen with source, size, and content counts before activation.
 - Kept import separate from account recovery. Import does not merge with or replace existing data.
 
-## Note organization
+### Note organization
 
 - Added confirmed **Remove from List** and **Remove from Session** actions.
 - Kept the note, its other memberships, and Session activity history unchanged.
 - Added compatibility for older notes that were created inside a Session.
 
-## Timestamped Evidence and transcript corrections
+### Timestamped Evidence and transcript corrections
 
 - Added continuous transcript-range selection and timestamped Evidence creation.
 - Added exact Source Version, start and end time, segment index, and correction provenance to
@@ -197,7 +211,7 @@
   transcript chunks remain in the optional AI artifact file.
 - Verified 77 Core tests, the complete unsigned iPad Simulator build, and 43 app and UI tests.
 
-## Source comparison and Concept connections
+### Source comparison and Concept connections
 
 - Added a full-screen workspace for comparing two Sources or two immutable versions of one Source.
 - Added independent Source and version selection, PDF navigation, scrolling, and local media
@@ -210,7 +224,7 @@
 - Added deterministic worker and encrypted-store coverage for allowed Concept IDs, citations,
   idempotent manual links, reviewed acceptance, Evidence, and generator attribution.
 
-## Evidence cards and backlinks
+### Evidence cards and backlinks
 
 - Added a note-side Evidence shelf filtered to the note's Topic.
 - Added drag and Insert actions that place a non-editable Evidence card on a notebook page.
@@ -220,7 +234,7 @@
 - Added readable Evidence citations to note PDF export.
 - Added durability, reuse, backlink, Source Version, and PDF-output tests.
 
-## YouTube references and local media transcription
+### YouTube references and local media transcription
 
 - Added normalized YouTube video references with optional start times and no downloaded media,
   captions, thumbnails, or metadata.
@@ -235,7 +249,7 @@
 - Added URL, unsafe-link, no-media-asset, no-partial-record, transcript contract, worker identity,
   size, dedupe, legacy compatibility, durable retrieval, and export coverage.
 
-## Shared Google file Sources
+### Shared Google file Sources
 
 - Added direct capture for native Google Docs, Slides, and Sheets share links that allow anyone
   with the link to view.
@@ -248,7 +262,7 @@
 - Added exact-byte, URL, endpoint, privacy-header, access-denied, malformed, oversized, offline,
   persistence, refresh, no-partial-record, and readable-export tests.
 
-## Webpage Sources
+### Webpage Sources
 
 - Added manual HTTPS webpage capture from Library.
 - Added bounded streaming, response-status and content-type checks, URL validation, and HTML
@@ -260,7 +274,7 @@
 - Added malformed, binary, empty, unsupported, oversized, offline, exact-byte, refresh, and
   no-partial-record tests.
 
-## Local video Sources
+### Local video Sources
 
 - Added MP4, M4V, and MOV import from every Source entry point.
 - Added bounded ISO media-container validation and required system video decoding before any
@@ -272,7 +286,7 @@
 - Added decoder, spoof, truncation, exact-byte, protected-file isolation, encrypted import, and
   no-partial-record tests.
 
-## Local audio Sources
+### Local audio Sources
 
 - Added MP3, M4A, AAC, WAV, and CAF import from every Source entry point.
 - Added bounded format validation and system decoding before any Source record is created.
@@ -282,7 +296,7 @@
 - Kept transcription separate from playback. Import and listening do not require a provider or a
   paired Mac.
 
-## Packaged document Sources
+### Packaged document Sources
 
 - Added local import for EPUB, DOCX, ODT, PPTX, ODP, and XLSX files.
 - Added bounded archive validation before Source creation. Imports reject unsafe paths, links,
@@ -293,7 +307,7 @@
 - Preserved the exact original file as an encrypted Source and immutable Source Version.
 - Added readable text derivatives for supported Sources to the full notebook export.
 
-## CSV Sources
+### CSV Sources
 
 - Added CSV import from Today, Library, and Topic dashboards.
 - Added validation for UTF-8, quoted fields, embedded commas and newlines, escaped quotes, row and
@@ -303,7 +317,7 @@
 - Preserved the exact CSV file as an encrypted original and created an immutable Source Version.
 - Added CSV refresh with the same type and validation checks used during import.
 
-## Local weekly review
+### Local weekly review
 
 - Added a weekly review in Study that is calculated on the iPad without AI.
 - Added totals for focused time, completed sessions, card reviews, submitted tests, and average
@@ -315,7 +329,7 @@
 - Added direct links from each review row to its Topic, goal, unresolved question, or recommended
   work item.
 
-## Scoped proactive automation
+### Scoped proactive automation
 
 - Added explicit recurring permissions for selected Topics and supported AI tasks.
 - Added per-Topic/task cadence, expiration, and recorded USD spending limits.
@@ -326,7 +340,7 @@
   provider processing.
 - Kept every automatic result in the existing cited draft review flow.
 
-## Cited written-response feedback
+### Cited written-response feedback
 
 - Added an optional feedback request for submitted written test responses.
 - Added a preflight disclosure for the frozen question, grading guide, reference answer,
@@ -337,7 +351,7 @@
 - Preserved the submitted response, deterministic correctness result, original attempt score, and
   immutable provider response.
 
-## Study Next destinations and history
+### Study Next destinations and history
 
 - Added direct destinations for due cards, paused sessions, unfinished attempts, tests, goals,
   unresolved questions, and Topic fallback.
@@ -349,7 +363,7 @@
 - Fixed non-local recommendations to use their declared target instead of their recommendation
   record ID.
 
-## Test planning and coverage
+### Test planning and coverage
 
 - Added Comprehensive, Quick Check, and Custom modes for manual and generated tests.
 - Added local objective detection from Topic Concepts, Sources, notes, and unresolved questions.
@@ -362,7 +376,7 @@
 - Added case-insensitive objective matching so capitalization changes during review do not create
   duplicate objective keys or crash acceptance.
 
-## Item-level AI draft review
+### Item-level AI draft review
 
 - Added item-by-item selection and exclusion for generated cards, test questions, and Concepts.
 - Added editing for prompts, answers, rubrics, objectives, choices, names, and descriptions before
@@ -371,7 +385,7 @@
   artifact data.
 - Materialized only selected items and retained idempotent acceptance.
 
-## Learning record lifecycle update
+### Learning record lifecycle update
 
 - Added Manage Learning for goals, unresolved questions, decks, cards, Concepts, and tests.
 - Added card revisions, suspension, archive, restore, and deck assignment without erasing review
@@ -379,7 +393,7 @@
 - Added Source title, Topic, related Topic, List, archive, and restore controls.
 - Added List rename, move, archive, and restore controls with backward-compatible encrypted data.
 
-## Personal beta candidate
+### Personal beta candidate
 
 Release date: Not published.
 

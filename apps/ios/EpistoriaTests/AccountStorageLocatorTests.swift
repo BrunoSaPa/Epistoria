@@ -262,6 +262,48 @@ final class AccountStorageLocatorTests: XCTestCase {
         XCTAssertFalse(store.containsStoredConfiguration)
         XCTAssertEqual(defaults.string(forKey: "unrelated"), "keep")
     }
+
+    func testDevelopmentResetAcceptsCurrentReadableArchiveAndClearsConfiguration() async throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let suiteName = "AccountStorageLocatorTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let configuration = makeConfiguration()
+        let configurationStore = AccountConfigurationStore(defaults: defaults)
+        try configurationStore.save(configuration)
+        let target = accountDirectory(root: root, accountId: configuration.accountId)
+        try FileManager.default.createDirectory(at: target, withIntermediateDirectories: true)
+        _ = FileManager.default.createFile(
+            atPath: target.appendingPathComponent("epistoria.sqlite").path,
+            contents: Data([1])
+        )
+        let suffix = UUID().uuidString.lowercased()
+        let model = AppModel(
+            configurationStore: configurationStore,
+            accountKeyStore: KeychainStore(service: "com.epistoria.tests.reset-key.\(suffix)"),
+            tokenStore: DeviceTokenStore(service: "com.epistoria.tests.reset-token.\(suffix)"),
+            applicationSupportURL: root
+        )
+
+        try await model.deleteLocalDevelopmentNotebook(
+            verifiedArchive: PortableArchiveInspection(
+                formatVersion: "epistoria-export/8",
+                sha256: String(repeating: "a", count: 64),
+                byteCount: 1
+            )
+        )
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: target.path))
+        XCTAssertFalse(configurationStore.containsStoredConfiguration)
+        guard case .onboarding = model.phase else {
+            return XCTFail("Reset did not return to onboarding")
+        }
+        XCTAssertEqual(
+            configurationStore.developmentResetReceipt?.archiveFormat,
+            "epistoria-export/8"
+        )
+    }
     #endif
 
     func testDatabaseErrorsHaveUserReadableDescriptions() {
@@ -271,6 +313,43 @@ final class AccountStorageLocatorTests: XCTestCase {
         )
         XCTAssertFalse(LocalDatabaseError.queryFailed("internal").localizedDescription.contains("error 1"))
     }
+
+    func testLegacyConfigurationDecodesAsGenerationOne() throws {
+        let accountId = UUID()
+        let deviceId = UUID()
+        let data = try JSONSerialization.data(withJSONObject: [
+            "accountId": accountId.uuidString,
+            "deviceId": deviceId.uuidString,
+            "serverConnected": false,
+            "storageScope": "accountScoped",
+        ])
+
+        let decoded = try JSONDecoder().decode(AccountConfiguration.self, from: data)
+        XCTAssertEqual(decoded.accountId, accountId)
+        XCTAssertEqual(decoded.notebookGenerationId, accountId)
+        XCTAssertEqual(decoded.schemaGeneration, 1)
+    }
+
+    #if DEBUG
+    func testDevelopmentResetReceiptPreservesOnlyArchiveProofAndNextGeneration() throws {
+        let suiteName = "AccountStorageLocatorTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = AccountConfigurationStore(defaults: defaults)
+        let receipt = DevelopmentResetReceipt(
+            archiveFormat: "epistoria-export/7",
+            archiveSHA256: String(repeating: "a", count: 64),
+            priorAccountId: UUID(),
+            nextNotebookGenerationId: UUID(),
+            resetAt: .now
+        )
+
+        store.recordDevelopmentReset(receipt)
+
+        XCTAssertEqual(store.developmentResetReceipt, receipt)
+        XCTAssertEqual(store.pendingNotebookGenerationId, receipt.nextNotebookGenerationId)
+    }
+    #endif
 
     private func makeConfiguration() -> AccountConfiguration {
         AccountConfiguration(

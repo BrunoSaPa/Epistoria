@@ -4,21 +4,19 @@ import Foundation
 public enum EntityType: String, Codable, CaseIterable, Sendable {
     case area = "AREA"
     case topicArea = "TOPIC_AREA"
-    case collection = "COLLECTION"
-    case collectionItem = "COLLECTION_ITEM"
-    case institution = "INSTITUTION"
-    case academicTerm = "ACADEMIC_TERM"
-    case course = "COURSE"
+    case list = "LIST"
+    case listItem = "LIST_ITEM"
+    case topic = "TOPIC"
     case studySession = "STUDY_SESSION"
     case note = "NOTE"
     case notePage = "NOTE_PAGE"
     case noteBlock = "NOTE_BLOCK"
     case trashEntry = "TRASH_ENTRY"
-    case resource = "RESOURCE"
+    case source = "SOURCE"
     case asset = "ASSET"
     case annotation = "ANNOTATION"
     case sessionNote = "SESSION_NOTE"
-    case sessionResource = "SESSION_RESOURCE"
+    case sessionSource = "SESSION_SOURCE"
     case aiArtifact = "AI_ARTIFACT"
     case recognitionArtifact = "RECOGNITION_ARTIFACT"
     case recognitionDecision = "RECOGNITION_DECISION"
@@ -212,24 +210,19 @@ public struct NoteCanvasImageConfiguration: Codable, Equatable, Sendable {
 /// independent of device scale and zoom. Infinite canvases share the same origin as fixed
 /// paper and allow negative coordinates in every direction.
 public struct NoteCanvasConfiguration: Codable, Equatable, Sendable {
-    public var schemaVersion = "note-canvas/v3"
+    public var schemaVersion = "note-canvas/v4"
     public var pageFormat: NotePageFormat
     public var orientation: NotePageOrientation
     public var paperStyle: NotePaperStyle
     public var paperColor: NotePaperColor
     /// Pattern spacing in document points. The renderer clamps decoded values before use.
     public var paperSpacing: Double
-    /// Fixed-paper notes append compact, numbered pages. Infinite canvases always have one
-    /// unbounded surface.
-    public var pageCount: Int
-
     public init(
         pageFormat: NotePageFormat = .a4,
         orientation: NotePageOrientation = .portrait,
         paperStyle: NotePaperStyle = .plain,
         paperColor: NotePaperColor = .white,
-        paperSpacing: Double? = nil,
-        pageCount: Int = 1
+        paperSpacing: Double? = nil
     ) {
         self.pageFormat = pageFormat
         self.orientation = orientation
@@ -239,11 +232,6 @@ public struct NoteCanvasConfiguration: Codable, Equatable, Sendable {
             max(paperSpacing ?? (paperStyle == .dotted ? 24 : 28), 12),
             72
         )
-        self.pageCount = pageFormat == .infinite ? 1 : max(pageCount, 1)
-    }
-
-    public var effectivePageCount: Int {
-        pageFormat == .infinite ? 1 : max(pageCount, 1)
     }
 
     public var pageWidth: Double? {
@@ -260,50 +248,6 @@ public struct NoteCanvasConfiguration: Codable, Equatable, Sendable {
         return orientation == .portrait ? portraitHeight : portraitWidth
     }
 
-    private enum CodingKeys: String, CodingKey {
-        case schemaVersion
-        case pageFormat
-        case orientation
-        case paperStyle
-        case paperColor
-        case paperSpacing
-        case pageCount
-    }
-
-    public init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        schemaVersion = try container.decodeIfPresent(String.self, forKey: .schemaVersion)
-            ?? "note-canvas/v1"
-        pageFormat = try container.decode(NotePageFormat.self, forKey: .pageFormat)
-        orientation = try container.decode(NotePageOrientation.self, forKey: .orientation)
-        paperStyle = try container.decode(NotePaperStyle.self, forKey: .paperStyle)
-        paperColor = try container.decodeIfPresent(NotePaperColor.self, forKey: .paperColor)
-            ?? .white
-        paperSpacing = min(
-            max(
-                try container.decodeIfPresent(Double.self, forKey: .paperSpacing)
-                    ?? (paperStyle == .dotted ? 24 : 28),
-                12
-            ),
-            72
-        )
-        let decodedPageCount = max(
-            try container.decodeIfPresent(Int.self, forKey: .pageCount) ?? 1,
-            1
-        )
-        pageCount = pageFormat == .infinite ? 1 : decodedPageCount
-    }
-
-    public func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(schemaVersion, forKey: .schemaVersion)
-        try container.encode(pageFormat, forKey: .pageFormat)
-        try container.encode(orientation, forKey: .orientation)
-        try container.encode(paperStyle, forKey: .paperStyle)
-        try container.encode(paperColor, forKey: .paperColor)
-        try container.encode(paperSpacing, forKey: .paperSpacing)
-        try container.encode(effectivePageCount, forKey: .pageCount)
-    }
 }
 
 public struct NoteCanvasPlacement: Codable, Equatable, Sendable {
@@ -336,7 +280,7 @@ public enum NoteBlockCanvasRole: String, Codable, Sendable {
     case inkLayer = "INK_LAYER"
 }
 
-public enum ResourceKind: String, Codable, CaseIterable, Sendable {
+public enum SourceKind: String, Codable, CaseIterable, Sendable {
     case book = "BOOK"
     case pdf = "PDF"
     case paper = "PAPER"
@@ -345,7 +289,7 @@ public enum ResourceKind: String, Codable, CaseIterable, Sendable {
     case lecture = "LECTURE"
     case image = "IMAGE"
     case document = "DOCUMENT"
-    case courseMaterial = "COURSE_MATERIAL"
+    case topicMaterial = "TOPIC_MATERIAL"
     case other = "OTHER"
     case pastedText = "PASTED_TEXT"
     case markdown = "MARKDOWN"
@@ -390,132 +334,17 @@ public protocol EntityPayload: Codable, Sendable {
     var updatedAt: Date { get }
 }
 
-public struct CollectionPayload: EntityPayload, Equatable {
-    public static let entityType = EntityType.collection
-    public var schemaVersion: String
+public struct ListPayload: EntityPayload, Equatable {
+    public static let entityType = EntityType.list
+    public var schemaVersion = "list/v1"
     public var name: String
-    public var parentCollectionId: UUID?
     public var archivedAt: Date?
-    public var createdAt: Date
-    public var updatedAt: Date
-
-    public init(name: String, parentCollectionId: UUID? = nil, now: Date = .now) {
-        schemaVersion = "collection/v2"
-        self.name = name
-        self.parentCollectionId = parentCollectionId
-        archivedAt = nil
-        createdAt = now
-        updatedAt = now
-    }
-
-    private enum CodingKeys: String, CodingKey {
-        case schemaVersion, name, parentCollectionId, archivedAt, createdAt, updatedAt
-    }
-
-    public init(from decoder: Decoder) throws {
-        let values = try decoder.container(keyedBy: CodingKeys.self)
-        let version = try values.decodeIfPresent(String.self, forKey: .schemaVersion)
-            ?? "collection/v1"
-        guard version == "collection/v1" || version == "collection/v2" else {
-            throw DecodingError.dataCorruptedError(
-                forKey: .schemaVersion,
-                in: values,
-                debugDescription: "Unsupported List schema \(version)"
-            )
-        }
-        schemaVersion = version
-        name = try values.decode(String.self, forKey: .name)
-        parentCollectionId = try values.decodeIfPresent(UUID.self, forKey: .parentCollectionId)
-        archivedAt = try values.decodeIfPresent(Date.self, forKey: .archivedAt)
-        createdAt = try values.decode(Date.self, forKey: .createdAt)
-        updatedAt = try values.decode(Date.self, forKey: .updatedAt)
-    }
-
-    public func encode(to encoder: Encoder) throws {
-        var values = encoder.container(keyedBy: CodingKeys.self)
-        try values.encode("collection/v2", forKey: .schemaVersion)
-        try values.encode(name, forKey: .name)
-        try values.encodeIfPresent(parentCollectionId, forKey: .parentCollectionId)
-        try values.encodeIfPresent(archivedAt, forKey: .archivedAt)
-        try values.encode(createdAt, forKey: .createdAt)
-        try values.encode(updatedAt, forKey: .updatedAt)
-    }
-}
-
-public struct InstitutionPayload: EntityPayload, Equatable {
-    public static let entityType = EntityType.institution
-    public var schemaVersion = "institution/v1"
-    public var name: String
     public var createdAt: Date
     public var updatedAt: Date
 
     public init(name: String, now: Date = .now) {
         self.name = name
-        createdAt = now
-        updatedAt = now
-    }
-}
-
-public struct AcademicTermPayload: EntityPayload, Equatable {
-    public static let entityType = EntityType.academicTerm
-    public var schemaVersion = "academic-term/v1"
-    public var institutionId: UUID
-    public var name: String
-    public var startDate: Date?
-    public var endDate: Date?
-    public var createdAt: Date
-    public var updatedAt: Date
-
-    public init(
-        institutionId: UUID,
-        name: String,
-        startDate: Date? = nil,
-        endDate: Date? = nil,
-        now: Date = .now
-    ) {
-        self.institutionId = institutionId
-        self.name = name
-        self.startDate = startDate
-        self.endDate = endDate
-        createdAt = now
-        updatedAt = now
-    }
-}
-
-public struct CoursePayload: EntityPayload, Equatable {
-    public static let entityType = EntityType.course
-    public var schemaVersion = "course/v1"
-    public var institutionId: UUID?
-    public var academicTermId: UUID?
-    public var name: String
-    public var code: String?
-    public var professor: String?
-    public var courseDescription: String?
-    public var startDate: Date?
-    public var endDate: Date?
-    public var archived: Bool
-    public var colorHex: String?
-    public var createdAt: Date
-    public var updatedAt: Date
-
-    public init(
-        name: String,
-        institutionId: UUID? = nil,
-        academicTermId: UUID? = nil,
-        code: String? = nil,
-        professor: String? = nil,
-        now: Date = .now
-    ) {
-        self.institutionId = institutionId
-        self.academicTermId = academicTermId
-        self.name = name
-        self.code = code
-        self.professor = professor
-        courseDescription = nil
-        startDate = nil
-        endDate = nil
-        archived = false
-        colorHex = nil
+        archivedAt = nil
         createdAt = now
         updatedAt = now
     }
@@ -523,10 +352,10 @@ public struct CoursePayload: EntityPayload, Equatable {
 
 public struct StudySessionPayload: EntityPayload, Equatable {
     public static let entityType = EntityType.studySession
-    public var schemaVersion = "study-session/v1"
+    public var schemaVersion = "study-session/v2"
     public var title: String
-    public var courseId: UUID?
-    public var primaryCollectionId: UUID?
+    public var topicId: UUID?
+    public var primaryListId: UUID?
     public var state: StudySessionState
     public var goals: [String]
     public var objective: String?
@@ -541,13 +370,13 @@ public struct StudySessionPayload: EntityPayload, Equatable {
 
     public init(
         title: String,
-        courseId: UUID? = nil,
+        topicId: UUID? = nil,
         goals: [String] = [],
         now: Date = .now
     ) {
         self.title = title
-        self.courseId = courseId
-        primaryCollectionId = nil
+        self.topicId = topicId
+        primaryListId = nil
         state = .active
         self.goals = goals
         objective = goals.first
@@ -564,9 +393,9 @@ public struct StudySessionPayload: EntityPayload, Equatable {
 
 public struct NotePayload: EntityPayload, Equatable {
     public static let entityType = EntityType.note
-    public var schemaVersion = "note/v4"
+    public var schemaVersion = "note/v5"
     public var title: String
-    public var courseId: UUID?
+    public var topicId: UUID?
     public var studySessionId: UUID?
     public var archivedAt: Date?
     /// A local-first ordering hint used by Notebook and Today. The value is encrypted and syncs
@@ -580,13 +409,13 @@ public struct NotePayload: EntityPayload, Equatable {
 
     public init(
         title: String,
-        courseId: UUID? = nil,
+        topicId: UUID? = nil,
         studySessionId: UUID? = nil,
         canvas: NoteCanvasConfiguration = NoteCanvasConfiguration(),
         now: Date = .now
     ) {
         self.title = title
-        self.courseId = courseId
+        self.topicId = topicId
         self.studySessionId = studySessionId
         archivedAt = nil
         pinnedAt = nil
@@ -598,7 +427,7 @@ public struct NotePayload: EntityPayload, Equatable {
 
 public struct NoteBlockPayload: EntityPayload, Equatable {
     public static let entityType = EntityType.noteBlock
-    public var schemaVersion = "note-block/v7"
+    public var schemaVersion = "note-block/v8"
     public var noteId: UUID
     public var blockType: NoteBlockKind
     public var orderKey: String
@@ -616,11 +445,8 @@ public struct NoteBlockPayload: EntityPayload, Equatable {
     public var canvasShape: NoteCanvasShape?
     /// Non-destructive crop, mask, rotation, and original-reference metadata for image blocks.
     public var imageConfiguration: NoteCanvasImageConfiguration?
-    /// Page-local records use a zero-based index. A missing value is legacy page zero.
-    public var canvasPageIndex: Int?
-    /// Stable page identity. `canvasPageIndex` remains a read-only compatibility fallback for
-    /// records written before note pages became first-class encrypted entities.
-    public var canvasPageId: UUID?
+    /// Stable page identity for fixed-page notes. Infinite-canvas blocks leave this nil.
+    public var pageId: UUID?
     public var tombstone: Bool
     public var createdAt: Date
     public var updatedAt: Date
@@ -663,82 +489,10 @@ public struct NoteBlockPayload: EntityPayload, Equatable {
         canvasRole = nil
         canvasShape = nil
         imageConfiguration = nil
-        canvasPageIndex = nil
-        canvasPageId = nil
+        pageId = nil
         tombstone = false
         createdAt = now
         updatedAt = now
-    }
-}
-
-public struct ResourcePayload: EntityPayload, Equatable {
-    public static let entityType = EntityType.resource
-    public var schemaVersion = "resource/v1"
-    public var resourceType: ResourceKind
-    public var title: String
-    public var authors: [String]
-    public var url: URL?
-    public var externalIdentifier: String?
-    public var originalAssetId: UUID?
-    public var importedAt: Date
-    public var createdAt: Date
-    public var updatedAt: Date
-
-    public init(
-        resourceType: ResourceKind,
-        title: String,
-        authors: [String] = [],
-        originalAssetId: UUID? = nil,
-        now: Date = .now
-    ) {
-        self.resourceType = resourceType
-        self.title = title
-        self.authors = authors
-        url = nil
-        externalIdentifier = nil
-        self.originalAssetId = originalAssetId
-        importedAt = now
-        createdAt = now
-        updatedAt = now
-    }
-
-    private enum CodingKeys: String, CodingKey {
-        case schemaVersion, resourceType, sourceType, title, authors, url, canonicalURL
-        case externalIdentifier, identifiers, originalAssetId, importedAt, createdAt, updatedAt
-    }
-
-    public init(from decoder: Decoder) throws {
-        let values = try decoder.container(keyedBy: CodingKeys.self)
-        schemaVersion = try values.decodeIfPresent(String.self, forKey: .schemaVersion) ?? "resource/v1"
-        resourceType = try values.decodeIfPresent(ResourceKind.self, forKey: .resourceType)
-            ?? values.decode(ResourceKind.self, forKey: .sourceType)
-        title = try values.decode(String.self, forKey: .title)
-        authors = try values.decodeIfPresent([String].self, forKey: .authors) ?? []
-        url = try values.decodeIfPresent(URL.self, forKey: .url)
-            ?? values.decodeIfPresent(URL.self, forKey: .canonicalURL)
-        externalIdentifier = try values.decodeIfPresent(String.self, forKey: .externalIdentifier)
-        if externalIdentifier == nil,
-           let identifiers = try values.decodeIfPresent([String].self, forKey: .identifiers) {
-            externalIdentifier = identifiers.first
-        }
-        originalAssetId = try values.decodeIfPresent(UUID.self, forKey: .originalAssetId)
-        importedAt = try values.decode(Date.self, forKey: .importedAt)
-        createdAt = try values.decode(Date.self, forKey: .createdAt)
-        updatedAt = try values.decode(Date.self, forKey: .updatedAt)
-    }
-
-    public func encode(to encoder: Encoder) throws {
-        var values = encoder.container(keyedBy: CodingKeys.self)
-        try values.encode("resource/v1", forKey: .schemaVersion)
-        try values.encode(resourceType, forKey: .resourceType)
-        try values.encode(title, forKey: .title)
-        try values.encode(authors, forKey: .authors)
-        try values.encodeIfPresent(url, forKey: .url)
-        try values.encodeIfPresent(externalIdentifier, forKey: .externalIdentifier)
-        try values.encodeIfPresent(originalAssetId, forKey: .originalAssetId)
-        try values.encode(importedAt, forKey: .importedAt)
-        try values.encode(createdAt, forKey: .createdAt)
-        try values.encode(updatedAt, forKey: .updatedAt)
     }
 }
 
@@ -791,7 +545,7 @@ public struct AnnotationRectangle: Codable, Equatable, Sendable {
 public struct AnnotationPayload: EntityPayload, Equatable {
     public static let entityType = EntityType.annotation
     public var schemaVersion = "annotation/v1"
-    public var resourceId: UUID
+    public var sourceId: UUID
     public var studySessionId: UUID?
     public var noteId: UUID?
     public var annotationType: AnnotationKind
@@ -804,13 +558,13 @@ public struct AnnotationPayload: EntityPayload, Equatable {
     public var updatedAt: Date
 
     public init(
-        resourceId: UUID,
+        sourceId: UUID,
         annotationType: AnnotationKind,
         pageNumber: Int? = nil,
         comment: String = "",
         now: Date = .now
     ) {
-        self.resourceId = resourceId
+        self.sourceId = sourceId
         studySessionId = nil
         noteId = nil
         self.annotationType = annotationType
@@ -826,12 +580,12 @@ public struct AnnotationPayload: EntityPayload, Equatable {
 
 public struct RelationPayload: EntityPayload, Equatable {
     public enum Kind: String, Codable, Sendable {
-        case collectionItem = "collection-item/v1"
+        case listItem = "list-item/v1"
         case sessionNote = "session-note/v1"
-        case sessionResource = "session-resource/v1"
+        case sessionSource = "session-source/v1"
     }
 
-    public static let entityType = EntityType.collectionItem
+    public static let entityType = EntityType.listItem
     public var schemaVersion: Kind
     public var leftId: UUID
     public var rightId: UUID
@@ -848,9 +602,9 @@ public struct RelationPayload: EntityPayload, Equatable {
 
     public var resolvedEntityType: EntityType {
         switch schemaVersion {
-        case .collectionItem: .collectionItem
+        case .listItem: .listItem
         case .sessionNote: .sessionNote
-        case .sessionResource: .sessionResource
+        case .sessionSource: .sessionSource
         }
     }
 }

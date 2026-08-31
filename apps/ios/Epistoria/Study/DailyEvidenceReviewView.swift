@@ -99,9 +99,9 @@ struct DailyEvidenceReviewView: View {
     private func sourceLink(for item: DailyEvidenceReviewItem) -> some View {
         if let evidence = item.evidenceIds.compactMap({ evidenceById[$0] }).first {
             NavigationLink {
-                ResourceDetailView(
+                SourceDetailView(
                     model: model,
-                    resourceId: evidence.payload.sourceId,
+                    sourceId: evidence.payload.sourceId,
                     initialSourceVersionId: evidence.payload.sourceVersionId,
                     initialPageNumber: evidence.payload.locator.page,
                     highlightText: evidence.payload.excerpt,

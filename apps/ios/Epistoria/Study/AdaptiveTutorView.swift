@@ -77,9 +77,9 @@ struct AdaptiveTutorView: View {
             .refreshable { await refresh() }
             .sheet(item: $selectedCitation) { citation in
                 NavigationStack {
-                    ResourceDetailView(
+                    SourceDetailView(
                         model: model,
-                        resourceId: citation.sourceId,
+                        sourceId: citation.sourceId,
                         initialSourceVersionId: citation.sourceVersionId,
                         initialPageNumber: citation.locator.page,
                         highlightText: citation.excerpt,

@@ -142,13 +142,13 @@ the current personal beta.
 - Empty Trash only through a separate permanent action. Sources with Evidence and Lists with child
   Lists remain protected until their dependencies are reviewed.
 - Archive and restore notes and Topics.
-- Return to recent notes and resources from Today.
+- Return to recent notes and Sources from Today.
 
 ## Study sessions
 
 - Plan, start, pause, resume, end, or abandon a Topic study period.
 - Keep only one active timer.
-- Add new or existing notes and resources to the session. A session references the original note
+- Add new or existing notes and Sources to the session. A session references the original note
   and preserves which material was used together.
 - Review a removable activity timeline without deleting the underlying notes or Sources.
 - Optional: request a cited session digest after the session.
@@ -156,7 +156,7 @@ the current personal beta.
 
 ## Search
 
-- Search notes, resources, PDF text, annotations, sessions, and labeled local OCR on the iPad.
+- Search notes, Sources, PDF text, annotations, sessions, and labeled local OCR on the iPad.
 - Filter results by content type.
 - See exact text matches first and related results in a separate section.
 - Find related material when the query uses different wording from the note or Source.
@@ -369,7 +369,7 @@ require representative device validation.
   and chunks when derived AI records are selected for export.
 - Include transcript corrections and timestamped Evidence in `knowledge.json`. Generated
   transcript chunks remain separate in `ai-artifacts.json`.
-- Import a validated version 5 or 6 export into an empty notebook. Stable records and original files
+- Import a validated version 8 export into an empty notebook. Stable records and original files
   are encrypted for the target notebook before activation.
 
 Import does not merge with or replace existing notebook data. See

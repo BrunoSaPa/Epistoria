@@ -4,9 +4,7 @@ import SwiftUI
 struct NotebookView: View {
     private enum Mode: String, CaseIterable, Identifiable {
         case notes = "Notes"
-        case collections = "Lists"
-        case archivedNotes = "Archived Notes"
-        case archivedLists = "Archived Lists"
+        case lists = "Lists"
         var id: Self { self }
     }
 
@@ -17,35 +15,45 @@ struct NotebookView: View {
     @Bindable var model: AppModel
     @State private var notes: [IdentifiedPayload<NotePayload>] = []
     @State private var archivedNotes: [IdentifiedPayload<NotePayload>] = []
-    @State private var collections: [IdentifiedPayload<CollectionPayload>] = []
+    @State private var lists: [IdentifiedPayload<ListPayload>] = []
     @State private var sessions: [IdentifiedPayload<StudySessionPayload>] = []
     @State private var organizationByNoteId: [UUID: NoteOrganizationSummary] = [:]
     @State private var mode = Mode.notes
+    @State private var showArchived = false
     @State private var showNewNote = false
-    @State private var showNewCollection = false
+    @State private var showNewList = false
+    @State private var noteCursor: EntityPageCursor?
+    @State private var listCursor: EntityPageCursor?
+    @State private var isLoadingMore = false
     @State private var destination: Destination?
     @State private var createdNotePendingNavigation: UUID?
     @State private var pendingArchive: IdentifiedPayload<NotePayload>?
     @State private var pendingTrashNote: IdentifiedPayload<NotePayload>?
-    @State private var pendingTrashList: IdentifiedPayload<CollectionPayload>?
+    @State private var pendingTrashList: IdentifiedPayload<ListPayload>?
     @State private var errorMessage: String?
 
     var body: some View {
         NavigationStack {
             Group {
-                if mode == .notes && notes.isEmpty {
+                if mode == .notes && displayedNotes.isEmpty {
                     ContentUnavailableView {
-                        Label("A quiet notebook", systemImage: "book.pages")
+                        Label(showArchived ? "Nothing archived" : "A quiet notebook", systemImage: showArchived ? "archivebox" : "book.pages")
                     } description: {
-                        Text("Create a note, then write freely, place text, and annotate images on one page.")
+                        Text(showArchived
+                             ? "Archived notes stay encrypted and searchable."
+                             : "Create a note, then write freely, place text, and annotate images.")
                     } actions: {
-                        Button("Create your first note") { showNewNote = true }
-                            .buttonStyle(.borderedProminent)
-                            .tint(EpistoriaDesign.ink)
+                        if !showArchived {
+                            Button("Create your first note") { showNewNote = true }
+                                .buttonStyle(.borderedProminent)
+                                .tint(EpistoriaDesign.ink)
+                        }
+                        if noteCursor != nil { loadMoreButton }
                     }
                 } else if mode == .notes {
-                    List(notes, id: \.id) { note in
-                        NavigationLink {
+                    List {
+                        ForEach(displayedNotes, id: \.id) { note in
+                            NavigationLink {
                             NoteEditorView(
                                 model: model,
                                 noteId: note.id,
@@ -55,8 +63,9 @@ struct NotebookView: View {
                             NoteReviewPreview(
                                 model: model,
                                 note: note,
-                                context: organizationByNoteId[note.id]?.label
-                                    ?? "Unassigned · Organize later"
+                                context: showArchived
+                                    ? "Archived · \(organizationByNoteId[note.id]?.label ?? "Unassigned")"
+                                    : organizationByNoteId[note.id]?.label ?? "Unassigned · Organize later"
                             )
                         }
                         .accessibilityIdentifier("notebook.note.\(note.id.uuidString)")
@@ -66,105 +75,66 @@ struct NotebookView: View {
                             }
                             .tint(EpistoriaDesign.ink)
                         }
-                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                             Button("Trash", systemImage: "trash", role: .destructive) {
                                 pendingTrashNote = note
                             }
-                            Button("Archive", systemImage: "archivebox") {
-                                pendingArchive = note
+                            Button(showArchived ? "Restore" : "Archive", systemImage: showArchived ? "arrow.uturn.backward" : "archivebox") {
+                                if showArchived {
+                                    Task { await setArchived(note, archived: false) }
+                                } else {
+                                    pendingArchive = note
+                                }
                             }
                             .tint(.gray)
-                        }
-                    }
-                } else if mode == .archivedNotes && archivedNotes.isEmpty {
-                    ContentUnavailableView {
-                        Label("Nothing archived", systemImage: "archivebox")
-                    } description: {
-                        Text("Archived notes stay encrypted and searchable. Move a note here when you want it out of your active notebook.")
-                    }
-                } else if mode == .archivedNotes {
-                    List(archivedNotes, id: \.id) { note in
-                        NavigationLink {
-                            NoteEditorView(
-                                model: model,
-                                noteId: note.id,
-                                onLifecycleChanged: { Task { await load() } }
-                            )
-                        } label: {
-                            NoteReviewPreview(
-                                model: model,
-                                note: note,
-                                context: "Archived · \(organizationByNoteId[note.id]?.label ?? "Unassigned")"
-                            )
-                        }
-                        .accessibilityIdentifier("notebook.archived-note.\(note.id.uuidString)")
-                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                            Button("Trash", systemImage: "trash", role: .destructive) {
-                                pendingTrashNote = note
                             }
-                            Button("Restore", systemImage: "arrow.uturn.backward") {
-                                Task { await setArchived(note, archived: false) }
-                            }
-                            .tint(EpistoriaDesign.accent)
+                        }
+                        if noteCursor != nil {
+                            loadMoreButton
                         }
                     }
-                } else if mode == .collections && activeCollections.isEmpty {
+                } else if displayedLists.isEmpty {
                     ContentUnavailableView {
-                        Label("No lists yet", systemImage: "folder")
+                        Label(showArchived ? "No archived Lists" : "No Lists yet", systemImage: showArchived ? "archivebox" : "folder")
                     } description: {
-                        Text("Lists are optional cross-topic groups. An item can belong to several lists without being duplicated.")
+                        Text(showArchived
+                             ? "Archived Lists keep their links and can be restored here."
+                             : "Lists are optional cross-Topic groups. An item can belong to several Lists without being duplicated.")
                     } actions: {
-                        Button("Create a list") { showNewCollection = true }
-                            .buttonStyle(.borderedProminent)
-                            .tint(EpistoriaDesign.ink)
+                        if !showArchived {
+                            Button("Create a List") { showNewList = true }
+                                .buttonStyle(.borderedProminent)
+                                .tint(EpistoriaDesign.ink)
+                        }
+                        if listCursor != nil { loadMoreButton }
                     }
-                } else if mode == .collections {
+                } else {
                     List {
-                        Section {
+                        if !showArchived {
                             Label("Lists group notes and sources across Topics. They are optional and never duplicate the underlying item.", systemImage: "folder")
                                 .font(.subheadline)
                                 .foregroundStyle(EpistoriaDesign.mutedInk)
                         }
                         Section("Lists") {
-                            ForEach(activeCollections.filter { $0.payload.parentCollectionId == nil }, id: \.id) { collection in
+                            ForEach(displayedLists, id: \.id) { list in
                                 NavigationLink {
-                                    CollectionDetailView(model: model, collectionId: collection.id)
+                                    ListDetailView(model: model, listId: list.id)
                                 } label: {
-                                    Label(collection.payload.name, systemImage: "folder")
+                                    Label(list.payload.name, systemImage: "folder")
                                 }
                                 .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                                     Button("Trash", systemImage: "trash", role: .destructive) {
-                                        pendingTrashList = collection
+                                        pendingTrashList = list
                                     }
-                                    Button("Archive", systemImage: "archivebox") {
-                                        Task { await setListArchived(collection, archived: true) }
+                                    Button(showArchived ? "Restore" : "Archive", systemImage: showArchived ? "arrow.uturn.backward" : "archivebox") {
+                                        Task { await setListArchived(list, archived: !showArchived) }
                                     }
                                     .tint(.gray)
                                 }
                             }
-                        }
-                    }
-                } else if archivedCollections.isEmpty {
-                    ContentUnavailableView {
-                        Label("No archived Lists", systemImage: "archivebox")
-                    } description: {
-                        Text("Archived Lists keep their links and can be restored here.")
-                    }
-                } else {
-                    List(archivedCollections, id: \.id) { collection in
-                        NavigationLink {
-                            CollectionDetailView(model: model, collectionId: collection.id)
-                        } label: {
-                            Label(collection.payload.name, systemImage: "folder")
-                        }
-                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                            Button("Trash", systemImage: "trash", role: .destructive) {
-                                pendingTrashList = collection
+                            if listCursor != nil {
+                                loadMoreButton
                             }
-                            Button("Restore", systemImage: "arrow.uturn.backward") {
-                                Task { await setListArchived(collection, archived: false) }
-                            }
-                            .tint(EpistoriaDesign.accent)
                         }
                     }
                 }
@@ -177,13 +147,20 @@ struct NotebookView: View {
                         ForEach(Mode.allCases) { Text($0.rawValue).tag($0) }
                     }
                     .pickerStyle(.segmented)
-                    .frame(width: 390)
+                    .frame(width: 220)
                 }
-                ToolbarItem(placement: .primaryAction) {
+                ToolbarItemGroup(placement: .primaryAction) {
+                    Menu {
+                        Button("Active", systemImage: "book.pages") { showArchived = false }
+                        Button("Archived", systemImage: "archivebox") { showArchived = true }
+                    } label: {
+                        Label(showArchived ? "Archived" : "Active", systemImage: "line.3.horizontal.decrease.circle")
+                    }
                     Menu {
                         Button("Note", systemImage: "square.and.pencil") { showNewNote = true }
-                        Button("List", systemImage: "folder.badge.plus") { showNewCollection = true }
+                        Button("List", systemImage: "folder.badge.plus") { showNewList = true }
                     } label: { Label("New", systemImage: "plus") }
+                    .accessibilityIdentifier("notebook.new")
                 }
             }
             .sheet(isPresented: $showNewNote, onDismiss: openCreatedNoteIfNeeded) {
@@ -191,8 +168,8 @@ struct NotebookView: View {
                     createdNotePendingNavigation = id
                 }
             }
-            .sheet(isPresented: $showNewCollection) {
-                NewCollectionView(model: model, collections: collections) { Task { await load() } }
+            .sheet(isPresented: $showNewList) {
+                NewListView(model: model) { Task { await load() } }
             }
             .task { await load() }
             .refreshable { await load() }
@@ -267,26 +244,24 @@ struct NotebookView: View {
     private func load() async {
         guard let store = model.store else { return }
         do {
-            async let loadedNotes = store.list(NotePayload.self)
-            async let loadedCollections = store.list(CollectionPayload.self)
-            async let loadedSessions = store.list(StudySessionPayload.self)
-            async let loadedTrash = store.trashedTargetIds()
-            let result = try await (loadedNotes, loadedCollections, loadedSessions, loadedTrash)
-            notes = result.0
-                .filter { $0.payload.archivedAt == nil && !result.3.contains($0.id) }
+            async let loadedWorkspace = store.workspaceSnapshot()
+            let workspace = try await loadedWorkspace
+            noteCursor = workspace.notes.nextCursor
+            listCursor = workspace.lists.nextCursor
+            notes = workspace.notes.items
+                .filter { $0.payload.archivedAt == nil }
                 .sorted(by: noteSort)
-            archivedNotes = result.0
-                .filter { $0.payload.archivedAt != nil && !result.3.contains($0.id) }
+            archivedNotes = workspace.notes.items
+                .filter { $0.payload.archivedAt != nil }
                 .sorted { ($0.payload.archivedAt ?? .distantPast) > ($1.payload.archivedAt ?? .distantPast) }
-            collections = result.1
-                .filter { !result.3.contains($0.id) }
+            lists = workspace.lists.items
                 .sorted { $0.payload.name.localizedCaseInsensitiveCompare($1.payload.name) == .orderedAscending }
-            sessions = result.2.sorted { $0.payload.startedAt > $1.payload.startedAt }
+            sessions = workspace.sessions.items.sorted { $0.payload.startedAt > $1.payload.startedAt }
             organizationByNoteId = try await NoteOrganizationIndex.load(
                 store: store,
-                notes: result.0,
-                collections: result.1,
-                sessions: result.2
+                notes: workspace.notes.items,
+                collections: workspace.lists.items,
+                sessions: workspace.sessions.items
             )
         }
         catch { errorMessage = error.localizedDescription }
@@ -307,15 +282,15 @@ struct NotebookView: View {
     private func setPinned(_ note: IdentifiedPayload<NotePayload>, pinned: Bool) async {
         guard let store = model.store else { return }
         var changed = note.payload
-        changed.schemaVersion = "note/v4"
+        changed.schemaVersion = "note/v5"
         changed.pinnedAt = pinned ? .now : nil
         changed.updatedAt = .now
         do {
             _ = try await store.save(
                 id: note.id,
                 payload: changed,
-                parentId: changed.courseId ?? changed.studySessionId,
-                relationIds: [changed.courseId, changed.studySessionId].compactMap(\.self)
+                parentId: changed.topicId ?? changed.studySessionId,
+                relationIds: [changed.topicId, changed.studySessionId].compactMap(\.self)
             )
             model.noteLocalMutation()
             await load()
@@ -335,12 +310,12 @@ struct NotebookView: View {
         } catch { errorMessage = error.localizedDescription }
     }
 
-    private func moveListToTrash(_ list: IdentifiedPayload<CollectionPayload>) async {
+    private func moveListToTrash(_ list: IdentifiedPayload<ListPayload>) async {
         guard let store = model.store else { return }
         do {
             _ = try await store.moveToTrash(
                 targetId: list.id,
-                targetType: .collection,
+                targetType: .list,
                 displayName: list.payload.name
             )
             model.noteLocalMutation()
@@ -357,8 +332,8 @@ struct NotebookView: View {
             _ = try await store.save(
                 id: changed.id,
                 payload: changed.payload,
-                parentId: changed.payload.courseId ?? changed.payload.studySessionId,
-                relationIds: [changed.payload.courseId, changed.payload.studySessionId].compactMap(\.self)
+                parentId: changed.payload.topicId ?? changed.payload.studySessionId,
+                relationIds: [changed.payload.topicId, changed.payload.studySessionId].compactMap(\.self)
             )
             model.noteLocalMutation()
             await load()
@@ -367,26 +342,79 @@ struct NotebookView: View {
         }
     }
 
-    private var activeCollections: [IdentifiedPayload<CollectionPayload>] {
-        collections.filter { $0.payload.archivedAt == nil }
+    private var activeLists: [IdentifiedPayload<ListPayload>] {
+        lists.filter { $0.payload.archivedAt == nil }
     }
 
-    private var archivedCollections: [IdentifiedPayload<CollectionPayload>] {
-        collections.filter { $0.payload.archivedAt != nil }
+    private var archivedLists: [IdentifiedPayload<ListPayload>] {
+        lists.filter { $0.payload.archivedAt != nil }
     }
 
-    private func setListArchived(_ list: IdentifiedPayload<CollectionPayload>, archived: Bool) async {
+    private var displayedNotes: [IdentifiedPayload<NotePayload>] {
+        showArchived ? archivedNotes : notes
+    }
+
+    private var displayedLists: [IdentifiedPayload<ListPayload>] {
+        showArchived ? archivedLists : activeLists
+    }
+
+    private func setListArchived(_ list: IdentifiedPayload<ListPayload>, archived: Bool) async {
         guard let store = model.store else { return }
         do {
             try await store.updateList(
                 id: list.id,
                 name: list.payload.name,
-                parentListId: list.payload.parentCollectionId,
                 archived: archived
             )
             model.noteLocalMutation()
             await load()
         } catch { errorMessage = error.localizedDescription }
+    }
+
+    private var loadMoreButton: some View {
+        Button {
+            Task { await loadMore() }
+        } label: {
+            HStack {
+                Spacer()
+                if isLoadingMore { ProgressView() }
+                Text(isLoadingMore ? "Loading…" : "Load more")
+                Spacer()
+            }
+        }
+        .disabled(isLoadingMore)
+    }
+
+    private func loadMore() async {
+        guard let store = model.store, !isLoadingMore else { return }
+        isLoadingMore = true
+        defer { isLoadingMore = false }
+        do {
+            if mode == .notes, let noteCursor {
+                let page = try await store.listPage(NotePayload.self, after: noteCursor)
+                self.noteCursor = page.nextCursor
+                let active = page.items.filter { $0.payload.archivedAt == nil }
+                let archived = page.items.filter { $0.payload.archivedAt != nil }
+                notes = (notes + active).sorted(by: noteSort)
+                archivedNotes = (archivedNotes + archived).sorted {
+                    ($0.payload.archivedAt ?? .distantPast) > ($1.payload.archivedAt ?? .distantPast)
+                }
+            } else if mode == .lists, let listCursor {
+                let page = try await store.listPage(ListPayload.self, after: listCursor)
+                self.listCursor = page.nextCursor
+                lists = (lists + page.items).sorted {
+                    $0.payload.name.localizedCaseInsensitiveCompare($1.payload.name) == .orderedAscending
+                }
+            }
+            organizationByNoteId = try await NoteOrganizationIndex.load(
+                store: store,
+                notes: notes + archivedNotes,
+                collections: lists,
+                sessions: sessions
+            )
+        } catch {
+            errorMessage = error.localizedDescription
+        }
     }
 
     private func openCreatedNoteIfNeeded() {
@@ -405,16 +433,16 @@ struct NewNoteView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var title = ""
     @State private var errorMessage: String?
-    let courseId: UUID?
+    let topicId: UUID?
     let onCreated: (UUID) -> Void
 
     init(
         model: AppModel,
-        courseId: UUID? = nil,
+        topicId: UUID? = nil,
         onCreated: @escaping (UUID) -> Void
     ) {
         self.model = model
-        self.courseId = courseId
+        self.topicId = topicId
         self.onCreated = onCreated
     }
 
@@ -424,6 +452,7 @@ struct NewNoteView: View {
                 Section {
                     TextField("Note title", text: $title)
                         .font(.title3)
+                        .accessibilityIdentifier("notebook.new-note.title")
                 } footer: {
                     Text("This note starts unassigned. Add it to a Topic, List, or study session later.")
                 }
@@ -439,7 +468,7 @@ struct NewNoteView: View {
                                 guard let store = model.store else { return }
                                 let id = try await store.createNote(
                                     title: title.trimmingCharacters(in: .whitespacesAndNewlines),
-                                    courseId: courseId,
+                                    topicId: topicId,
                                     canvas: NoteCanvasConfiguration(
                                         pageFormat: model.workspacePreferences.defaultPageFormat,
                                         orientation: model.workspacePreferences.defaultPageOrientation,
@@ -454,48 +483,33 @@ struct NewNoteView: View {
                         }
                     }
                     .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .accessibilityIdentifier("notebook.new-note.create")
                 }
             }
         }
     }
 }
 
-struct NewCollectionView: View {
+struct NewListView: View {
     @Bindable var model: AppModel
     @Environment(\.dismiss) private var dismiss
-    let collections: [IdentifiedPayload<CollectionPayload>]
-    var fixedParentId: UUID?
     let onCreated: () -> Void
 
     @State private var name = ""
-    @State private var parentId: UUID?
     @State private var errorMessage: String?
 
     init(
         model: AppModel,
-        collections: [IdentifiedPayload<CollectionPayload>],
-        fixedParentId: UUID? = nil,
         onCreated: @escaping () -> Void
     ) {
         self.model = model
-        self.collections = collections
-        self.fixedParentId = fixedParentId
         self.onCreated = onCreated
-        _parentId = State(initialValue: fixedParentId)
     }
 
     var body: some View {
         NavigationStack {
             Form {
                 TextField("List name", text: $name)
-                if fixedParentId == nil {
-                    Picker("Inside", selection: $parentId) {
-                        Text("Top level").tag(UUID?.none)
-                        ForEach(collections, id: \.id) { collection in
-                            Text(collection.payload.name).tag(Optional(collection.id))
-                        }
-                    }
-                }
                 Text("Lists do not move or duplicate the underlying record; they add another encrypted relationship.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -515,14 +529,8 @@ struct NewCollectionView: View {
     private func create() async {
         guard let store = model.store else { return }
         do {
-            let payload = CollectionPayload(
-                name: name.trimmingCharacters(in: .whitespacesAndNewlines),
-                parentCollectionId: parentId
-            )
-            _ = try await store.save(
-                payload: payload,
-                parentId: parentId,
-                relationIds: [parentId].compactMap(\.self)
+            _ = try await store.createList(
+                name: name.trimmingCharacters(in: .whitespacesAndNewlines)
             )
             model.noteLocalMutation()
             onCreated()

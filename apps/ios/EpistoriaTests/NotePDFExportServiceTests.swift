@@ -15,24 +15,26 @@ final class NotePDFExportServiceTests: XCTestCase {
             orientation: .landscape,
             paperStyle: .isometric,
             paperColor: .ivory,
-            paperSpacing: 18,
-            pageCount: 2
+            paperSpacing: 18
         )
         let noteID = try await fixture.store.createNote(
             title: "Factorization review",
             canvas: configuration
         )
+        let initialPages = try await fixture.store.notePages(noteId: noteID)
+        let firstPageID = try XCTUnwrap(initialPages.first?.id)
+        let secondPageID = try await fixture.store.insertNotePage(noteId: noteID, after: firstPageID)
         _ = try await fixture.store.appendCanvasText(
             noteId: noteID,
             text: "Common factor evidence",
             placement: NoteCanvasPlacement(x: 48, y: 72, width: 360, height: 120),
-            pageIndex: 0
+            pageId: firstPageID
         )
         _ = try await fixture.store.appendCanvasText(
             noteId: noteID,
             text: "Difference of squares evidence",
             placement: NoteCanvasPlacement(x: 48, y: 72, width: 360, height: 120),
-            pageIndex: 1
+            pageId: secondPageID
         )
         let sourceID = try await fixture.store.createSource(
             type: .pastedText,
@@ -51,7 +53,7 @@ final class NotePDFExportServiceTests: XCTestCase {
             noteId: noteID,
             evidenceId: evidenceID,
             placement: NoteCanvasPlacement(x: 48, y: 220, width: 360, height: 150),
-            pageIndex: 0
+            pageId: firstPageID
         )
         let imageURL = fixture.root.appendingPathComponent("factor-tree.png")
         let imageData = UIGraphicsImageRenderer(size: CGSize(width: 80, height: 60)).pngData {
@@ -65,10 +67,10 @@ final class NotePDFExportServiceTests: XCTestCase {
             assetId: importedImage.assetId,
             filename: importedImage.filename,
             placement: NoteCanvasPlacement(x: 440, y: 96, width: 180, height: 135, zIndex: 2),
-            pageIndex: 0
+            pageId: firstPageID
         )
 
-        let inkID = try await fixture.store.appendCanvasInkLayer(noteId: noteID, pageIndex: 1)
+        let inkID = try await fixture.store.appendCanvasInkLayer(noteId: noteID, pageId: secondPageID)
         var inkBlock = try await fixture.store.payload(NoteBlockPayload.self, id: inkID)
         inkBlock.payload.drawingData = makeDrawing().dataRepresentation()
         _ = try await fixture.store.save(
@@ -85,13 +87,13 @@ final class NotePDFExportServiceTests: XCTestCase {
                 lineWidth: 4
             ),
             placement: NoteCanvasPlacement(x: 380, y: 260, width: 220, height: 90, zIndex: 3),
-            pageIndex: 1
+            pageId: secondPageID
         )
         _ = try await fixture.store.appendCanvasEquation(
             noteId: noteID,
             symbol: "∫",
             placement: NoteCanvasPlacement(x: 620, y: 250, width: 100, height: 90, zIndex: 4),
-            pageIndex: 1
+            pageId: secondPageID
         )
 
         let result = try await fixture.service.export(noteId: noteID)
@@ -140,16 +142,20 @@ final class NotePDFExportServiceTests: XCTestCase {
         let fixture = try makeFixture()
         defer { try? FileManager.default.removeItem(at: fixture.root) }
         let noteID = try await fixture.store.createNote(
-            title: "Selected export",
-            canvas: NoteCanvasConfiguration(pageCount: 3)
+            title: "Selected export"
         )
+        let initialPages = try await fixture.store.notePages(noteId: noteID)
+        let firstPageID = try XCTUnwrap(initialPages.first?.id)
+        _ = try await fixture.store.insertNotePage(noteId: noteID, after: firstPageID)
+        let twoPages = try await fixture.store.notePages(noteId: noteID)
+        let secondPageID = try XCTUnwrap(twoPages.last?.id)
+        _ = try await fixture.store.insertNotePage(noteId: noteID, after: secondPageID)
         let pages = try await fixture.store.notePages(noteId: noteID)
         for index in pages.indices {
             _ = try await fixture.store.appendCanvasText(
                 noteId: noteID,
                 text: "Stable page \(index + 1)",
                 placement: NoteCanvasPlacement(x: 40, y: 60, width: 300, height: 80),
-                pageIndex: index,
                 pageId: pages[index].id
             )
         }
@@ -178,7 +184,9 @@ final class NotePDFExportServiceTests: XCTestCase {
         let fixture = try makeFixture()
         defer { try? FileManager.default.removeItem(at: fixture.root) }
         let noteID = try await fixture.store.createNote(title: "OCR export")
-        let inkID = try await fixture.store.appendCanvasInkLayer(noteId: noteID, pageIndex: 0)
+        let pages = try await fixture.store.notePages(noteId: noteID)
+        let pageID = try XCTUnwrap(pages.first?.id)
+        let inkID = try await fixture.store.appendCanvasInkLayer(noteId: noteID, pageId: pageID)
         var ink = try await fixture.store.payload(NoteBlockPayload.self, id: inkID)
         let originalDrawing = makeDrawing().dataRepresentation()
         ink.payload.drawingData = originalDrawing

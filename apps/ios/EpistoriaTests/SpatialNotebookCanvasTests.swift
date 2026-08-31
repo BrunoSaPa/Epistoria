@@ -9,7 +9,7 @@ final class SpatialNotebookCanvasTests: XCTestCase {
         XCTAssertEqual(NoteOrganizationSummary().label, "Unassigned · Organize later")
         XCTAssertEqual(
             NoteOrganizationSummary(collectionNames: ["Algebra"]).label,
-            "Collection · Algebra"
+            "List · Algebra"
         )
         XCTAssertEqual(
             NoteOrganizationSummary(sessionTitles: ["Factoring practice"]).label,
@@ -20,7 +20,7 @@ final class SpatialNotebookCanvasTests: XCTestCase {
                 collectionNames: ["Algebra"],
                 sessionTitles: ["Factoring practice"]
             ).label,
-            "Collection · Algebra · Session · Factoring practice"
+            "List · Algebra · Session · Factoring practice"
         )
     }
 
@@ -124,7 +124,7 @@ final class SpatialNotebookCanvasTests: XCTestCase {
         let host = SpatialNotebookHostView(
             frame: CGRect(x: 0, y: 0, width: 1_024, height: 768)
         )
-        let configuration = NoteCanvasConfiguration(pageFormat: .a4, pageCount: 2)
+        let configuration = NoteCanvasConfiguration(pageFormat: .a4)
         apply(to: host, configuration: configuration, pageIndex: 0)
         host.setNeedsLayout()
         host.layoutIfNeeded()
@@ -145,7 +145,7 @@ final class SpatialNotebookCanvasTests: XCTestCase {
 
         apply(
             to: host,
-            configuration: NoteCanvasConfiguration(pageFormat: .a4, pageCount: 3),
+            configuration: NoteCanvasConfiguration(pageFormat: .a4),
             mode: .ink,
             inkTool: .eraser,
             allowsViewportNavigation: false

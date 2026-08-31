@@ -49,6 +49,245 @@ final class LocalDatabaseTests: XCTestCase {
         }
     }
 
+    func testAtomicBatchRebuildsEachOwnerAfterAllSearchSegmentsChange() async throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let database = try SQLCipherDatabase(
+            url: directory.appendingPathComponent("batched-search.sqlite"),
+            key: Data(repeating: 17, count: 32)
+        )
+        let noteId = UUID()
+        let firstBlockId = UUID()
+        let secondBlockId = UUID()
+        let timestamp = Date(timeIntervalSince1970: 2_000_000_000)
+        let note = NotePayload(title: "Batch search note", now: timestamp)
+        _ = try await database.saveLocal(
+            id: noteId,
+            entityType: .note,
+            content: try CanonicalJSON.encode(note),
+            modifiedAt: timestamp
+        )
+
+        func write(blockId: UUID, text: String) -> LocalEntityWrite {
+            let segment = SearchSegmentWrite(
+                id: blockId,
+                ownerEntityId: noteId,
+                sourceEntityId: blockId,
+                origin: .writtenText,
+                reviewState: .authored,
+                authority: 100,
+                title: "Batch search note",
+                body: text,
+                updatedAt: timestamp
+            )
+            return LocalEntityWrite(
+                id: blockId,
+                entityType: .noteBlock,
+                parentId: noteId,
+                relationIds: [noteId],
+                content: Data("opaque-\(text)".utf8),
+                searchProjection: SearchProjectionWrite(
+                    sourceEntityId: blockId,
+                    segments: [segment]
+                ),
+                modifiedAt: timestamp
+            )
+        }
+
+        try await database.saveLocalBatch([
+            write(blockId: firstBlockId, text: "batchedalpha"),
+            write(blockId: secondBlockId, text: "batchedbeta"),
+        ])
+
+        let initialAlphaHits = try await database.search("batchedalpha")
+        let initialBetaHits = try await database.search("batchedbeta")
+        XCTAssertEqual(initialAlphaHits.first?.entity.id, noteId)
+        XCTAssertEqual(initialBetaHits.first?.entity.id, noteId)
+
+        try await database.saveLocalBatch([
+            LocalEntityWrite(
+                id: firstBlockId,
+                entityType: .noteBlock,
+                parentId: noteId,
+                relationIds: [noteId],
+                content: Data("opaque-cleared".utf8),
+                searchProjection: SearchProjectionWrite(
+                    sourceEntityId: firstBlockId,
+                    segments: []
+                ),
+                modifiedAt: timestamp.addingTimeInterval(1)
+            ),
+        ])
+
+        let clearedAlphaHits = try await database.search("batchedalpha")
+        let retainedBetaHits = try await database.search("batchedbeta")
+        XCTAssertTrue(clearedAlphaHits.isEmpty)
+        XCTAssertEqual(retainedBetaHits.first?.entity.id, noteId)
+    }
+
+    func testCursorPagesAreBoundedStableAndDoNotRepeatEntities() async throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let database = try SQLCipherDatabase(
+            url: directory.appendingPathComponent("pages.sqlite"),
+            key: Data(repeating: 18, count: 32)
+        )
+        let store = EpistoriaStore(database: database)
+        let base = Date(timeIntervalSince1970: 2_000_000_000)
+        for index in 0 ..< 7 {
+            let timestamp = base.addingTimeInterval(TimeInterval(index / 2))
+            _ = try await store.save(payload: NotePayload(title: "Note \(index)", now: timestamp))
+        }
+
+        let first = try await store.listPage(NotePayload.self, limit: 3)
+        let second = try await store.listPage(
+            NotePayload.self,
+            limit: 3,
+            after: try XCTUnwrap(first.nextCursor)
+        )
+        let third = try await store.listPage(
+            NotePayload.self,
+            limit: 3,
+            after: try XCTUnwrap(second.nextCursor)
+        )
+        let ids = (first.items + second.items + third.items).map(\.id)
+        XCTAssertEqual(first.items.count, 3)
+        XCTAssertEqual(second.items.count, 3)
+        XCTAssertEqual(third.items.count, 1)
+        XCTAssertEqual(Set(ids).count, 7)
+        XCTAssertNil(third.nextCursor)
+    }
+
+    func testBoundedWorkspaceSnapshotAndSummaryProjectionRebuildFromAuthoritativeRows() async throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let database = try SQLCipherDatabase(
+            url: directory.appendingPathComponent("summary.sqlite"),
+            key: Data(repeating: 19, count: 32)
+        )
+        let store = EpistoriaStore(database: database)
+        let topicId = try await store.createTopic(name: "Topology")
+        let noteId = try await store.createNote(title: "Open sets", topicId: topicId)
+        var note = try await store.payload(NotePayload.self, id: noteId)
+        note.payload.pinnedAt = Date(timeIntervalSince1970: 2_000_000_100)
+        note.payload.updatedAt = note.payload.pinnedAt!
+        _ = try await store.save(
+            id: noteId,
+            payload: note.payload,
+            parentId: topicId,
+            relationIds: [topicId]
+        )
+        for index in 0 ..< 4 {
+            _ = try await store.createNote(title: "Bounded \(index)", topicId: topicId)
+        }
+
+        let snapshot = try await store.workspaceSnapshot(
+            limits: WorkspaceReadLimits(notes: 2, lists: 1, sources: 1, topics: 1, sessions: 1)
+        )
+        XCTAssertEqual(snapshot.notes.items.count, 2)
+        XCTAssertNotNil(snapshot.notes.nextCursor)
+        XCTAssertEqual(snapshot.topics.items.map(\.id), [topicId])
+
+        let initial = try await database.workspaceSummary(types: [.note], topicId: topicId)
+        XCTAssertEqual(initial.count, 5)
+        XCTAssertEqual(initial.first?.id, noteId)
+        XCTAssertEqual(initial.first?.pinnedAt, note.payload.pinnedAt)
+
+        try await database.invalidateWorkspaceSummary()
+        let needsRebuild = try await database.workspaceSummaryNeedsRebuild()
+        let invalidatedSummary = try await database.workspaceSummary(types: [.note])
+        XCTAssertTrue(needsRebuild)
+        XCTAssertTrue(invalidatedSummary.isEmpty)
+
+        try await database.rebuildWorkspaceSummary()
+        let isStillStale = try await database.workspaceSummaryNeedsRebuild()
+        XCTAssertFalse(isStillStale)
+        let rebuilt = try await database.workspaceSummary(types: [.note], topicId: topicId)
+        XCTAssertEqual(Set(rebuilt.map(\.id)), Set(initial.map(\.id)))
+    }
+
+    func testDueFlashcardProjectionUsesLatestReviewAndExcludesInactiveCards() async throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let database = try SQLCipherDatabase(
+            url: directory.appendingPathComponent("due-cards.sqlite"),
+            key: Data(repeating: 20, count: 32)
+        )
+        let store = EpistoriaStore(database: database)
+        let now = Date(timeIntervalSince1970: 2_000_100_000)
+        let topicId = try await store.createTopic(name: "Algebra")
+        let neverReviewed = try await store.createFlashcard(
+            topicId: topicId,
+            prompt: "Factor x² - 1",
+            answer: "(x - 1)(x + 1)"
+        )
+        let reviewedDue = try await store.createFlashcard(
+            topicId: topicId,
+            prompt: "Factor x² + 2x + 1",
+            answer: "(x + 1)²"
+        )
+        let reviewedLater = try await store.createFlashcard(
+            topicId: topicId,
+            prompt: "Factor x² - 4",
+            answer: "(x - 2)(x + 2)"
+        )
+        let suspended = try await store.createFlashcard(
+            topicId: topicId,
+            prompt: "Factor x² - 9",
+            answer: "(x - 3)(x + 3)"
+        )
+
+        func saveReview(cardId: UUID, dueAt: Date, reviewedAt: Date) async throws {
+            let card = try await store.payload(FlashcardPayload.self, id: cardId)
+            _ = try await store.save(
+                payload: FlashcardReviewPayload(
+                    cardId: cardId,
+                    cardRevisionId: card.payload.currentRevisionId,
+                    rating: .good,
+                    previousState: FlashcardScheduleState(dueAt: reviewedAt),
+                    resultingState: FlashcardScheduleState(dueAt: dueAt),
+                    now: reviewedAt
+                ),
+                parentId: cardId,
+                relationIds: [cardId, card.payload.currentRevisionId]
+            )
+        }
+        try await saveReview(
+            cardId: reviewedDue,
+            dueAt: now.addingTimeInterval(-60),
+            reviewedAt: now.addingTimeInterval(-3_600)
+        )
+        try await saveReview(
+            cardId: reviewedLater,
+            dueAt: now.addingTimeInterval(86_400),
+            reviewedAt: now.addingTimeInterval(-1_800)
+        )
+        try await store.setFlashcardLifecycle(id: suspended, suspended: true, at: now)
+
+        let due = try await store.dueFlashcards(now: now)
+        let counts = try await store.dueFlashcardCountsByTopic(now: now)
+        XCTAssertEqual(Set(due.map(\.id)), Set([neverReviewed, reviewedDue]))
+        XCTAssertEqual(counts[topicId], 2)
+
+        try await database.rebuildWorkspaceSummary()
+        let rebuilt = try await store.dueFlashcards(now: now)
+        XCTAssertEqual(Set(rebuilt.map(\.id)), Set([neverReviewed, reviewedDue]))
+    }
+
+    func testCurrentGenerationRefusesAnOlderLocalSchemaWithoutChangingIt() async throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("older-generation.sqlite")
+        let key = Data(repeating: 74, count: 32)
+        let legacy = try SQLCipherDatabase(url: url, key: key, schemaGeneration: 1)
+        try await legacy.checkpoint()
+
+        XCTAssertThrowsError(try SQLCipherDatabase(url: url, key: key)) { error in
+            XCTAssertEqual(error as? LocalDatabaseError, .incompatibleSchema(4))
+        }
+        XCTAssertNoThrow(try SQLCipherDatabase(url: url, key: key, schemaGeneration: 1))
+    }
+
     func testRepositoryPersistsVerticalSliceOffline() async throws {
         let directory = try temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -57,58 +296,50 @@ final class LocalDatabaseTests: XCTestCase {
             key: Data(0 ..< 32)
         )
         let store = EpistoriaStore(database: database)
-        let collectionId = try await store.save(payload: CollectionPayload(name: "Mathematics"))
-        let institutionId = try await store.save(payload: InstitutionPayload(name: "Synthetic U"))
-        let termId = try await store.save(
-            payload: AcademicTermPayload(institutionId: institutionId, name: "Fall 2026"),
-            parentId: institutionId,
-            relationIds: [institutionId]
-        )
-        let courseId = try await store.save(
-            payload: CoursePayload(
+        let listId = try await store.save(payload: ListPayload(name: "Mathematics"))
+        let topicId = try await store.save(
+            payload: TopicPayload(
                 name: "Probability",
-                institutionId: institutionId,
-                academicTermId: termId
-            ),
-            parentId: termId,
-            relationIds: [institutionId, termId]
+                institution: "Synthetic U",
+                term: "Fall 2026"
+            )
         )
-        let sessionId = try await store.startSession(title: "Entropy", courseId: courseId)
+        let sessionId = try await store.startSession(title: "Entropy", topicId: topicId)
         let noteId = try await store.createNote(
             title: "Entropy notes",
-            courseId: courseId,
+            topicId: topicId,
             sessionId: sessionId
         )
         _ = try await store.appendTextBlock(noteId: noteId, text: "Entropy measures uncertainty")
         _ = try await store.appendHandwritingBlock(noteId: noteId)
         let collectionLink = RelationPayload(
-            kind: .collectionItem,
-            leftId: collectionId,
+            kind: .listItem,
+            leftId: listId,
             rightId: noteId
         )
         _ = try await store.save(
             payload: collectionLink,
-            parentId: collectionId,
-            relationIds: [collectionId, noteId],
-            entityTypeOverride: .collectionItem
+            parentId: listId,
+            relationIds: [listId, noteId],
+            entityTypeOverride: .listItem
         )
         try await store.endSession(id: sessionId)
 
-        let courses = try await store.list(CoursePayload.self)
+        let topics = try await store.list(TopicPayload.self)
         let blocks = try await store.list(NoteBlockPayload.self, parentId: noteId)
         let links = try await store.list(
             RelationPayload.self,
-            parentId: collectionId,
-            entityTypeOverride: .collectionItem
+            parentId: listId,
+            entityTypeOverride: .listItem
         )
         let pending = try await database.pendingMutations()
-        XCTAssertEqual(courses.count, 1)
+        XCTAssertEqual(topics.count, 1)
         XCTAssertEqual(blocks.count, 2)
         XCTAssertEqual(links.first?.payload.rightId, noteId)
         let session = try await store.payload(StudySessionPayload.self, id: sessionId)
         XCTAssertEqual(session.payload.state, .ended)
         XCTAssertNotNil(session.payload.endedAt)
-        XCTAssertGreaterThanOrEqual(pending.count, 7)
+        XCTAssertGreaterThanOrEqual(pending.count, 5)
     }
 
     func testUnassignedQuickNoteCanJoinCollectionAndSessionWithoutDuplication() async throws {
@@ -120,19 +351,19 @@ final class LocalDatabaseTests: XCTestCase {
         )
         let store = EpistoriaStore(database: database)
         let noteId = try await store.createNote(title: "Unassigned quick note")
-        let collectionId = try await store.save(payload: CollectionPayload(name: "Algebra"))
+        let listId = try await store.save(payload: ListPayload(name: "Algebra"))
         let sessionId = try await store.startSession(title: "Factoring practice")
 
-        let firstCollectionLink = try await store.linkNote(noteId, toCollection: collectionId)
-        let repeatedCollectionLink = try await store.linkNote(noteId, toCollection: collectionId)
+        let firstCollectionLink = try await store.linkNote(noteId, toList: listId)
+        let repeatedCollectionLink = try await store.linkNote(noteId, toList: listId)
         let firstSessionLink = try await store.linkNote(noteId, toSession: sessionId)
         let repeatedSessionLink = try await store.linkNote(noteId, toSession: sessionId)
 
         let note = try await store.payload(NotePayload.self, id: noteId)
         let collectionLinks = try await store.list(
             RelationPayload.self,
-            parentId: collectionId,
-            entityTypeOverride: .collectionItem
+            parentId: listId,
+            entityTypeOverride: .listItem
         )
         let sessionLinks = try await store.list(
             RelationPayload.self,
@@ -154,7 +385,7 @@ final class LocalDatabaseTests: XCTestCase {
         ).count
         try await store.unlinkNote(
             noteId,
-            fromCollection: collectionId,
+            fromList: listId,
             at: Date(timeIntervalSince1970: 1_800_100_000)
         )
         try await store.unlinkNote(
@@ -164,8 +395,8 @@ final class LocalDatabaseTests: XCTestCase {
         )
         let collectionLinksAfterUnlink = try await store.list(
             RelationPayload.self,
-            parentId: collectionId,
-            entityTypeOverride: .collectionItem
+            parentId: listId,
+            entityTypeOverride: .listItem
         )
         let sessionNoteIdsAfterUnlink = try await store.noteIdsLinkedToSession(sessionId)
         let preservedNote = try await store.payload(NotePayload.self, id: noteId)
@@ -187,7 +418,7 @@ final class LocalDatabaseTests: XCTestCase {
         XCTAssertEqual(deletionMutations.count, 2)
         XCTAssertTrue(deletionMutations.allSatisfy { $0.operation == .delete })
 
-        let replacementCollectionLink = try await store.linkNote(noteId, toCollection: collectionId)
+        let replacementCollectionLink = try await store.linkNote(noteId, toList: listId)
         let replacementSessionLink = try await store.linkNote(noteId, toSession: sessionId)
         XCTAssertNotEqual(replacementCollectionLink, firstCollectionLink)
         XCTAssertNotEqual(replacementSessionLink, firstSessionLink)
@@ -244,22 +475,22 @@ final class LocalDatabaseTests: XCTestCase {
         XCTAssertFalse(first.reusedExistingAsset)
         XCTAssertTrue(second.reusedExistingAsset)
         XCTAssertEqual(first.assetId, second.assetId)
-        XCTAssertNotEqual(first.resourceId, second.resourceId)
+        XCTAssertNotEqual(first.sourceId, second.sourceId)
         let decrypted = try await manager.decryptedData(assetId: first.assetId)
         XCTAssertEqual(decrypted, original)
         let annotationId = try await store.save(
             payload: AnnotationPayload(
-                resourceId: first.resourceId,
+                sourceId: first.sourceId,
                 annotationType: .important,
                 pageNumber: 4,
                 comment: "Important explanation of autonomous equations."
             ),
-            parentId: first.resourceId,
-            relationIds: [first.resourceId]
+            parentId: first.sourceId,
+            relationIds: [first.sourceId]
         )
         let annotation = try await store.payload(AnnotationPayload.self, id: annotationId)
         XCTAssertEqual(annotation.payload.pageNumber, 4)
-        XCTAssertEqual(annotation.payload.resourceId, first.resourceId)
+        XCTAssertEqual(annotation.payload.sourceId, first.sourceId)
         let local = try await database.localAsset(id: first.assetId)
         let encrypted = try Data(contentsOf: XCTUnwrap(local?.encryptedFileURL))
         XCTAssertNil(encrypted.range(of: Data("Synthetic original bytes".utf8)))
@@ -410,7 +641,7 @@ final class LocalDatabaseTests: XCTestCase {
         let reopened = EpistoriaStore(database: try SQLCipherDatabase(url: databaseURL, key: key))
         var image = try await reopened.payload(NoteBlockPayload.self, id: imageId)
         let storedConfiguration = try XCTUnwrap(image.payload.imageConfiguration)
-        XCTAssertEqual(image.payload.schemaVersion, "note-block/v7")
+        XCTAssertEqual(image.payload.schemaVersion, "note-block/v8")
         XCTAssertEqual(image.payload.assetId, replacementAssetId)
         XCTAssertEqual(image.payload.plainText, "replacement.png")
         XCTAssertEqual(storedConfiguration.crop, configuration.crop)
@@ -444,11 +675,11 @@ final class LocalDatabaseTests: XCTestCase {
         XCTAssertEqual(restoredEntity.relationIds, [noteId, originalAssetId])
     }
 
-    func testSpatialSchemasDecodeLegacyNotesWithoutDiscardingContent() throws {
+    func testNewGenerationRejectsLegacyNotePayloadVersions() throws {
         let legacyNote = """
         {
           "archivedAt": null,
-          "courseId": null,
+          "topicId": null,
           "createdAt": "2026-08-13T12:00:00.000Z",
           "schemaVersion": "note/v1",
           "studySessionId": null,
@@ -473,20 +704,18 @@ final class LocalDatabaseTests: XCTestCase {
         }
         """
 
-        let note = try CanonicalJSON.decode(NotePayload.self, from: Data(legacyNote.utf8))
-        let block = try CanonicalJSON.decode(NoteBlockPayload.self, from: Data(legacyBlock.utf8))
-        XCTAssertEqual(note.schemaVersion, "note/v1")
-        XCTAssertNil(note.canvas)
-        XCTAssertEqual(block.plainText, "Preserved text")
-        XCTAssertNil(block.canvasPlacement)
-        XCTAssertNil(block.canvasRole)
+        XCTAssertThrowsError(
+            try EntityPayloadValidator.validate(entityType: .note, content: Data(legacyNote.utf8))
+        )
+        XCTAssertThrowsError(
+            try EntityPayloadValidator.validate(entityType: .noteBlock, content: Data(legacyBlock.utf8))
+        )
     }
 
     func testPageFormatsUsePrintPointsAndSupportTwoDirectionalWorldCoordinates() {
-        let a4 = NoteCanvasConfiguration(pageFormat: .a4, orientation: .portrait, pageCount: 3)
+        let a4 = NoteCanvasConfiguration(pageFormat: .a4, orientation: .portrait)
         XCTAssertEqual(a4.pageWidth, 595)
         XCTAssertEqual(a4.pageHeight, 842)
-        XCTAssertEqual(a4.effectivePageCount, 3)
 
         let letterLandscape = NoteCanvasConfiguration(
             pageFormat: .letter,
@@ -498,7 +727,6 @@ final class LocalDatabaseTests: XCTestCase {
         let infinite = NoteCanvasConfiguration(pageFormat: .infinite)
         XCTAssertNil(infinite.pageWidth)
         XCTAssertNil(infinite.pageHeight)
-        XCTAssertEqual(infinite.effectivePageCount, 1)
         let placement = NoteCanvasPlacement(x: -12_000, y: -8_000, width: 400, height: 200)
         XCTAssertLessThan(placement.x, 0)
         XCTAssertLessThan(placement.y, 0)
@@ -509,31 +737,10 @@ final class LocalDatabaseTests: XCTestCase {
             paperColor: .stone,
             paperSpacing: 18
         )
-        XCTAssertEqual(modifiedPaper.schemaVersion, "note-canvas/v3")
+        XCTAssertEqual(modifiedPaper.schemaVersion, "note-canvas/v4")
         XCTAssertEqual(modifiedPaper.paperStyle, .isometric)
         XCTAssertEqual(modifiedPaper.paperColor, .stone)
         XCTAssertEqual(modifiedPaper.paperSpacing, 18)
-    }
-
-    func testLegacyCanvasDefaultsToOnePage() throws {
-        let legacy = """
-        {
-          "orientation": "PORTRAIT",
-          "pageFormat": "A4",
-          "paperStyle": "PLAIN",
-          "schemaVersion": "note-canvas/v1"
-        }
-        """
-
-        let canvas = try CanonicalJSON.decode(
-            NoteCanvasConfiguration.self,
-            from: Data(legacy.utf8)
-        )
-
-        XCTAssertEqual(canvas.schemaVersion, "note-canvas/v1")
-        XCTAssertEqual(canvas.effectivePageCount, 1)
-        XCTAssertEqual(canvas.paperColor, .white)
-        XCTAssertEqual(canvas.paperSpacing, 28)
     }
 
     func testFinitePagesPersistAsMetadataWithPageLocalBlocks() async throws {
@@ -546,8 +753,14 @@ final class LocalDatabaseTests: XCTestCase {
         let store = EpistoriaStore(database: database)
         let noteId = try await store.createNote(
             title: "Paged note",
-            canvas: NoteCanvasConfiguration(pageFormat: .a4, pageCount: 4)
+            canvas: NoteCanvasConfiguration(pageFormat: .a4)
         )
+        var pages = try await store.notePages(noteId: noteId)
+        for _ in 0 ..< 3 {
+            _ = try await store.insertNotePage(noteId: noteId, after: pages.last?.id)
+            pages = try await store.notePages(noteId: noteId)
+        }
+        let fourthPageId = try XCTUnwrap(pages.last?.id)
 
         let emptyPages = try await store.list(NoteBlockPayload.self, parentId: noteId)
         XCTAssertTrue(emptyPages.isEmpty)
@@ -556,9 +769,9 @@ final class LocalDatabaseTests: XCTestCase {
             noteId: noteId,
             text: "Only on page four",
             placement: NoteCanvasPlacement(x: 40, y: 60, width: 320, height: 120),
-            pageIndex: 3
+            pageId: fourthPageId
         )
-        let inkId = try await store.appendCanvasInkLayer(noteId: noteId, pageIndex: 3)
+        let inkId = try await store.appendCanvasInkLayer(noteId: noteId, pageId: fourthPageId)
         let shapeId = try await store.appendCanvasShape(
             noteId: noteId,
             shape: NoteCanvasShape(
@@ -568,13 +781,13 @@ final class LocalDatabaseTests: XCTestCase {
                 lineWidth: 5
             ),
             placement: NoteCanvasPlacement(x: 80, y: 220, width: 180, height: 140),
-            pageIndex: 3
+            pageId: fourthPageId
         )
         let symbolId = try await store.appendCanvasEquation(
             noteId: noteId,
             symbol: "∫",
             placement: NoteCanvasPlacement(x: 280, y: 220, width: 100, height: 90),
-            pageIndex: 3
+            pageId: fourthPageId
         )
 
         let reopened = try EpistoriaStore(
@@ -583,24 +796,24 @@ final class LocalDatabaseTests: XCTestCase {
                 key: Data(repeating: 23, count: 32)
             )
         )
-        let note = try await reopened.payload(NotePayload.self, id: noteId)
         let text = try await reopened.payload(NoteBlockPayload.self, id: textId)
         let ink = try await reopened.payload(NoteBlockPayload.self, id: inkId)
         let shape = try await reopened.payload(NoteBlockPayload.self, id: shapeId)
         let symbol = try await reopened.payload(NoteBlockPayload.self, id: symbolId)
 
-        XCTAssertEqual(note.payload.canvas?.effectivePageCount, 4)
-        XCTAssertEqual(text.payload.canvasPageIndex, 3)
-        XCTAssertEqual(ink.payload.canvasPageIndex, 3)
+        let reopenedPages = try await reopened.notePages(noteId: noteId)
+        XCTAssertEqual(reopenedPages.count, 4)
+        XCTAssertEqual(text.payload.pageId, fourthPageId)
+        XCTAssertEqual(ink.payload.pageId, fourthPageId)
         XCTAssertEqual(ink.payload.canvasRole, .inkLayer)
         XCTAssertEqual(shape.payload.canvasShape?.kind, .triangle)
         XCTAssertEqual(shape.payload.canvasShape?.strokeColor, .blue)
         XCTAssertEqual(shape.payload.canvasShape?.fillColor, .graphite)
         XCTAssertEqual(shape.payload.canvasShape?.lineWidth, 5)
-        XCTAssertEqual(shape.payload.canvasPageIndex, 3)
+        XCTAssertEqual(shape.payload.pageId, fourthPageId)
         XCTAssertEqual(symbol.payload.blockType, .equation)
         XCTAssertEqual(symbol.payload.plainText, "∫")
-        XCTAssertEqual(symbol.payload.canvasPageIndex, 3)
+        XCTAssertEqual(symbol.payload.pageId, fourthPageId)
     }
 
     func testConflictCandidateKeepsContentAndRelationshipUntilResolved() async throws {
@@ -611,13 +824,13 @@ final class LocalDatabaseTests: XCTestCase {
             key: Data(repeating: 3, count: 32)
         )
         let noteId = UUID()
-        let courseId = UUID()
+        let topicId = UUID()
         let content = try CanonicalJSON.encode(NotePayload(title: "Preserve this version"))
         _ = try await database.saveLocal(
             id: noteId,
             entityType: .note,
-            parentId: courseId,
-            relationIds: [courseId],
+            parentId: topicId,
+            relationIds: [topicId],
             content: content,
             search: SearchDocument(title: "Preserve this version", body: "")
         )
@@ -628,8 +841,8 @@ final class LocalDatabaseTests: XCTestCase {
         let conflicts = try await database.conflicts()
         let conflict = try XCTUnwrap(conflicts.first)
         XCTAssertEqual(conflict.candidateContent, content)
-        XCTAssertEqual(conflict.parentId, courseId)
-        XCTAssertEqual(conflict.relationIds, [courseId])
+        XCTAssertEqual(conflict.parentId, topicId)
+        XCTAssertEqual(conflict.relationIds, [topicId])
         let beforeHealth = try await database.dataHealth()
         XCTAssertEqual(beforeHealth.unresolvedConflicts, 1)
 
@@ -722,7 +935,7 @@ final class LocalDatabaseTests: XCTestCase {
         XCTAssertEqual(sequenceAfterRejection, "12")
     }
 
-    func testLegacyCourseBecomesTopicOnlyOnMutationAndKeepsRecoveryBackup() async throws {
+    func testTopicMutationKeepsCanonicalSchemaAndMetadata() async throws {
         let directory = try temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
         let database = try SQLCipherDatabase(
@@ -730,32 +943,23 @@ final class LocalDatabaseTests: XCTestCase {
             key: Data(repeating: 41, count: 32)
         )
         let store = EpistoriaStore(database: database)
-        let id = try await store.save(payload: CoursePayload(name: "Topology", code: "MATH-401"))
-        let storedLegacy = try await database.entity(id: id)
-        let legacyContent = try XCTUnwrap(storedLegacy?.content)
-
+        let id = try await store.save(payload: TopicPayload(name: "Topology", code: "MATH-401"))
         var topic = try await store.topic(id: id).payload
-        XCTAssertEqual(topic.schemaVersion, "course/v1")
+        XCTAssertEqual(topic.schemaVersion, "topic/v1")
         XCTAssertEqual(topic.name, "Topology")
+        topic.institution = "Synthetic University"
+        topic.term = "Fall 2026"
         topic.topicDescription = "Open and closed sets"
         topic.updatedAt = .now
         _ = try await store.saveTopic(id: id, payload: topic)
 
         let upgraded = try await store.topic(id: id).payload
-        let backup = try await database.migrationBackup(
-            entityId: id,
-            migrationName: "course-to-topic/v1"
-        )
         XCTAssertEqual(upgraded.schemaVersion, "topic/v1")
         XCTAssertEqual(upgraded.topicDescription, "Open and closed sets")
-        XCTAssertEqual(backup, legacyContent)
+        XCTAssertEqual(upgraded.institution, "Synthetic University")
+        XCTAssertEqual(upgraded.term, "Fall 2026")
         let storedUpgraded = try await database.entity(id: id)
-        let journal = try await database.migrationJournal()
-        XCTAssertEqual(storedUpgraded?.entityType, .course)
-        XCTAssertEqual(journal.count, 1)
-        XCTAssertEqual(journal.first?.name, "course-to-topic/v1")
-        XCTAssertNotNil(journal.first?.completedAt)
-        XCTAssertNil(journal.first?.failureCode)
+        XCTAssertEqual(storedUpgraded?.entityType, .topic)
     }
 
     func testSourceCreationFreezesInitialVersionAtomically() async throws {
@@ -812,7 +1016,7 @@ final class LocalDatabaseTests: XCTestCase {
         try validData.write(to: validURL, options: .atomic)
 
         let imported = try await manager.importSource(from: validURL)
-        let source = try await store.payload(SourcePayload.self, id: imported.resourceId)
+        let source = try await store.payload(SourcePayload.self, id: imported.sourceId)
         let decrypted = try await manager.decryptedData(assetId: imported.assetId)
         XCTAssertEqual(source.payload.sourceType, .csv)
         XCTAssertEqual(source.payload.title, "constants")
@@ -854,7 +1058,7 @@ final class LocalDatabaseTests: XCTestCase {
         try audio.write(to: audioURL, options: .atomic)
 
         let imported = try await manager.importSource(from: audioURL)
-        let source = try await store.payload(SourcePayload.self, id: imported.resourceId)
+        let source = try await store.payload(SourcePayload.self, id: imported.sourceId)
         let decrypted = try await manager.decryptedData(assetId: imported.assetId)
         XCTAssertEqual(source.payload.sourceType, .audio)
         XCTAssertEqual(decrypted, audio)
@@ -892,7 +1096,7 @@ final class LocalDatabaseTests: XCTestCase {
         try video.write(to: videoURL, options: .atomic)
 
         let imported = try await manager.importSource(from: videoURL)
-        let source = try await store.payload(SourcePayload.self, id: imported.resourceId)
+        let source = try await store.payload(SourcePayload.self, id: imported.sourceId)
         let decrypted = try await manager.decryptedData(assetId: imported.assetId)
         XCTAssertEqual(source.payload.sourceType, .video)
         XCTAssertEqual(decrypted, video)
@@ -964,7 +1168,7 @@ final class LocalDatabaseTests: XCTestCase {
         )
 
         let imported = try await manager.importWebSnapshot(from: requestedURL)
-        var source = try await store.payload(SourcePayload.self, id: imported.resourceId)
+        var source = try await store.payload(SourcePayload.self, id: imported.sourceId)
         XCTAssertEqual(source.payload.sourceType, .website)
         XCTAssertEqual(source.payload.canonicalURL, requestedURL)
         XCTAssertEqual(source.payload.title, "Algebra")
@@ -974,22 +1178,22 @@ final class LocalDatabaseTests: XCTestCase {
         let decryptedFirstImport = try await manager.decryptedData(assetId: imported.assetId)
         XCTAssertEqual(decryptedFirstImport, firstHTML)
 
-        let refreshed = try await manager.refreshWebSnapshot(id: imported.resourceId)
+        let refreshed = try await manager.refreshWebSnapshot(id: imported.sourceId)
         XCTAssertEqual(refreshed.capturedURL, secondURL)
         XCTAssertEqual(refreshed.difference.addedExamples, ["New example"])
         XCTAssertEqual(refreshed.difference.removedExamples, ["Old example"])
-        source = try await store.payload(SourcePayload.self, id: imported.resourceId)
+        source = try await store.payload(SourcePayload.self, id: imported.sourceId)
         let secondAssetId = try XCTUnwrap(source.payload.originalAssetId)
         XCTAssertEqual(source.payload.currentVersionId, refreshed.versionId)
         let decryptedSecondImport = try await manager.decryptedData(assetId: secondAssetId)
         XCTAssertEqual(decryptedSecondImport, secondHTML)
-        let versions = try await store.list(SourceVersionPayload.self, parentId: imported.resourceId)
+        let versions = try await store.list(SourceVersionPayload.self, parentId: imported.sourceId)
         XCTAssertEqual(versions.count, 2)
         let oldVersionAssetId = try XCTUnwrap(firstVersion.payload.originalAssetId)
         let decryptedOldVersion = try await manager.decryptedData(assetId: oldVersionAssetId)
         XCTAssertEqual(decryptedOldVersion, firstHTML)
 
-        await XCTAssertThrowsErrorAsync(try await manager.refreshWebSnapshot(id: imported.resourceId)) {
+        await XCTAssertThrowsErrorAsync(try await manager.refreshWebSnapshot(id: imported.sourceId)) {
             XCTAssertEqual($0 as? WebSnapshotCaptureError, .networkUnavailable)
         }
         await XCTAssertThrowsErrorAsync(try await manager.importWebSnapshot(from: requestedURL)) {
@@ -1061,7 +1265,7 @@ final class LocalDatabaseTests: XCTestCase {
         )
 
         let imported = try await manager.importGoogleWorkspaceSnapshot(from: requestedURL)
-        var source = try await store.payload(SourcePayload.self, id: imported.resourceId)
+        var source = try await store.payload(SourcePayload.self, id: imported.sourceId)
         let reference = try GoogleWorkspaceReference(url: requestedURL)
         XCTAssertEqual(source.payload.sourceType, .googleDocument)
         XCTAssertEqual(source.payload.canonicalURL, reference.canonicalURL)
@@ -1072,10 +1276,10 @@ final class LocalDatabaseTests: XCTestCase {
         let decryptedFirstData = try await manager.decryptedData(assetId: imported.assetId)
         XCTAssertEqual(decryptedFirstData, firstData)
 
-        let refreshed = try await manager.refreshGoogleWorkspaceSnapshot(id: imported.resourceId)
+        let refreshed = try await manager.refreshGoogleWorkspaceSnapshot(id: imported.sourceId)
         XCTAssertEqual(refreshed.difference.addedExamples, ["New factorization example"])
         XCTAssertEqual(refreshed.difference.removedExamples, ["Old factorization example"])
-        source = try await store.payload(SourcePayload.self, id: imported.resourceId)
+        source = try await store.payload(SourcePayload.self, id: imported.sourceId)
         XCTAssertEqual(source.payload.currentVersionId, refreshed.versionId)
         let currentAssetId = try XCTUnwrap(source.payload.originalAssetId)
         let decryptedSecondData = try await manager.decryptedData(assetId: currentAssetId)
@@ -1085,10 +1289,10 @@ final class LocalDatabaseTests: XCTestCase {
         XCTAssertEqual(decryptedOldData, firstData)
 
         await XCTAssertThrowsErrorAsync(
-            try await manager.refreshGoogleWorkspaceSnapshot(id: imported.resourceId)
+            try await manager.refreshGoogleWorkspaceSnapshot(id: imported.sourceId)
         ) { XCTAssertEqual($0 as? GoogleWorkspaceCaptureError, .networkUnavailable) }
         await XCTAssertThrowsErrorAsync(
-            try await manager.refreshGoogleWorkspaceSnapshot(id: imported.resourceId)
+            try await manager.refreshGoogleWorkspaceSnapshot(id: imported.sourceId)
         ) { XCTAssertEqual($0 as? SourceAdapterError, .unsupportedType) }
         await XCTAssertThrowsErrorAsync(
             try await manager.importGoogleWorkspaceSnapshot(from: requestedURL)
@@ -1507,12 +1711,12 @@ final class LocalDatabaseTests: XCTestCase {
         let topicId = try await store.createTopic(name: "Topology")
         let activeId = try await store.startSession(
             title: "Open sets",
-            courseId: topicId,
+            topicId: topicId,
             requireTopic: true
         )
         let plannedId = try await store.startSession(
             title: "Compactness",
-            courseId: topicId,
+            topicId: topicId,
             state: .planned,
             requireTopic: true
         )
@@ -1554,7 +1758,7 @@ final class LocalDatabaseTests: XCTestCase {
         let firstSource = try await store.payload(SourcePayload.self, id: sourceId)
         let firstVersionId = try XCTUnwrap(firstSource.payload.currentVersionId)
         var annotation = AnnotationPayload(
-            resourceId: sourceId,
+            sourceId: sourceId,
             annotationType: .important,
             pageNumber: 3,
             comment: "A compact subset is closed in a Hausdorff space."
@@ -1600,7 +1804,7 @@ final class LocalDatabaseTests: XCTestCase {
             locator: SourceLocator(kind: .plainText, startOffset: 0, endOffset: 31),
             excerpt: "Every compact subset is closed."
         )
-        let noteId = try await store.createNote(title: "Separation axioms", courseId: topicId)
+        let noteId = try await store.createNote(title: "Separation axioms", topicId: topicId)
         let blockId = try await store.appendCanvasEvidence(
             noteId: noteId,
             evidenceId: evidenceId,
@@ -1636,7 +1840,7 @@ final class LocalDatabaseTests: XCTestCase {
         let allEvidence = try await store.list(EvidencePayload.self)
         let backlinks = try await store.evidenceBacklinks(evidenceId: evidenceId)
 
-        XCTAssertEqual(block.payload.schemaVersion, "note-block/v7")
+        XCTAssertEqual(block.payload.schemaVersion, "note-block/v8")
         XCTAssertEqual(block.payload.evidenceId, evidenceId)
         XCTAssertEqual(evidence.payload.sourceVersionId, versionId)
         XCTAssertEqual(allEvidence.count, 1)
@@ -1704,7 +1908,7 @@ final class LocalDatabaseTests: XCTestCase {
         XCTAssertEqual(accepted.payload.reviewState, .accepted)
     }
 
-    func testLearningLifecycleEditsPreserveHistoryAndLegacyLists() async throws {
+    func testLearningLifecycleEditsPreserveHistoryAndLists() async throws {
         let directory = try temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
         let database = try SQLCipherDatabase(
@@ -1714,34 +1918,12 @@ final class LocalDatabaseTests: XCTestCase {
         let store = EpistoriaStore(database: database)
         let topicId = try await store.createTopic(name: "Algebra")
 
-        let legacyListJSON = """
-        {
-          "schemaVersion":"collection/v1",
-          "name":"Legacy list",
-          "parentCollectionId":null,
-          "createdAt":"2026-08-20T12:00:00.000Z",
-          "updatedAt":"2026-08-20T12:00:00.000Z"
-        }
-        """
-        let legacyList = try CanonicalJSON.decode(CollectionPayload.self, from: Data(legacyListJSON.utf8))
-        XCTAssertNil(legacyList.archivedAt)
-        let listId = UUID()
-        _ = try await database.saveLocal(
-            id: listId,
-            entityType: .collection,
-            content: Data(legacyListJSON.utf8),
-            search: SearchDocument(title: "Legacy list", body: "")
-        )
-        try await store.updateList(id: listId, name: "Reference", parentListId: nil, archived: true)
-        let archivedList = try await store.payload(CollectionPayload.self, id: listId)
-        let listBackup = try await database.migrationBackup(
-            entityId: listId,
-            migrationName: "collection-to-list/v2"
-        )
+        let listId = try await store.createList(name: "Reading")
+        try await store.updateList(id: listId, name: "Reference", archived: true)
+        let archivedList = try await store.payload(ListPayload.self, id: listId)
         XCTAssertEqual(archivedList.payload.name, "Reference")
-        XCTAssertEqual(archivedList.payload.schemaVersion, "collection/v2")
+        XCTAssertEqual(archivedList.payload.schemaVersion, "list/v1")
         XCTAssertNotNil(archivedList.payload.archivedAt)
-        XCTAssertEqual(listBackup, Data(legacyListJSON.utf8))
 
         let deckId = try await store.createFlashcardDeck(topicId: topicId, name: "Core ideas")
         let cardId = try await store.createFlashcard(
@@ -2530,9 +2712,11 @@ final class LocalDatabaseTests: XCTestCase {
         let store = EpistoriaStore(database: database)
         let noteId = try await store.createNote(
             title: "Stable pages",
-            canvas: NoteCanvasConfiguration(pageCount: 2)
+            canvas: NoteCanvasConfiguration()
         )
         var pages = try await store.notePages(noteId: noteId)
+        _ = try await store.insertNotePage(noteId: noteId, after: pages.last?.id)
+        pages = try await store.notePages(noteId: noteId)
         XCTAssertEqual(pages.count, 2)
 
         let sourcePageId = pages[1].id
@@ -2540,7 +2724,6 @@ final class LocalDatabaseTests: XCTestCase {
             noteId: noteId,
             text: "Content on the second stable page",
             placement: NoteCanvasPlacement(x: 20, y: 30, width: 240, height: 80),
-            pageIndex: 1,
             pageId: sourcePageId
         )
         let insertedId = try await store.insertNotePage(noteId: noteId, before: pages[0].id)
@@ -2549,7 +2732,7 @@ final class LocalDatabaseTests: XCTestCase {
 
         let duplicateId = try await store.duplicateNotePage(noteId: noteId, pageId: sourcePageId)
         var duplicatedBlocks = try await store.list(NoteBlockPayload.self, parentId: noteId)
-            .filter { !$0.payload.tombstone && $0.payload.canvasPageId == duplicateId }
+            .filter { !$0.payload.tombstone && $0.payload.pageId == duplicateId }
         XCTAssertEqual(duplicatedBlocks.count, 1)
         XCTAssertEqual(duplicatedBlocks.first?.payload.plainText, "Content on the second stable page")
 
@@ -2573,8 +2756,87 @@ final class LocalDatabaseTests: XCTestCase {
         XCTAssertEqual(pages.count, 4)
         XCTAssertFalse(originalBlock.payload.tombstone)
         duplicatedBlocks = try await store.list(NoteBlockPayload.self, parentId: noteId)
-            .filter { !$0.payload.tombstone && $0.payload.canvasPageId == duplicateId }
+            .filter { !$0.payload.tombstone && $0.payload.pageId == duplicateId }
         XCTAssertEqual(duplicatedBlocks.count, 1)
+    }
+
+    func testFixedAndInfinitePageConversionPreservesBlocksAtomically() async throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let database = try SQLCipherDatabase(
+            url: directory.appendingPathComponent("page-mode-conversion.sqlite"),
+            key: Data(repeating: 72, count: 32)
+        )
+        let store = EpistoriaStore(database: database)
+        let noteId = try await store.createNote(title: "Convertible note")
+        let initialPages = try await store.notePages(noteId: noteId)
+        let firstPageId = try XCTUnwrap(initialPages.first?.id)
+        let blockId = try await store.appendCanvasText(
+            noteId: noteId,
+            text: "Preserved content",
+            placement: NoteCanvasPlacement(x: 20, y: 30, width: 240, height: 80),
+            pageId: firstPageId
+        )
+
+        var infinite = NoteCanvasConfiguration(pageFormat: .infinite)
+        infinite.paperStyle = .dotted
+        try await store.updateNoteCanvasConfiguration(
+            noteId: noteId,
+            pageId: firstPageId,
+            configuration: infinite
+        )
+
+        var note = try await store.payload(NotePayload.self, id: noteId)
+        var block = try await store.payload(NoteBlockPayload.self, id: blockId)
+        let infinitePages = try await store.notePages(noteId: noteId)
+        XCTAssertEqual(note.payload.canvas?.pageFormat, .infinite)
+        XCTAssertTrue(infinitePages.isEmpty)
+        XCTAssertNil(block.payload.pageId)
+        XCTAssertEqual(block.payload.plainText, "Preserved content")
+
+        let fixed = NoteCanvasConfiguration(pageFormat: .letter, orientation: .landscape)
+        try await store.updateNoteCanvasConfiguration(
+            noteId: noteId,
+            pageId: nil,
+            configuration: fixed
+        )
+
+        let restoredPages = try await store.notePages(noteId: noteId)
+        let restoredPage = try XCTUnwrap(restoredPages.first)
+        note = try await store.payload(NotePayload.self, id: noteId)
+        block = try await store.payload(NoteBlockPayload.self, id: blockId)
+        XCTAssertEqual(note.payload.canvas?.pageFormat, .letter)
+        XCTAssertEqual(restoredPage.payload.configuration.orientation, .landscape)
+        XCTAssertEqual(block.payload.pageId, restoredPage.id)
+        XCTAssertEqual(block.payload.plainText, "Preserved content")
+    }
+
+    func testMultiPageNoteCannotBecomeInfinite() async throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let database = try SQLCipherDatabase(
+            url: directory.appendingPathComponent("multi-page-mode.sqlite"),
+            key: Data(repeating: 73, count: 32)
+        )
+        let store = EpistoriaStore(database: database)
+        let noteId = try await store.createNote(title: "Two pages")
+        let initialPages = try await store.notePages(noteId: noteId)
+        let firstPageId = try XCTUnwrap(initialPages.first?.id)
+        _ = try await store.insertNotePage(noteId: noteId, after: firstPageId)
+
+        do {
+            try await store.updateNoteCanvasConfiguration(
+                noteId: noteId,
+                pageId: firstPageId,
+                configuration: NoteCanvasConfiguration(pageFormat: .infinite)
+            )
+            XCTFail("Expected a multi-page note to reject infinite canvas conversion")
+        } catch {
+            let remainingPages = try await store.notePages(noteId: noteId)
+            XCTAssertEqual(remainingPages.count, 2)
+            let note = try await store.payload(NotePayload.self, id: noteId)
+            XCTAssertNotEqual(note.payload.canvas?.pageFormat, .infinite)
+        }
     }
 
     func testTrashIsManualRecoverableAndProtectsDependencies() async throws {
@@ -2612,7 +2874,6 @@ final class LocalDatabaseTests: XCTestCase {
             noteId: removableId,
             text: "Delete with the note",
             placement: NoteCanvasPlacement(x: 20, y: 20, width: 200, height: 60),
-            pageIndex: 0,
             pageId: removablePageId
         )
         _ = try await store.moveToTrash(
@@ -2653,7 +2914,7 @@ final class LocalDatabaseTests: XCTestCase {
 
         let trashId = try await store.moveToTrash(
             targetId: sourceId,
-            targetType: .resource,
+            targetType: .source,
             displayName: "Protected source"
         )
         let entry = try await store.payload(TrashEntryPayload.self, id: trashId)

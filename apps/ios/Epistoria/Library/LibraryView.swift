@@ -19,8 +19,10 @@ struct LibraryView: View {
     @Bindable var model: AppModel
     @State private var resources: [IdentifiedPayload<SourcePayload>] = []
     @State private var topics: [IdentifiedPayload<TopicPayload>] = []
+    @State private var sourceCursor: EntityPageCursor?
+    @State private var isLoadingMore = false
     @State private var section = LibrarySection.inbox
-    @State private var selectedType: ResourceKind?
+    @State private var selectedType: SourceKind?
     @State private var selectedTopicId: UUID?
     @State private var isImporting = false
     @State private var isCapturingWebPage = false
@@ -61,12 +63,16 @@ struct LibraryView: View {
                                 Button("Add YouTube video") { isAddingYouTubeVideo = true }
                                     .buttonStyle(.bordered)
                             }
+                            if sourceCursor != nil {
+                                loadMoreButton
+                            }
                         }
                     }
                 } else {
-                    List(visibleResources, id: \.id) { resource in
-                        NavigationLink {
-                            ResourceDetailView(model: model, resourceId: resource.id)
+                    List {
+                        ForEach(visibleResources, id: \.id) { resource in
+                            NavigationLink {
+                            SourceDetailView(model: model, sourceId: resource.id)
                         } label: {
                             HStack(spacing: 14) {
                                 Image(systemName: resource.payload.sourceType.epistoriaSymbol)
@@ -80,16 +86,18 @@ struct LibraryView: View {
                                 }
                             }
                         }
-                        .accessibilityIdentifier("library.resource.\(resource.id.uuidString)")
-                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                            Button("Trash", systemImage: "trash", role: .destructive) {
-                                pendingTrashSource = resource
+                        .accessibilityIdentifier("library.source.\(resource.id.uuidString)")
+                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                Button("Trash", systemImage: "trash", role: .destructive) {
+                                    pendingTrashSource = resource
+                                }
+                                Button(resource.payload.archivedAt == nil ? "Archive" : "Restore", systemImage: resource.payload.archivedAt == nil ? "archivebox" : "arrow.uturn.backward") {
+                                    Task { await setSourceArchived(resource, archived: resource.payload.archivedAt == nil) }
+                                }
+                                .tint(.gray)
                             }
-                            Button(resource.payload.archivedAt == nil ? "Archive" : "Restore", systemImage: resource.payload.archivedAt == nil ? "archivebox" : "arrow.uturn.backward") {
-                                Task { await setSourceArchived(resource, archived: resource.payload.archivedAt == nil) }
-                            }
-                            .tint(.gray)
                         }
+                        if sourceCursor != nil { loadMoreButton }
                     }
                 }
             }
@@ -109,7 +117,7 @@ struct LibraryView: View {
                 ToolbarItemGroup(placement: .primaryAction) {
                     Menu {
                         Button("Any type") { selectedType = nil }
-                        ForEach(ResourceKind.allCases, id: \.self) { kind in
+                        ForEach(SourceKind.allCases, id: \.self) { kind in
                             Button(kind.rawValue.replacingOccurrences(of: "_", with: " ").capitalized) { selectedType = kind }
                         }
                         Divider()
@@ -260,16 +268,44 @@ struct LibraryView: View {
     private func load() async {
         guard let store = model.store else { return }
         do {
-            async let loadedResources = store.list(SourcePayload.self)
-            async let loadedTopics = store.topics()
-            async let loadedTrash = store.trashedTargetIds()
-            let result = try await (loadedResources, loadedTopics, loadedTrash)
-            resources = result.0
-                .filter { !result.2.contains($0.id) }
+            async let loadedWorkspace = store.workspaceSnapshot(
+                limits: WorkspaceReadLimits(notes: 1, lists: 1, sources: 50, topics: 100, sessions: 1)
+            )
+            let workspace = try await loadedWorkspace
+            sourceCursor = workspace.sources.nextCursor
+            resources = workspace.sources.items
                 .sorted { $0.payload.importedAt > $1.payload.importedAt }
-            topics = result.1.filter { !$0.payload.archived }
+            topics = workspace.topics.items.filter { !$0.payload.archived }
         }
         catch { errorMessage = error.localizedDescription }
+    }
+
+    private var loadMoreButton: some View {
+        Button {
+            Task { await loadMore() }
+        } label: {
+            HStack {
+                Spacer()
+                if isLoadingMore { ProgressView() }
+                Text(isLoadingMore ? "Loading…" : "Load more")
+                Spacer()
+            }
+        }
+        .disabled(isLoadingMore)
+    }
+
+    private func loadMore() async {
+        guard let store = model.store, let sourceCursor, !isLoadingMore else { return }
+        isLoadingMore = true
+        defer { isLoadingMore = false }
+        do {
+            let page = try await store.listPage(SourcePayload.self, after: sourceCursor)
+            self.sourceCursor = page.nextCursor
+            resources = (resources + page.items)
+                .sorted { $0.payload.importedAt > $1.payload.importedAt }
+        } catch {
+            errorMessage = error.localizedDescription
+        }
     }
 
     private func moveSourceToTrash(_ source: IdentifiedPayload<SourcePayload>) async {
@@ -280,7 +316,7 @@ struct LibraryView: View {
                 .map(\.id)
             _ = try await store.moveToTrash(
                 targetId: source.id,
-                targetType: .resource,
+                targetType: .source,
                 displayName: source.payload.title,
                 dependencyIds: dependencies
             )
@@ -583,9 +619,9 @@ private struct YouTubeCaptureSheet: View {
     }
 }
 
-struct ResourceDetailView: View {
+struct SourceDetailView: View {
     @Bindable var model: AppModel
-    let resourceId: UUID
+    let sourceId: UUID
     var sessionId: UUID?
     var initialPageNumber: Int?
     var focusedAnnotationId: UUID?
@@ -593,10 +629,10 @@ struct ResourceDetailView: View {
     var initialMediaTimeSeconds: Double?
     var initialHighlightRectangles: [AnnotationRectangle]
 
-    @State private var resource: IdentifiedPayload<ResourcePayload>?
+    @State private var resource: IdentifiedPayload<SourcePayload>?
     @State private var source: IdentifiedPayload<SourcePayload>?
     @State private var topics: [IdentifiedPayload<TopicPayload>] = []
-    @State private var lists: [IdentifiedPayload<CollectionPayload>] = []
+    @State private var lists: [IdentifiedPayload<ListPayload>] = []
     @State private var versions: [IdentifiedPayload<SourceVersionPayload>] = []
     @State private var selectedSourceVersionId: UUID?
     @State private var isOrganizing = false
@@ -650,7 +686,7 @@ struct ResourceDetailView: View {
 
     init(
         model: AppModel,
-        resourceId: UUID,
+        sourceId: UUID,
         sessionId: UUID? = nil,
         initialSourceVersionId: UUID? = nil,
         initialPageNumber: Int? = nil,
@@ -660,7 +696,7 @@ struct ResourceDetailView: View {
         initialHighlightRectangles: [AnnotationRectangle] = []
     ) {
         self.model = model
-        self.resourceId = resourceId
+        self.sourceId = sourceId
         self.sessionId = sessionId
         self.initialPageNumber = initialPageNumber
         self.focusedAnnotationId = focusedAnnotationId
@@ -678,17 +714,17 @@ struct ResourceDetailView: View {
             if isLoading {
                 ProgressView("Decrypting locally…")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if resource?.payload.resourceType == .youtube,
+            } else if resource?.payload.sourceType == .youtube,
                       let url = selectedYouTubeURL,
                       let reference = try? YouTubeReference(url: url) {
                 YouTubeSourceView(reference: reference)
-            } else if resource?.payload.resourceType == .website,
+            } else if resource?.payload.sourceType == .website,
                       sourceData == nil,
                       let url = source?.payload.canonicalURL {
                 SharedWebReferenceView(url: url) {
                     Task { await refreshWebPage() }
                 }
-            } else if let sourceData, resource?.payload.resourceType == .pdf {
+            } else if let sourceData, resource?.payload.sourceType == .pdf {
                 PDFDocumentView(
                     data: sourceData,
                     pageNumber: $pageNumber,
@@ -696,15 +732,15 @@ struct ResourceDetailView: View {
                     highlightText: highlightText,
                     highlightRectangles: citationRectangles
                 )
-            } else if let sourceData, resource?.payload.resourceType == .image,
+            } else if let sourceData, resource?.payload.sourceType == .image,
                       let image = UIImage(data: sourceData) {
                 ScrollView([.horizontal, .vertical]) {
                     Image(uiImage: image).resizable().scaledToFit().padding(24)
                 }
-            } else if let sourceData, resource?.payload.resourceType == .audio {
+            } else if let sourceData, resource?.payload.sourceType == .audio {
                 AudioSourceView(data: sourceData, initialTime: mediaPlaybackStartTime)
                     .id(mediaPlaybackStartTime)
-            } else if let sourceData, resource?.payload.resourceType == .video {
+            } else if let sourceData, resource?.payload.sourceType == .video {
                 VideoSourceView(
                     data: sourceData,
                     filenameExtension: sourceFilenameExtension,
@@ -716,7 +752,7 @@ struct ResourceDetailView: View {
             } else if let readableText {
                 StructuredSourceTextView(
                     text: readableText,
-                    usesMonospacedText: resource?.payload.resourceType == .markdown
+                    usesMonospacedText: resource?.payload.sourceType == .markdown
                 )
             } else {
                 ContentUnavailableView {
@@ -730,7 +766,7 @@ struct ResourceDetailView: View {
             }
         }
         .epistoriaPageBackground()
-        .navigationTitle(resource?.payload.title ?? "Resource")
+        .navigationTitle(resource?.payload.title ?? "Source")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
@@ -750,7 +786,7 @@ struct ResourceDetailView: View {
                 Button { isOrganizing = true } label: {
                     Label("Edit Source", systemImage: "slider.horizontal.3")
                 }
-                if resource?.payload.resourceType == .website {
+                if resource?.payload.sourceType == .website {
                     Button { Task { await refreshWebPage() } } label: {
                         Label("Refresh webpage", systemImage: "arrow.clockwise")
                     }
@@ -761,7 +797,7 @@ struct ResourceDetailView: View {
                             systemImage: "sidebar.trailing"
                         )
                     }
-                } else if resource?.payload.resourceType.isGoogleWorkspaceSource == true {
+                } else if resource?.payload.sourceType.isGoogleWorkspaceSource == true {
                     Button { Task { await refreshGoogleFile() } } label: {
                         Label("Refresh Google file", systemImage: "arrow.clockwise")
                     }
@@ -772,9 +808,9 @@ struct ResourceDetailView: View {
                             systemImage: "sidebar.trailing"
                         )
                     }
-                } else if resource?.payload.resourceType == .youtube
-                            || resource?.payload.resourceType == .audio
-                            || resource?.payload.resourceType == .video {
+                } else if resource?.payload.sourceType == .youtube
+                            || resource?.payload.sourceType == .audio
+                            || resource?.payload.sourceType == .video {
                     Button { isInspectorPresented.toggle() } label: {
                         Label(
                             isInspectorPresented ? "Hide Source details" : "Show Source details",
@@ -806,7 +842,7 @@ struct ResourceDetailView: View {
                     }
                     .disabled(pageNumber >= pageCount)
                 }
-                if resource?.payload.resourceType == .pdf { Button {
+                if resource?.payload.sourceType == .pdf { Button {
                     comment = ""
                     isInspectorPresented = true
                     annotationEditorFocused = true
@@ -854,7 +890,7 @@ struct ResourceDetailView: View {
             }
         }
         .fullScreenCover(isPresented: $isComparing) {
-            SourceComparisonView(model: model, initialSourceId: resourceId)
+            SourceComparisonView(model: model, initialSourceId: sourceId)
         }
         .sheet(isPresented: $isApprovingTranscription) {
             MediaTranscriptionApprovalSheet(
@@ -918,7 +954,7 @@ struct ResourceDetailView: View {
         .sheet(isPresented: $isShowingOCRReview) {
             OCRReviewView(
                 model: model,
-                parentId: resourceId,
+                parentId: sourceId,
                 artifacts: $ocrArtifacts,
                 onCreateEquation: nil
             )
@@ -964,7 +1000,7 @@ struct ResourceDetailView: View {
             }
             Button("Cancel", role: .cancel) { pendingDeletion = nil }
         } message: {
-            Text("The PDF itself is never changed. You can undo while this resource remains open.")
+            Text("The PDF itself is never changed. You can undo while this Source remains open.")
         }
         .safeAreaInset(edge: .bottom) {
             if recentlyDeleted != nil {
@@ -982,7 +1018,7 @@ struct ResourceDetailView: View {
                 .padding()
             }
         }
-        .alert("Resource error", isPresented: .constant(errorMessage != nil)) {
+        .alert("Source error", isPresented: .constant(errorMessage != nil)) {
             Button("Try again") { Task { await load() } }
             Button("Dismiss", role: .cancel) { errorMessage = nil }
         } message: { Text(errorMessage ?? "") }
@@ -992,7 +1028,7 @@ struct ResourceDetailView: View {
         NavigationStack {
             ScrollViewReader { proxy in
                 List {
-                if resource?.payload.resourceType == .pdf { Section {
+                if resource?.payload.sourceType == .pdf { Section {
                     Label("Original PDF preserved", systemImage: "lock.doc")
                         .foregroundStyle(.secondary)
                     Text("Annotations are separate encrypted records, so importing never modifies the source file.")
@@ -1000,7 +1036,7 @@ struct ResourceDetailView: View {
                         .foregroundStyle(.secondary)
                 } }
 
-                if resource?.payload.resourceType == .pdf { Section("Source guide") {
+                if resource?.payload.sourceType == .pdf { Section("Source guide") {
                     if let sourceAnalysis {
                         LabeledContent(
                             "Coverage",
@@ -1090,7 +1126,7 @@ struct ResourceDetailView: View {
                     .disabled(sourceData == nil)
                 } }
 
-                if resource?.payload.resourceType == .pdf, !sourceQueries.isEmpty {
+                if resource?.payload.sourceType == .pdf, !sourceQueries.isEmpty {
                     Section("Source answers") {
                         ForEach(sourceQueries.prefix(5), id: \.id) { artifact in
                             DisclosureGroup(artifact.payload.question) {
@@ -1110,7 +1146,7 @@ struct ResourceDetailView: View {
                     }
                 }
 
-                if resource?.payload.resourceType == .pdf { Section("Searchable text") {
+                if resource?.payload.sourceType == .pdf { Section("Searchable text") {
                     if let extraction {
                         Label("\(extraction.payload.pageCount) pages indexed", systemImage: "checkmark.circle.fill")
                             .foregroundStyle(EpistoriaDesign.positive)
@@ -1138,7 +1174,7 @@ struct ResourceDetailView: View {
                     }
                 } }
 
-                if resource?.payload.resourceType == .image, !ocrArtifacts.isEmpty {
+                if resource?.payload.sourceType == .image, !ocrArtifacts.isEmpty {
                     Section("Recognized text") {
                         Button("Review recognized image (\(ocrArtifacts.count))") {
                             isShowingOCRReview = true
@@ -1149,7 +1185,7 @@ struct ResourceDetailView: View {
                     }
                 }
 
-                if resource?.payload.resourceType == .website {
+                if resource?.payload.sourceType == .website {
                     Section("Captured webpage") {
                         if let canonicalURL = source?.payload.canonicalURL {
                             LabeledContent("Address") {
@@ -1166,7 +1202,7 @@ struct ResourceDetailView: View {
                     }
                 }
 
-                if resource?.payload.resourceType.isGoogleWorkspaceSource == true {
+                if resource?.payload.sourceType.isGoogleWorkspaceSource == true {
                     Section("Captured Google file") {
                         if let canonicalURL = source?.payload.canonicalURL {
                             LabeledContent("Share link") {
@@ -1181,7 +1217,7 @@ struct ResourceDetailView: View {
                     }
                 }
 
-                if resource?.payload.resourceType == .youtube {
+                if resource?.payload.sourceType == .youtube {
                     Section("YouTube reference") {
                         if let url = selectedYouTubeURL {
                             LabeledContent("Video link") {
@@ -1196,8 +1232,8 @@ struct ResourceDetailView: View {
                     }
                 }
 
-                if resource?.payload.resourceType == .audio
-                    || resource?.payload.resourceType == .video {
+                if resource?.payload.sourceType == .audio
+                    || resource?.payload.sourceType == .video {
                     Section("Transcript") {
                         if let transcription {
                             Button("Read timestamped transcript", systemImage: "text.quote") {
@@ -1241,8 +1277,8 @@ struct ResourceDetailView: View {
                 Section("Versions") {
                     ForEach(versions, id: \.id) { version in
                         Button {
-                            guard resource?.payload.resourceType == .website
-                                    || resource?.payload.resourceType.isGoogleWorkspaceSource == true
+                            guard resource?.payload.sourceType == .website
+                                    || resource?.payload.sourceType.isGoogleWorkspaceSource == true
                             else { return }
                             selectedSourceVersionId = version.id
                             Task { await load() }
@@ -1269,8 +1305,8 @@ struct ResourceDetailView: View {
                         }
                         .buttonStyle(.plain)
                         .disabled(
-                            resource?.payload.resourceType != .website
-                                && resource?.payload.resourceType.isGoogleWorkspaceSource != true
+                            resource?.payload.sourceType != .website
+                                && resource?.payload.sourceType.isGoogleWorkspaceSource != true
                         )
                     }
                     Text("Refresh creates a new immutable version. Existing citations and study records keep their original version.")
@@ -1278,7 +1314,7 @@ struct ResourceDetailView: View {
                         .foregroundStyle(.secondary)
                 }
 
-                if resource?.payload.resourceType == .pdf { Section("Add to page \(pageNumber)") {
+                if resource?.payload.sourceType == .pdf { Section("Add to page \(pageNumber)") {
                     Picker("Kind", selection: $annotationKind) {
                         ForEach(AnnotationKind.allCases, id: \.self) { kind in
                             Text(kind.rawValue.capitalized).tag(kind)
@@ -1299,7 +1335,7 @@ struct ResourceDetailView: View {
                         .foregroundStyle(.secondary)
                 } }
 
-                if resource?.payload.resourceType == .pdf { Section("Annotations") {
+                if resource?.payload.sourceType == .pdf { Section("Annotations") {
                     if annotations.isEmpty {
                         Text("No annotations yet").foregroundStyle(.secondary)
                     }
@@ -1354,11 +1390,11 @@ struct ResourceDetailView: View {
                 } }
                 }
                 .navigationTitle(
-                    resource?.payload.resourceType == .website
-                        || resource?.payload.resourceType.isGoogleWorkspaceSource == true
-                        || resource?.payload.resourceType == .youtube
-                        || resource?.payload.resourceType == .audio
-                        || resource?.payload.resourceType == .video
+                    resource?.payload.sourceType == .website
+                        || resource?.payload.sourceType.isGoogleWorkspaceSource == true
+                        || resource?.payload.sourceType == .youtube
+                        || resource?.payload.sourceType == .audio
+                        || resource?.payload.sourceType == .video
                         ? "Source details"
                         : "Notes"
                 )
@@ -1426,10 +1462,10 @@ struct ResourceDetailView: View {
     private var canTranscribeCurrentMedia: Bool {
         guard let filename = sourceAsset?.originalFilename else { return false }
         let ext = URL(fileURLWithPath: filename).pathExtension.lowercased()
-        if resource?.payload.resourceType == .audio {
+        if resource?.payload.sourceType == .audio {
             return ["mp3", "m4a", "wav"].contains(ext)
         }
-        return resource?.payload.resourceType == .video && ext == "mp4"
+        return resource?.payload.sourceType == .video && ext == "mp4"
     }
 
     private func load() async {
@@ -1444,8 +1480,8 @@ struct ResourceDetailView: View {
         transcription = nil
         transcriptSegments = []
         do {
-            let loaded = try await store.payload(ResourcePayload.self, id: resourceId)
-            async let loadedSource = store.payload(SourcePayload.self, id: resourceId)
+            let loaded = try await store.payload(SourcePayload.self, id: sourceId)
+            async let loadedSource = store.payload(SourcePayload.self, id: sourceId)
             async let loadedTopics = store.topics()
             async let loadedLists = store.lists()
             resource = loaded
@@ -1453,10 +1489,10 @@ struct ResourceDetailView: View {
             source = resolvedSource
             topics = try await loadedTopics.filter { !$0.payload.archived }
             lists = try await loadedLists.filter { $0.payload.archivedAt == nil }
-            versions = try await store.list(SourceVersionPayload.self, parentId: resourceId)
+            versions = try await store.list(SourceVersionPayload.self, parentId: sourceId)
                 .sorted { $0.payload.versionNumber > $1.payload.versionNumber }
             annotations = try await store.list(AnnotationPayload.self)
-                .filter { $0.payload.resourceId == resourceId }
+                .filter { $0.payload.sourceId == sourceId }
                 .sorted {
                     ($0.payload.pageNumber ?? 0, $0.payload.updatedAt)
                         < ($1.payload.pageNumber ?? 0, $1.payload.updatedAt)
@@ -1470,17 +1506,17 @@ struct ResourceDetailView: View {
             } else if let initialPageNumber {
                 pageNumber = max(initialPageNumber, 1)
             }
-            if loaded.payload.resourceType == .pdf || loaded.payload.resourceType == .image {
-                extraction = try await model.aiJobs?.latestPDFExtraction(resourceId: resourceId)
-                ocrArtifacts = try await store.ocrArtifacts(parentId: resourceId)
+            if loaded.payload.sourceType == .pdf || loaded.payload.sourceType == .image {
+                extraction = try await model.aiJobs?.latestPDFExtraction(sourceId: sourceId)
+                ocrArtifacts = try await store.ocrArtifacts(parentId: sourceId)
                 if let currentVersionId = resolvedSource.payload.currentVersionId,
                    let coordinator = model.aiJobs {
                     sourceAnalysis = try await coordinator.latestSourceAnalysis(
-                        sourceId: resourceId,
+                        sourceId: sourceId,
                         sourceVersionId: currentVersionId
                     )
                     sourceQueries = try await coordinator.sourceQueryArtifacts(
-                        sourceId: resourceId,
+                        sourceId: sourceId,
                         sourceVersionId: currentVersionId
                     )
                 }
@@ -1499,7 +1535,7 @@ struct ResourceDetailView: View {
                 if let metadata = try? await store.payload(AssetPayload.self, id: assetId).payload {
                     sourceAsset = metadata
                     let ext = URL(fileURLWithPath: metadata.originalFilename).pathExtension.lowercased()
-                    if loaded.payload.resourceType == .video,
+                    if loaded.payload.sourceType == .video,
                        ["m4v", "mov", "mp4"].contains(ext) {
                         sourceFilenameExtension = ext
                     }
@@ -1508,11 +1544,11 @@ struct ResourceDetailView: View {
                 sourceData = data
                 let prepared = try await Self.prepareReaderContent(
                     data: data,
-                    sourceType: loaded.payload.resourceType
+                    sourceType: loaded.payload.sourceType
                 )
                 csvDocument = prepared.csv
                 readableText = prepared.text
-                if loaded.payload.resourceType == .image,
+                if loaded.payload.sourceType == .image,
                    let selectedVersion,
                    model.localProcessingSettings.automaticSourceOCR
                 {
@@ -1522,7 +1558,7 @@ struct ResourceDetailView: View {
                         store: store
                     )
                 }
-                if loaded.payload.resourceType == .pdf,
+                if loaded.payload.sourceType == .pdf,
                    let selectedVersion,
                    let extraction,
                    !extraction.payload.pagesNeedingOcr.isEmpty,
@@ -1538,11 +1574,11 @@ struct ResourceDetailView: View {
                     }
                 }
             }
-            if (loaded.payload.resourceType == .audio || loaded.payload.resourceType == .video),
+            if (loaded.payload.sourceType == .audio || loaded.payload.sourceType == .video),
                let currentVersionId = resolvedSource.payload.currentVersionId,
                let coordinator = model.aiJobs {
                 transcription = try await coordinator.latestMediaTranscription(
-                    sourceId: resourceId,
+                    sourceId: sourceId,
                     sourceVersionId: currentVersionId
                 )
                 if let transcription {
@@ -1551,13 +1587,13 @@ struct ResourceDetailView: View {
                     )
                 }
             }
-            let supportsInspector = loaded.payload.resourceType == .pdf
-                || loaded.payload.resourceType == .image
-                || loaded.payload.resourceType == .website
-                || loaded.payload.resourceType.isGoogleWorkspaceSource
-                || loaded.payload.resourceType == .youtube
-                || loaded.payload.resourceType == .audio
-                || loaded.payload.resourceType == .video
+            let supportsInspector = loaded.payload.sourceType == .pdf
+                || loaded.payload.sourceType == .image
+                || loaded.payload.sourceType == .website
+                || loaded.payload.sourceType.isGoogleWorkspaceSource
+                || loaded.payload.sourceType == .youtube
+                || loaded.payload.sourceType == .audio
+                || loaded.payload.sourceType == .video
             if !supportsInspector {
                 isInspectorPresented = false
             }
@@ -1567,7 +1603,7 @@ struct ResourceDetailView: View {
             {
                 _ = try await store.recordSessionActivity(
                     sessionId: sessionId,
-                    itemId: resourceId,
+                    itemId: sourceId,
                     kind: .sourceOpened
                 )
                 hasRecordedSessionOpen = true
@@ -1582,7 +1618,7 @@ struct ResourceDetailView: View {
 
     fileprivate static func prepareReaderContent(
         data: Data,
-        sourceType: ResourceKind
+        sourceType: SourceKind
     ) async throws -> PreparedSourceContent {
         try await Task.detached(priority: .userInitiated) {
             if sourceType == .csv {
@@ -1620,7 +1656,7 @@ struct ResourceDetailView: View {
         do {
             let capture = try await LocalTextOCRService.recognizeImage(
                 accountId: accountId,
-                sourceId: resourceId,
+                sourceId: sourceId,
                 sourceVersionId: version.id,
                 inputRevision: version.revision,
                 imageData: data,
@@ -1645,7 +1681,7 @@ struct ResourceDetailView: View {
                     response: formulaResponse
                 )
             }
-            ocrArtifacts = try await store.ocrArtifacts(parentId: resourceId)
+            ocrArtifacts = try await store.ocrArtifacts(parentId: sourceId)
             model.noteLocalMutation()
         } catch {
             // The original image remains readable. Recognition can be retried by reopening it.
@@ -1685,7 +1721,7 @@ struct ResourceDetailView: View {
                 guard let imageData = image.jpegData(compressionQuality: 0.82) else { continue }
                 let capture = try await LocalTextOCRService.recognizeSourcePage(
                     accountId: accountId,
-                    sourceId: resourceId,
+                    sourceId: sourceId,
                     sourceVersionId: version.id,
                     inputRevision: version.revision,
                     pageNumber: pageNumber,
@@ -1701,14 +1737,14 @@ struct ResourceDetailView: View {
                 // Keep the page available. Reopening the Source retries local recognition.
             }
         }
-        ocrArtifacts = (try? await store.ocrArtifacts(parentId: resourceId)) ?? ocrArtifacts
+        ocrArtifacts = (try? await store.ocrArtifacts(parentId: sourceId)) ?? ocrArtifacts
         model.noteLocalMutation()
     }
 
     private func refreshSource(_ result: Result<URL, Error>) async {
         guard let manager = model.assetManager else { return }
         do {
-            _ = try await manager.refreshSource(id: resourceId, from: result.get())
+            _ = try await manager.refreshSource(id: sourceId, from: result.get())
             model.noteLocalMutation()
             await load()
         } catch { errorMessage = error.localizedDescription }
@@ -1719,7 +1755,7 @@ struct ResourceDetailView: View {
         isRefreshingWebPage = true
         defer { isRefreshingWebPage = false }
         do {
-            let refreshed = try await manager.refreshWebSnapshot(id: resourceId)
+            let refreshed = try await manager.refreshWebSnapshot(id: sourceId)
             selectedSourceVersionId = nil
             snapshotChangeTitle = "Webpage refreshed"
             webSnapshotDifference = refreshed.difference
@@ -1735,7 +1771,7 @@ struct ResourceDetailView: View {
         isRefreshingGoogleFile = true
         defer { isRefreshingGoogleFile = false }
         do {
-            let refreshed = try await manager.refreshGoogleWorkspaceSnapshot(id: resourceId)
+            let refreshed = try await manager.refreshGoogleWorkspaceSnapshot(id: sourceId)
             selectedSourceVersionId = nil
             snapshotChangeTitle = "Google file refreshed"
             webSnapshotDifference = refreshed.difference
@@ -1752,7 +1788,7 @@ struct ResourceDetailView: View {
         guard !clean.isEmpty else { return }
         do {
             var payload = AnnotationPayload(
-                resourceId: resourceId,
+                sourceId: sourceId,
                 annotationType: annotationKind,
                 pageNumber: pageNumber,
                 comment: clean
@@ -1766,8 +1802,8 @@ struct ResourceDetailView: View {
             } else {
                 _ = try await store.save(
                     payload: payload,
-                    parentId: resourceId,
-                    relationIds: [resourceId, sessionId].compactMap(\.self)
+                    parentId: sourceId,
+                    relationIds: [sourceId, sessionId].compactMap(\.self)
                 )
             }
             comment = ""
@@ -1778,7 +1814,7 @@ struct ResourceDetailView: View {
 
     private func queueExtraction() async {
         do {
-            _ = try await model.extractPDFOnDevice(sourceId: resourceId)
+            _ = try await model.extractPDFOnDevice(sourceId: sourceId)
             model.noteLocalMutation()
             await load()
         }
@@ -1798,7 +1834,7 @@ struct ResourceDetailView: View {
         guard let transcriptionDisclosure else { return }
         do {
             _ = try await model.transcribeSourceDirect(
-                sourceId: resourceId,
+                sourceId: sourceId,
                 language: transcriptionLanguage,
                 approvedRoute: transcriptionDisclosure.route
             )
@@ -1813,7 +1849,7 @@ struct ResourceDetailView: View {
     private func prepareSourceApproval(forQuestion: Bool) async {
         do {
             let preparation = try await model.prepareDirectSource(
-                sourceId: resourceId,
+                sourceId: sourceId,
                 includeImages: includeSourceImages
             )
             let disclosure = try model.directProviderDisclosure(
@@ -1886,8 +1922,8 @@ struct ResourceDetailView: View {
             _ = try await store.save(
                 id: transcription.id,
                 payload: transcription.payload,
-                parentId: resourceId,
-                relationIds: [resourceId, transcription.payload.sourceVersionId]
+                parentId: sourceId,
+                relationIds: [sourceId, transcription.payload.sourceVersionId]
                     + transcription.payload.chunkEntityIds
             )
             self.transcription = transcription
@@ -1915,9 +1951,9 @@ struct ResourceDetailView: View {
             _ = try await store.save(
                 id: annotation.id,
                 payload: annotation.payload,
-                parentId: resourceId,
+                parentId: sourceId,
                 relationIds: [
-                    Optional(resourceId),
+                    Optional(sourceId),
                     annotation.payload.studySessionId,
                     annotation.payload.noteId,
                 ].compactMap(\.self)
@@ -3158,7 +3194,7 @@ private struct SourceComparisonPane: View {
             }
             let decrypted = try await assetManager.decryptedLocalData(assetId: assetId)
             data = decrypted
-            let prepared = try await ResourceDetailView.prepareReaderContent(
+            let prepared = try await SourceDetailView.prepareReaderContent(
                 data: decrypted,
                 sourceType: source.payload.sourceType
             )
@@ -3547,7 +3583,7 @@ private struct SourceOrganizationView: View {
     @Bindable var model: AppModel
     let source: IdentifiedPayload<SourcePayload>?
     let topics: [IdentifiedPayload<TopicPayload>]
-    let lists: [IdentifiedPayload<CollectionPayload>]
+    let lists: [IdentifiedPayload<ListPayload>]
     let onSaved: () -> Void
     @State private var title: String
     @State private var primaryTopicId: UUID?
@@ -3560,7 +3596,7 @@ private struct SourceOrganizationView: View {
         model: AppModel,
         source: IdentifiedPayload<SourcePayload>?,
         topics: [IdentifiedPayload<TopicPayload>],
-        lists: [IdentifiedPayload<CollectionPayload>],
+        lists: [IdentifiedPayload<ListPayload>],
         onSaved: @escaping () -> Void
     ) {
         self.model = model
@@ -3718,9 +3754,9 @@ private struct EditAnnotationView: View {
             _ = try await store.save(
                 id: annotation.id,
                 payload: payload,
-                parentId: payload.resourceId,
+                parentId: payload.sourceId,
                 relationIds: [
-                    Optional(payload.resourceId),
+                    Optional(payload.sourceId),
                     payload.studySessionId,
                     payload.noteId,
                 ].compactMap(\.self)

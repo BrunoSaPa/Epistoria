@@ -20,17 +20,19 @@ final class PortableArchiveTests: XCTestCase {
         }
     }
 
-    func testEntityValidatorAcceptsCurrentAndLegacyTopicSchemas() throws {
+    func testEntityValidatorAcceptsCurrentTopicAndRejectsLegacyCourseSchema() throws {
         let topic = TopicPayload(name: "Synthetic")
         try EntityPayloadValidator.validate(
-            entityType: .course,
+            entityType: .topic,
             content: CanonicalJSON.encode(topic)
         )
         var legacy = topic
         legacy.schemaVersion = "course/v1"
-        try EntityPayloadValidator.validate(
-            entityType: .course,
-            content: CanonicalJSON.encode(legacy)
+        XCTAssertThrowsError(
+            try EntityPayloadValidator.validate(
+                entityType: .topic,
+                content: CanonicalJSON.encode(legacy)
+            )
         )
     }
 
@@ -71,6 +73,41 @@ final class PortableArchiveTests: XCTestCase {
             XCTAssertEqual(error as? PortableArchiveError, .unsafeEntry)
         }
         XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent("outside.txt").path))
+    }
+
+    func testInspectorChecksLegacyArchiveVersionAndProducesStableChecksum() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "EpistoriaPortableArchiveInspectionTests-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let zip = root.appendingPathComponent("version-7.zip")
+        try makeArchive(at: zip, entries: [
+            "epistoria-export/metadata.json": Data(
+                "{\"formatVersion\":\"epistoria-export/7\"}".utf8
+            ),
+            "epistoria-export/notes/example.json": Data("{}".utf8),
+        ])
+
+        let inspector = PortableArchiveInspector()
+        let first = try inspector.inspect(
+            zipURL: zip,
+            allowedFormats: ["epistoria-export/7"]
+        )
+        let second = try inspector.inspect(
+            zipURL: zip,
+            allowedFormats: ["epistoria-export/7"]
+        )
+        XCTAssertEqual(first, second)
+        XCTAssertEqual(first.formatVersion, "epistoria-export/7")
+        XCTAssertEqual(first.sha256.count, 64)
+        XCTAssertGreaterThan(first.byteCount, 0)
+        XCTAssertThrowsError(
+            try inspector.inspect(zipURL: zip, allowedFormats: ["epistoria-export/8"])
+        ) { error in
+            XCTAssertEqual(error as? PortableArchiveError, .unsupportedFormat)
+        }
     }
 
     private func makeArchive(at url: URL, entries: [String: Data]) throws {

@@ -45,7 +45,9 @@ private extension SessionActivityKind {
 struct SessionsView: View {
     @Bindable var model: AppModel
     @State private var sessions: [IdentifiedPayload<StudySessionPayload>] = []
-    @State private var courses: [IdentifiedPayload<CoursePayload>] = []
+    @State private var topics: [IdentifiedPayload<TopicPayload>] = []
+    @State private var sessionCursor: EntityPageCursor?
+    @State private var isLoadingMore = false
     @State private var noteCountBySessionId: [UUID: Int] = [:]
     @State private var showNewSession = false
     @State private var createdSessionId: UUID?
@@ -63,6 +65,7 @@ struct SessionsView: View {
                         Button("Start your first session") { showNewSession = true }
                             .buttonStyle(.borderedProminent)
                             .tint(EpistoriaDesign.ink)
+                        if sessionCursor != nil { loadMoreButton }
                     }
                 } else {
                     List {
@@ -79,6 +82,7 @@ struct SessionsView: View {
                         if !history.isEmpty {
                             Section("History") { sessionRows(history) }
                         }
+                        if sessionCursor != nil { loadMoreButton }
                     }
                 }
             }
@@ -90,7 +94,7 @@ struct SessionsView: View {
                 }
             }
             .sheet(isPresented: $showNewSession) {
-                NewSessionView(model: model, courses: courses) { id in
+                NewSessionView(model: model, topics: topics) { id in
                     Task {
                         await load()
                         createdSessionId = id
@@ -146,44 +150,75 @@ struct SessionsView: View {
     private func load() async {
         guard let store = model.store else { return }
         do {
-            async let loadedSessions = store.list(StudySessionPayload.self)
-            async let loadedCourses = store.list(CoursePayload.self)
-            let result = try await (loadedSessions, loadedCourses)
-            sessions = result.0.sorted { $0.payload.startedAt > $1.payload.startedAt }
-            courses = result.1.filter { !$0.payload.archived }
+            let workspace = try await store.workspaceSnapshot(
+                limits: WorkspaceReadLimits(notes: 1, lists: 1, sources: 1, topics: 100, sessions: 50)
+            )
+            sessionCursor = workspace.sessions.nextCursor
+            sessions = workspace.sessions.items.sorted { $0.payload.startedAt > $1.payload.startedAt }
+            topics = workspace.topics.items.filter { !$0.payload.archived }
             var counts: [UUID: Int] = [:]
-            for session in result.0 {
+            for session in workspace.sessions.items {
                 counts[session.id] = try await store.noteIdsLinkedToSession(session.id).count
             }
             noteCountBySessionId = counts
         } catch { errorMessage = error.localizedDescription }
+    }
+
+    private var loadMoreButton: some View {
+        Button {
+            Task { await loadMore() }
+        } label: {
+            HStack {
+                Spacer()
+                if isLoadingMore { ProgressView() }
+                Text(isLoadingMore ? "Loading…" : "Load more")
+                Spacer()
+            }
+        }
+        .disabled(isLoadingMore)
+    }
+
+    private func loadMore() async {
+        guard let store = model.store, let sessionCursor, !isLoadingMore else { return }
+        isLoadingMore = true
+        defer { isLoadingMore = false }
+        do {
+            let page = try await store.listPage(StudySessionPayload.self, limit: 50, after: sessionCursor)
+            self.sessionCursor = page.nextCursor
+            sessions = (sessions + page.items).sorted { $0.payload.startedAt > $1.payload.startedAt }
+            for session in page.items {
+                noteCountBySessionId[session.id] = try await store.noteIdsLinkedToSession(session.id).count
+            }
+        } catch {
+            errorMessage = error.localizedDescription
+        }
     }
 }
 
 struct NewSessionView: View {
     @Bindable var model: AppModel
     @Environment(\.dismiss) private var dismiss
-    let courses: [IdentifiedPayload<CoursePayload>]
-    let fixedCourseId: UUID?
+    let topics: [IdentifiedPayload<TopicPayload>]
+    let fixedTopicId: UUID?
     let onCreated: (UUID) -> Void
 
     @State private var title = ""
     @State private var goals = ""
-    @State private var courseId: UUID?
+    @State private var topicId: UUID?
     @State private var sessionState = StudySessionState.active
     @State private var errorMessage: String?
 
     init(
         model: AppModel,
-        courses: [IdentifiedPayload<CoursePayload>],
-        fixedCourseId: UUID? = nil,
+        topics: [IdentifiedPayload<TopicPayload>],
+        fixedTopicId: UUID? = nil,
         onCreated: @escaping (UUID) -> Void
     ) {
         self.model = model
-        self.courses = courses
-        self.fixedCourseId = fixedCourseId
+        self.topics = topics
+        self.fixedTopicId = fixedTopicId
         self.onCreated = onCreated
-        _courseId = State(initialValue: fixedCourseId)
+        _topicId = State(initialValue: fixedTopicId)
     }
 
     var body: some View {
@@ -194,15 +229,15 @@ struct NewSessionView: View {
                 } footer: {
                     Text("A session is one focused study period. Notes and Sources stay connected to their Topic after the session ends.")
                 }
-                if let fixedCourseId,
-                   let course = courses.first(where: { $0.id == fixedCourseId })
+                if let fixedTopicId,
+                   let topic = topics.first(where: { $0.id == fixedTopicId })
                 {
-                    LabeledContent("Topic", value: course.payload.name)
+                    LabeledContent("Topic", value: topic.payload.name)
                 } else {
-                    Picker("Topic", selection: $courseId) {
+                    Picker("Topic", selection: $topicId) {
                         Text("Choose a Topic").tag(UUID?.none)
-                        ForEach(courses, id: \.id) { course in
-                            Text(course.payload.name).tag(Optional(course.id))
+                        ForEach(topics, id: \.id) { topic in
+                            Text(topic.payload.name).tag(Optional(topic.id))
                         }
                     }
                 }
@@ -226,7 +261,7 @@ struct NewSessionView: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button(sessionState == .planned ? "Plan" : "Start") { Task { await create() } }
                         .disabled(
-                            title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || courseId == nil
+                            title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || topicId == nil
                         )
                 }
             }
@@ -242,7 +277,7 @@ struct NewSessionView: View {
                 .filter { !$0.isEmpty }
             let id = try await store.startSession(
                 title: title.trimmingCharacters(in: .whitespacesAndNewlines),
-                courseId: courseId,
+                topicId: topicId,
                 goals: parsedGoals,
                 state: sessionState,
                 requireTopic: true
@@ -260,7 +295,7 @@ struct SessionDetailView: View {
 
     @State private var session: IdentifiedPayload<StudySessionPayload>?
     @State private var notes: [IdentifiedPayload<NotePayload>] = []
-    @State private var resources: [IdentifiedPayload<ResourcePayload>] = []
+    @State private var resources: [IdentifiedPayload<SourcePayload>] = []
     @State private var activities: [IdentifiedPayload<SessionActivityPayload>] = []
     @State private var activityTitles: [UUID: String] = [:]
     @State private var digestArtifact: IdentifiedPayload<SessionDigestArtifact>?
@@ -350,13 +385,13 @@ struct SessionDetailView: View {
                 } header: {
                     Text("Session notes")
                 } footer: {
-                    Text("A session references the notes used during this focused period. The same note can remain in collections and appear in another session without being copied.")
+                    Text("A session references the notes used during this focused period. The same note can remain in Lists and appear in another session without being copied.")
                 }
 
-                Section("Resources") {
+                Section("Sources") {
                     ForEach(resources, id: \.id) { resource in
                         NavigationLink(resource.payload.title) {
-                            ResourceDetailView(model: model, resourceId: resource.id, sessionId: sessionId)
+                            SourceDetailView(model: model, sourceId: resource.id, sessionId: sessionId)
                         }
                     }
                     Button("Import Source for this session", systemImage: "doc.badge.plus") {
@@ -572,23 +607,23 @@ struct SessionDetailView: View {
         guard let store = model.store else { return }
         do {
             let loadedSession = try await store.payload(StudySessionPayload.self, id: sessionId)
-            let allNotes = try await store.list(NotePayload.self)
             let linkedNoteIds = try await store.noteIdsLinkedToSession(sessionId)
+            let linkedNotes = try await store.payloads(NotePayload.self, ids: Array(linkedNoteIds))
             let relations = try await store.list(
                 RelationPayload.self,
                 parentId: sessionId,
-                entityTypeOverride: .sessionResource
+                entityTypeOverride: .sessionSource
             )
             let loadedActivities = try await store.list(SessionActivityPayload.self, parentId: sessionId)
-            var linkedResources: [IdentifiedPayload<ResourcePayload>] = []
+            var linkedResources: [IdentifiedPayload<SourcePayload>] = []
             for relation in relations where relation.payload.leftId == sessionId {
-                if let resource = try? await store.payload(ResourcePayload.self, id: relation.payload.rightId) {
+                if let resource = try? await store.payload(SourcePayload.self, id: relation.payload.rightId) {
                     linkedResources.append(resource)
                 }
             }
             session = loadedSession
-            notes = allNotes
-                .filter { linkedNoteIds.contains($0.id) && $0.payload.archivedAt == nil }
+            notes = linkedNotes
+                .filter { $0.payload.archivedAt == nil }
                 .sorted { $0.payload.updatedAt > $1.payload.updatedAt }
             resources = linkedResources
             activities = loadedActivities
@@ -598,7 +633,7 @@ struct SessionDetailView: View {
             for activity in activities {
                 if let note = try? await store.payload(NotePayload.self, id: activity.payload.itemId) {
                     titles[activity.payload.itemId] = note.payload.title
-                } else if let source = try? await store.payload(ResourcePayload.self, id: activity.payload.itemId) {
+                } else if let source = try? await store.payload(SourcePayload.self, id: activity.payload.itemId) {
                     titles[activity.payload.itemId] = source.payload.title
                 }
             }
@@ -612,7 +647,7 @@ struct SessionDetailView: View {
         do {
             let id = try await store.createNote(
                 title: "Notes — \(session.payload.title)",
-                courseId: session.payload.courseId,
+                topicId: session.payload.topicId,
                 sessionId: sessionId
             )
             model.noteLocalMutation()
@@ -627,7 +662,7 @@ struct SessionDetailView: View {
             let url = try result.get()
             _ = try await manager.importSource(
                 from: url,
-                topicId: session?.payload.courseId,
+                topicId: session?.payload.topicId,
                 sessionId: sessionId
             )
             model.noteLocalMutation()
@@ -823,9 +858,9 @@ private struct DigestCitationLinks: View {
         case .annotation:
             if let annotation = try? CanonicalJSON.decode(AnnotationPayload.self, from: source.content) {
                 NavigationLink {
-                    ResourceDetailView(
+                    SourceDetailView(
                         model: model,
-                        resourceId: annotation.resourceId,
+                        sourceId: annotation.sourceId,
                         sessionId: annotation.studySessionId,
                         initialPageNumber: annotation.pageNumber,
                         focusedAnnotationId: source.id,

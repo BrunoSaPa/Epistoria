@@ -206,14 +206,10 @@ struct ConflictResolutionView: View {
     private func summary(_ content: Data, type: EntityType) -> String {
         let value: String
         switch type {
-        case .collection:
-            value = (try? CanonicalJSON.decode(CollectionPayload.self, from: content).name) ?? "Collection"
-        case .institution:
-            value = (try? CanonicalJSON.decode(InstitutionPayload.self, from: content).name) ?? "Institution"
-        case .academicTerm:
-            value = (try? CanonicalJSON.decode(AcademicTermPayload.self, from: content).name) ?? "Academic term"
-        case .course:
-            value = (try? CanonicalJSON.decode(CoursePayload.self, from: content).name) ?? "Course"
+        case .list:
+            value = (try? CanonicalJSON.decode(ListPayload.self, from: content).name) ?? "List"
+        case .topic:
+            value = (try? CanonicalJSON.decode(TopicPayload.self, from: content).name) ?? "Topic"
         case .studySession:
             value = (try? CanonicalJSON.decode(StudySessionPayload.self, from: content).title) ?? "Study session"
         case .note:
@@ -227,8 +223,8 @@ struct ConflictResolutionView: View {
         case .trashEntry:
             value = (try? CanonicalJSON.decode(TrashEntryPayload.self, from: content).displayName)
                 ?? "Deleted item"
-        case .resource:
-            value = (try? CanonicalJSON.decode(ResourcePayload.self, from: content).title) ?? "Resource"
+        case .source:
+            value = (try? CanonicalJSON.decode(SourcePayload.self, from: content).title) ?? "Source"
         case .asset:
             value = (try? CanonicalJSON.decode(AssetPayload.self, from: content).originalFilename) ?? "Encrypted asset"
         case .annotation:
@@ -248,7 +244,7 @@ struct ConflictResolutionView: View {
         case .recognitionDecision:
             value = (try? CanonicalJSON.decode(OCRCorrectionPayload.self, from: content).correctedText)
                 ?? "Recognition review"
-        case .collectionItem, .sessionNote, .sessionResource, .topicArea,
+        case .listItem, .sessionNote, .sessionSource, .topicArea,
              .conceptEvidence, .conceptLink:
             value = "Relationship record"
         case .area:

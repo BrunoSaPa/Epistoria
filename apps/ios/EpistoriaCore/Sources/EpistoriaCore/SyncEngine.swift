@@ -20,6 +20,7 @@ public enum SyncEngineError: Error, Equatable {
     case invalidSequence
     case conflictPayloadTooLarge
     case invalidPushResponse
+    case unsupportedEntitySchema
 }
 
 public actor SyncEngine {
@@ -182,6 +183,14 @@ public actor SyncEngine {
                     entityType: change.entityType,
                     entityId: change.entityId
                 )
+                do {
+                    try EntityPayloadValidator.validate(
+                        entityType: change.entityType,
+                        content: plaintext
+                    )
+                } catch {
+                    throw SyncEngineError.unsupportedEntitySchema
+                }
                 let entity = StoredEntity(
                     id: change.entityId,
                     entityType: change.entityType,
@@ -230,6 +239,14 @@ public actor SyncEngine {
                 entityType: conflict.entityType,
                 entityId: conflict.entityId
             )
+            do {
+                try EntityPayloadValidator.validate(
+                    entityType: conflict.entityType,
+                    content: plaintext
+                )
+            } catch {
+                throw SyncEngineError.unsupportedEntitySchema
+            }
             candidates.append(
                 HydratedServerConflict(
                     serverConflictId: conflict.id,

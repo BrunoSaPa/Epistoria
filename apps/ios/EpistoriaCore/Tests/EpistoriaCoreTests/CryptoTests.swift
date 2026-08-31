@@ -85,7 +85,7 @@ final class CryptoTests: XCTestCase {
                 envelope,
                 accountKey: key,
                 accountId: accountId,
-                entityType: .resource,
+                entityType: .source,
                 entityId: entityId
             )
         )

@@ -68,9 +68,9 @@ struct ConceptEvidenceMapView: View {
         .sheet(isPresented: sourceEvidencePresented) {
             if let item = selectedSourceEvidence {
                 NavigationStack {
-                    ResourceDetailView(
+                    SourceDetailView(
                         model: model,
-                        resourceId: item.payload.sourceId,
+                        sourceId: item.payload.sourceId,
                         initialSourceVersionId: item.payload.sourceVersionId,
                         initialPageNumber: item.payload.locator.page,
                         highlightText: item.payload.excerpt,
@@ -464,7 +464,7 @@ struct ConceptEvidenceMapView: View {
     }
 
     private var topicNotes: [IdentifiedPayload<NotePayload>] {
-        notes.filter { $0.payload.courseId == topicId && $0.payload.archivedAt == nil }
+        notes.filter { $0.payload.topicId == topicId && $0.payload.archivedAt == nil }
     }
 
     private var topicEvidence: [IdentifiedPayload<EvidencePayload>] {
@@ -921,11 +921,14 @@ private struct EvidenceNotePicker: View {
             let x = 48.0 + Double((visible.count / 6) % 2) * 400
             let y = 56.0 + Double(visible.count % 6) * 184
             let z = visible.compactMap(\.payload.canvasPlacement?.zIndex).max().map { $0 + 1 } ?? 1
+            let targetPageId = note.payload.canvas?.pageFormat == .infinite
+                ? nil
+                : try await store.ensureNotePages(noteId: note.id).first?.id
             _ = try await store.appendCanvasEvidence(
                 noteId: note.id,
                 evidenceId: evidenceId,
                 placement: NoteCanvasPlacement(x: x, y: y, width: 360, height: 168, zIndex: z),
-                pageIndex: 0
+                pageId: targetPageId
             )
             model.noteLocalMutation()
             onInserted(note.id)

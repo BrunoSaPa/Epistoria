@@ -95,6 +95,12 @@ struct StudyView: View {
     @State private var recommendations: [IdentifiedPayload<StudyRecommendationPayload>] = []
     @State private var recommendationResponses: [IdentifiedPayload<RecommendationResponsePayload>] = []
     @State private var dailyReviewQueue = DailyEvidenceReviewQueue.empty
+    @State private var dueCardIds: Set<UUID> = []
+    @State private var dueCardCountsByTopic: [UUID: Int] = [:]
+    @State private var cardCursor: EntityPageCursor?
+    @State private var testCursor: EntityPageCursor?
+    @State private var attemptCursor: EntityPageCursor?
+    @State private var sessionCursor: EntityPageCursor?
     @State private var openedRecommendationDestination: StudyRecommendationDestination?
     @State private var errorMessage: String?
 
@@ -527,7 +533,7 @@ struct StudyView: View {
                 NavigationLink {
                     SessionDetailView(model: model, sessionId: session.id)
                 } label: {
-                    StudyRow(title: session.payload.title, detail: topicName(session.payload.courseId), symbol: "timer")
+                    StudyRow(title: session.payload.title, detail: topicName(session.payload.topicId), symbol: "timer")
                 }
             }
         }
@@ -540,6 +546,9 @@ struct StudyView: View {
         }
         Section("All cards") {
             ForEach(cards.filter { $0.payload.archivedAt == nil }, id: \.id) { card in cardRow(card) }
+            if cardCursor != nil {
+                Button("Load more cards") { Task { await loadMoreCards() } }
+            }
         }
     }
 
@@ -552,6 +561,9 @@ struct StudyView: View {
                 } label: {
                     StudyRow(title: test.payload.title, detail: topicName(test.payload.topicId), symbol: "checkmark.square")
                 }
+            }
+            if testCursor != nil {
+                Button("Load more tests") { Task { await loadMoreTests() } }
             }
         }
         Section("In progress") {
@@ -578,6 +590,9 @@ struct StudyView: View {
                     )
                 }
             }
+            if attemptCursor != nil {
+                Button("Load older attempts") { Task { await loadMoreAttempts() } }
+            }
         }
         Section("Completed sessions") {
             ForEach(sessions.filter { $0.payload.state == .ended || $0.payload.state == .abandoned }, id: \.id) { session in
@@ -586,6 +601,9 @@ struct StudyView: View {
                 } label: {
                     StudyRow(title: session.payload.title, detail: session.payload.startedAt.formatted(date: .abbreviated, time: .shortened), symbol: "clock.arrow.circlepath")
                 }
+            }
+            if sessionCursor != nil {
+                Button("Load older sessions") { Task { await loadMoreSessions() } }
             }
         }
     }
@@ -604,11 +622,7 @@ struct StudyView: View {
     }
 
     private var dueCards: [IdentifiedPayload<FlashcardPayload>] {
-        cards.filter { card in
-            guard card.payload.archivedAt == nil, card.payload.suspendedAt == nil else { return false }
-            let latest = reviews.filter { $0.payload.cardId == card.id }.max { $0.payload.reviewedAt < $1.payload.reviewedAt }
-            return latest?.payload.resultingState.dueAt ?? card.payload.createdAt <= .now
-        }
+        cards.filter { dueCardIds.contains($0.id) }
     }
 
     private var unfinishedAttempts: [IdentifiedPayload<TestAttemptPayload>] {
@@ -653,7 +667,7 @@ struct StudyView: View {
             sessions: sessions,
             tests: tests,
             attempts: attempts,
-            dueCardCounts: Dictionary(grouping: dueCards, by: \.payload.topicId).mapValues(\.count),
+            dueCardCounts: dueCardCountsByTopic,
             learningPlanProjections: learningPlanProjections,
             storedRecommendations: recommendations,
             now: .now
@@ -742,35 +756,89 @@ struct StudyView: View {
     private func load() async {
         guard let store = model.store else { return }
         do {
-            async let a = store.topics()
-            async let b = store.list(StudySessionPayload.self)
-            async let c = store.list(FlashcardPayload.self)
-            async let d = store.list(FlashcardRevisionPayload.self)
-            async let e = store.list(FlashcardReviewPayload.self)
-            async let f = store.list(PracticeTestPayload.self)
-            async let g = store.list(TestAttemptPayload.self)
-            async let h = store.list(StudyGoalPayload.self)
-            async let i = store.list(UnresolvedQuestionPayload.self)
-            async let j = store.list(StudyRecommendationPayload.self)
-            async let k = store.list(RecommendationResponsePayload.self)
-            async let l = store.list(TestResponsePayload.self)
-            async let m = store.dailyEvidenceReviewQueue(now: .now)
-            let value = try await (a, b, c, d, e, f, g, h, i, j, k, l, m)
-            topics = value.0
-            sessions = value.1.sorted { $0.payload.startedAt > $1.payload.startedAt }
-            cards = value.2
-            revisions = Dictionary(uniqueKeysWithValues: value.3.map { ($0.id, $0) })
-            reviews = value.4
-            tests = value.5
-            attempts = value.6.sorted { $0.payload.startedAt > $1.payload.startedAt }
-            goals = value.7
-            unresolved = value.8
-            recommendations = value.9
-            recommendationResponses = value.10
-            testResponses = value.11
-            dailyReviewQueue = value.12
+            async let snapshotValue = store.learningSnapshot()
+            async let dueCardsValue = store.dueFlashcards(now: .now, limit: 200)
+            async let dueCountsValue = store.dueFlashcardCountsByTopic(now: .now)
+            async let dailyQueueValue = store.dailyEvidenceReviewQueue(now: .now)
+            let (snapshot, loadedDueCards, loadedDueCounts, loadedDailyQueue) = try await (
+                snapshotValue, dueCardsValue, dueCountsValue, dailyQueueValue
+            )
+            topics = snapshot.topics.items.filter { !$0.payload.archived }
+            sessions = snapshot.sessions.items.sorted { $0.payload.startedAt > $1.payload.startedAt }
+            sessionCursor = snapshot.sessions.nextCursor
+            cards = merge(snapshot.cards.items, loadedDueCards)
+            cardCursor = snapshot.cards.nextCursor
+            dueCardIds = Set(loadedDueCards.map(\.id))
+            dueCardCountsByTopic = loadedDueCounts
+            reviews = snapshot.reviews.items
+            tests = snapshot.tests.items
+            testCursor = snapshot.tests.nextCursor
+            attempts = snapshot.attempts.items.sorted { $0.payload.startedAt > $1.payload.startedAt }
+            attemptCursor = snapshot.attempts.nextCursor
+            goals = snapshot.goals.items
+            unresolved = snapshot.questions.items
+            recommendations = snapshot.recommendations.items
+            recommendationResponses = snapshot.recommendationResponses.items
+            testResponses = snapshot.testResponses.items
+            dailyReviewQueue = loadedDailyQueue
+            try await loadCurrentRevisions(store: store, cards: cards)
             errorMessage = nil
         } catch { errorMessage = error.localizedDescription }
+    }
+
+    private func loadMoreCards() async {
+        guard let store = model.store, let cursor = cardCursor else { return }
+        do {
+            let page = try await store.listPage(FlashcardPayload.self, limit: 50, after: cursor)
+            cards = merge(cards, page.items)
+            cardCursor = page.nextCursor
+            try await loadCurrentRevisions(store: store, cards: page.items)
+        } catch { errorMessage = error.localizedDescription }
+    }
+
+    private func loadMoreTests() async {
+        guard let store = model.store, let cursor = testCursor else { return }
+        do {
+            let page = try await store.listPage(PracticeTestPayload.self, limit: 50, after: cursor)
+            tests = merge(tests, page.items)
+            testCursor = page.nextCursor
+        } catch { errorMessage = error.localizedDescription }
+    }
+
+    private func loadMoreAttempts() async {
+        guard let store = model.store, let cursor = attemptCursor else { return }
+        do {
+            let page = try await store.listPage(TestAttemptPayload.self, limit: 50, after: cursor)
+            attempts = merge(attempts, page.items).sorted { $0.payload.startedAt > $1.payload.startedAt }
+            attemptCursor = page.nextCursor
+        } catch { errorMessage = error.localizedDescription }
+    }
+
+    private func loadMoreSessions() async {
+        guard let store = model.store, let cursor = sessionCursor else { return }
+        do {
+            let page = try await store.listPage(StudySessionPayload.self, limit: 50, after: cursor)
+            sessions = merge(sessions, page.items).sorted { $0.payload.startedAt > $1.payload.startedAt }
+            sessionCursor = page.nextCursor
+        } catch { errorMessage = error.localizedDescription }
+    }
+
+    private func loadCurrentRevisions(
+        store: EpistoriaStore,
+        cards newCards: [IdentifiedPayload<FlashcardPayload>]
+    ) async throws {
+        let missingIds = Array(Set(newCards.map(\.payload.currentRevisionId))).filter { revisions[$0] == nil }
+        guard !missingIds.isEmpty else { return }
+        let loaded = try await store.payloads(FlashcardRevisionPayload.self, ids: missingIds)
+        for revision in loaded { revisions[revision.id] = revision }
+    }
+
+    private func merge<Payload: EntityPayload>(
+        _ existing: [IdentifiedPayload<Payload>],
+        _ additions: [IdentifiedPayload<Payload>]
+    ) -> [IdentifiedPayload<Payload>] {
+        var seen = Set<UUID>()
+        return (existing + additions).filter { seen.insert($0.id).inserted }
     }
 
     private func respond(_ recommendation: LocalStudyRecommendation, action: RecommendationAction) async {

@@ -2,7 +2,7 @@ import AVFoundation
 import Foundation
 
 public struct VideoSourceAdapter: DecoderValidatedSourceAdapter {
-    public let sourceType = ResourceKind.video
+    public let sourceType = SourceKind.video
     public let supportedExtensions: Set<String> = ["m4v", "mov", "mp4"]
     public let maximumBytes = 384 * 1_024 * 1_024
 

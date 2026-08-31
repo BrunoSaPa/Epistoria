@@ -105,11 +105,11 @@ public struct SourceLocator: Codable, Equatable, Sendable {
     }
 }
 
-/// User-facing replacement for Resource. It retains the encrypted `RESOURCE` discriminator.
+/// One imported or captured item in the Library.
 public struct SourcePayload: EntityPayload, Equatable {
-    public static let entityType = EntityType.resource
-    public var schemaVersion: String
-    public var sourceType: ResourceKind
+    public static let entityType = EntityType.source
+    public var schemaVersion = "source/v1"
+    public var sourceType: SourceKind
     public var title: String
     public var authors: [String]
     public var canonicalURL: URL?
@@ -127,14 +127,13 @@ public struct SourcePayload: EntityPayload, Equatable {
     public var updatedAt: Date
 
     public init(
-        sourceType: ResourceKind,
+        sourceType: SourceKind,
         title: String,
         authors: [String] = [],
         originalAssetId: UUID? = nil,
         primaryTopicId: UUID? = nil,
         now: Date = .now
     ) {
-        schemaVersion = "source/v1"
         self.sourceType = sourceType
         self.title = title
         self.authors = authors
@@ -153,70 +152,6 @@ public struct SourcePayload: EntityPayload, Equatable {
         updatedAt = now
     }
 
-    private enum CodingKeys: String, CodingKey {
-        case schemaVersion, sourceType, resourceType, title, authors, canonicalURL, url
-        case identifiers, externalIdentifier, originalAssetId, currentVersionId, primaryTopicId
-        case relatedTopicIds, listIds, importState, locallyAvailable, archivedAt, importedAt
-        case createdAt, updatedAt
-    }
-
-    public init(from decoder: Decoder) throws {
-        let values = try decoder.container(keyedBy: CodingKeys.self)
-        let decodedSchema = try values.decodeIfPresent(String.self, forKey: .schemaVersion)
-            ?? "resource/v1"
-        guard decodedSchema == "resource/v1" || decodedSchema == "source/v1" else {
-            throw DecodingError.dataCorruptedError(
-                forKey: .schemaVersion,
-                in: values,
-                debugDescription: "Unsupported Source schema \(decodedSchema)"
-            )
-        }
-        schemaVersion = decodedSchema
-        sourceType = try values.decodeIfPresent(ResourceKind.self, forKey: .sourceType)
-            ?? values.decode(ResourceKind.self, forKey: .resourceType)
-        title = try values.decode(String.self, forKey: .title)
-        authors = try values.decodeIfPresent([String].self, forKey: .authors) ?? []
-        canonicalURL = try values.decodeIfPresent(URL.self, forKey: .canonicalURL)
-            ?? values.decodeIfPresent(URL.self, forKey: .url)
-        identifiers = try values.decodeIfPresent([String].self, forKey: .identifiers) ?? []
-        if identifiers.isEmpty,
-           let legacyIdentifier = try values.decodeIfPresent(String.self, forKey: .externalIdentifier) {
-            identifiers = [legacyIdentifier]
-        }
-        originalAssetId = try values.decodeIfPresent(UUID.self, forKey: .originalAssetId)
-        currentVersionId = try values.decodeIfPresent(UUID.self, forKey: .currentVersionId)
-        primaryTopicId = try values.decodeIfPresent(UUID.self, forKey: .primaryTopicId)
-        relatedTopicIds = try values.decodeIfPresent([UUID].self, forKey: .relatedTopicIds) ?? []
-        listIds = try values.decodeIfPresent([UUID].self, forKey: .listIds) ?? []
-        importState = try values.decodeIfPresent(SourceImportState.self, forKey: .importState) ?? .ready
-        locallyAvailable = try values.decodeIfPresent(Bool.self, forKey: .locallyAvailable)
-            ?? (originalAssetId != nil)
-        archivedAt = try values.decodeIfPresent(Date.self, forKey: .archivedAt)
-        importedAt = try values.decode(Date.self, forKey: .importedAt)
-        createdAt = try values.decode(Date.self, forKey: .createdAt)
-        updatedAt = try values.decode(Date.self, forKey: .updatedAt)
-    }
-
-    public func encode(to encoder: Encoder) throws {
-        var values = encoder.container(keyedBy: CodingKeys.self)
-        try values.encode("source/v1", forKey: .schemaVersion)
-        try values.encode(sourceType, forKey: .sourceType)
-        try values.encode(title, forKey: .title)
-        try values.encode(authors, forKey: .authors)
-        try values.encodeIfPresent(canonicalURL, forKey: .canonicalURL)
-        try values.encode(identifiers, forKey: .identifiers)
-        try values.encodeIfPresent(originalAssetId, forKey: .originalAssetId)
-        try values.encodeIfPresent(currentVersionId, forKey: .currentVersionId)
-        try values.encodeIfPresent(primaryTopicId, forKey: .primaryTopicId)
-        try values.encode(relatedTopicIds, forKey: .relatedTopicIds)
-        try values.encode(listIds, forKey: .listIds)
-        try values.encode(importState, forKey: .importState)
-        try values.encode(locallyAvailable, forKey: .locallyAvailable)
-        try values.encodeIfPresent(archivedAt, forKey: .archivedAt)
-        try values.encode(importedAt, forKey: .importedAt)
-        try values.encode(createdAt, forKey: .createdAt)
-        try values.encode(updatedAt, forKey: .updatedAt)
-    }
 }
 
 public struct SourceVersionPayload: EntityPayload, Equatable {

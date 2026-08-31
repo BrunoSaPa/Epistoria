@@ -570,7 +570,7 @@ public struct SessionDigestRequest: Codable, Equatable, Sendable {
     public var accountId: UUID
     public var jobId: UUID
     public var sessionId: UUID
-    public var courseId: UUID?
+    public var topicId: UUID?
     public var sessionTitle: String
     public var startedAt: Date
     public var endedAt: Date
@@ -692,7 +692,7 @@ public struct PDFExtractionRequest: Codable, Equatable, Sendable {
     public var schemaVersion = "pdf-extraction-request/v2"
     public var accountId: UUID
     public var jobId: UUID
-    public var resourceId: UUID
+    public var sourceId: UUID
     public var assetId: UUID
     public var assetKey: String
     public var expectedDedupeTag: String
@@ -720,20 +720,20 @@ public struct ExtractedPDFPage: Codable, Equatable, Sendable {
 public struct PDFExtractionChunk: Codable, Equatable, Sendable {
     public var schemaVersion: String
     public var jobId: UUID
-    public var resourceId: UUID
+    public var sourceId: UUID
     public var chunkIndex: Int
     public var pages: [ExtractedPDFPage]
 
     public init(
         schemaVersion: String = "pdf-extraction-chunk/v1",
         jobId: UUID,
-        resourceId: UUID,
+        sourceId: UUID,
         chunkIndex: Int,
         pages: [ExtractedPDFPage]
     ) {
         self.schemaVersion = schemaVersion
         self.jobId = jobId
-        self.resourceId = resourceId
+        self.sourceId = sourceId
         self.chunkIndex = chunkIndex
         self.pages = pages
     }
@@ -743,7 +743,7 @@ public struct PDFExtractionManifest: EntityPayload, Equatable {
     public static let entityType = EntityType.aiArtifact
     public var schemaVersion: String
     public var jobId: UUID
-    public var resourceId: UUID
+    public var sourceId: UUID
     public var generatedAt: Date
     public var pageCount: Int
     public var characterCount: Int
@@ -756,7 +756,7 @@ public struct PDFExtractionManifest: EntityPayload, Equatable {
     public init(
         schemaVersion: String = "ai-artifact/pdf-extraction/v2",
         jobId: UUID,
-        resourceId: UUID,
+        sourceId: UUID,
         generatedAt: Date,
         pageCount: Int,
         characterCount: Int,
@@ -765,7 +765,7 @@ public struct PDFExtractionManifest: EntityPayload, Equatable {
     ) {
         self.schemaVersion = schemaVersion
         self.jobId = jobId
-        self.resourceId = resourceId
+        self.sourceId = sourceId
         self.generatedAt = generatedAt
         self.pageCount = pageCount
         self.characterCount = characterCount
@@ -966,7 +966,7 @@ public struct MediaTranscriptionRequest: Codable, Equatable, Sendable {
     public var jobId: UUID
     public var sourceId: UUID
     public var sourceVersionId: UUID
-    public var sourceType: ResourceKind
+    public var sourceType: SourceKind
     public var assetId: UUID
     public var assetKey: String
     public var expectedDedupeTag: String
@@ -1289,7 +1289,7 @@ public actor AIJobCoordinator {
             accountId: accountId,
             jobId: jobId,
             sessionId: sessionId,
-            courseId: session.courseId,
+            topicId: session.topicId,
             sessionTitle: session.title,
             startedAt: session.startedAt,
             endedAt: endedAt,
@@ -1351,18 +1351,18 @@ public actor AIJobCoordinator {
     }
 
     public func submitPDFExtraction(
-        resourceId: UUID,
+        sourceId: UUID,
         automaticOCR: Bool = true,
         automaticFormulaOCR: Bool = false,
         preferredOCRLanguages: [String] = []
     ) async throws -> AIJobSummary {
-        let resource = try await store.payload(ResourcePayload.self, id: resourceId).payload
-        guard resource.resourceType == .pdf, let assetId = resource.originalAssetId else {
+        let resource = try await store.payload(SourcePayload.self, id: sourceId).payload
+        guard resource.sourceType == .pdf, let assetId = resource.originalAssetId else {
             throw AIJobCoordinatorError.resourceHasNoPDF
         }
         let asset = try await store.payload(AssetPayload.self, id: assetId).payload
-        let source = try await store.payload(SourcePayload.self, id: resourceId).payload
-        let versions = try await store.list(SourceVersionPayload.self, parentId: resourceId)
+        let source = try await store.payload(SourcePayload.self, id: sourceId).payload
+        let versions = try await store.list(SourceVersionPayload.self, parentId: sourceId)
         guard let sourceVersionId = source.currentVersionId
             ?? versions.max(by: { $0.payload.versionNumber < $1.payload.versionNumber })?.id
         else { throw AIJobCoordinatorError.resourceHasNoPDF }
@@ -1370,7 +1370,7 @@ public actor AIJobCoordinator {
         let request = PDFExtractionRequest(
             accountId: accountId,
             jobId: jobId,
-            resourceId: resourceId,
+            sourceId: sourceId,
             assetId: assetId,
             assetKey: asset.assetKey,
             expectedDedupeTag: asset.dedupeTag,
@@ -1391,13 +1391,13 @@ public actor AIJobCoordinator {
     }
 
     public func latestPDFExtraction(
-        resourceId: UUID
+        sourceId: UUID
     ) async throws -> IdentifiedPayload<PDFExtractionManifest>? {
-        let entities = try await database.entities(type: .aiArtifact, parentId: resourceId)
+        let entities = try await database.entities(type: .aiArtifact, parentId: sourceId)
         for entity in entities {
             if let artifact = try? CanonicalJSON.decode(
                 PDFExtractionManifest.self, from: entity.content),
-                artifact.resourceId == resourceId
+                artifact.sourceId == sourceId
             {
                 return IdentifiedPayload(
                     id: entity.id,
@@ -2023,7 +2023,7 @@ public actor AIJobCoordinator {
         }
         let notes = try await store.list(NotePayload.self).filter {
             $0.payload.archivedAt == nil
-                && ($0.payload.courseId.map(scopedTopicIds.contains) ?? false)
+                && ($0.payload.topicId.map(scopedTopicIds.contains) ?? false)
         }
         let questions = try await store.list(UnresolvedQuestionPayload.self).filter {
             $0.payload.resolvedAt == nil && scopedTopicIds.contains($0.payload.topicId)
@@ -2257,7 +2257,7 @@ public actor AIJobCoordinator {
         )
         var excerpts: [DigestSourceExcerpt] = []
         let notes = try await store.list(NotePayload.self).filter { note in
-            note.payload.courseId.map(scopedTopicIds.contains) ?? false
+            note.payload.topicId.map(scopedTopicIds.contains) ?? false
         }
         for note in notes {
             let blocks = try await store.list(NoteBlockPayload.self, parentId: note.id)

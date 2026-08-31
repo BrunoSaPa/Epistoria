@@ -89,6 +89,7 @@ struct NotePageManagerView: View {
                         Task { await insert(after: pages.last?.id) }
                     }
                     .disabled(pages.isEmpty)
+                    .accessibilityIdentifier("note.page-manager.add")
                 }
             }
             .confirmationDialog(
@@ -130,7 +131,7 @@ struct NotePageManagerView: View {
 
     private func excerpt(for pageId: UUID) -> String? {
         blocks.lazy
-            .filter { !$0.payload.tombstone && $0.payload.canvasPageId == pageId }
+            .filter { !$0.payload.tombstone && $0.payload.pageId == pageId }
             .compactMap { block -> String? in
                 let text = block.payload.plainText.trimmingCharacters(in: .whitespacesAndNewlines)
                 return text.isEmpty ? nil : text

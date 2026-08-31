@@ -5,7 +5,7 @@ public enum GoogleWorkspaceDocumentKind: String, CaseIterable, Codable, Sendable
     case slides = "SLIDES"
     case sheet = "SHEET"
 
-    public var sourceType: ResourceKind {
+    public var sourceType: SourceKind {
         switch self {
         case .document: .googleDocument
         case .slides: .googleSlides
@@ -65,7 +65,7 @@ public enum GoogleWorkspaceDocumentKind: String, CaseIterable, Codable, Sendable
     }
 }
 
-public extension ResourceKind {
+public extension SourceKind {
     var isGoogleWorkspaceSource: Bool {
         self == .googleDocument || self == .googleSlides || self == .googleSheet
     }
@@ -309,7 +309,7 @@ public struct GoogleWorkspaceSourceAdapter: SourceAdapter {
         self.kind = kind
     }
 
-    public var sourceType: ResourceKind { kind.sourceType }
+    public var sourceType: SourceKind { kind.sourceType }
     public var supportedExtensions: Set<String> { [kind.internalExtension] }
     public var maximumBytes: Int { kind.packagedAdapter.maximumBytes }
 

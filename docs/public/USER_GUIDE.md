@@ -22,7 +22,7 @@ Today provides the main actions and recent work:
   YouTube reference.
 - **Learn** opens the learning hub. Learning status appears on Today only when there is active or
   due work.
-- **Recent** opens recently used notes and resources.
+- **Recent** opens recently used notes and Sources.
 
 The status row reports whether work is saved on the iPad, waiting to sync, syncing, synced, or in
 conflict.
@@ -689,7 +689,7 @@ appear in readable notebook exports. A fresh iPad requires the key to be entered
 ## Search
 
 1. Open **Search**.
-2. Choose All, Notes, Resources, or Sessions.
+2. Choose All, Notes, Sources, or Sessions.
 3. Enter the search text.
 4. Open a result.
 
@@ -757,7 +757,7 @@ file.
 
 ## Import a readable export
 
-Import requires an empty notebook and a version 5, 6, or 7 export. It does not merge with or
+Import requires an empty notebook and a version 8 export. It does not merge with or
 replace existing data.
 
 1. Open **Settings → Data Health → Portable export**.

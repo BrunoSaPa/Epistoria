@@ -293,6 +293,7 @@ struct TrashView: View {
                             Button("Restore") { Task { await restore(entry.id) } }
                                 .buttonStyle(.bordered)
                                 .controlSize(.small)
+                                .accessibilityIdentifier("trash.restore.\(entry.payload.targetId.uuidString)")
                         }
                     }
                 } footer: {
@@ -364,8 +365,8 @@ private extension EntityType {
         case .note: "Note"
         case .notePage: "Page"
         case .noteBlock: "Canvas item"
-        case .resource: "Source"
-        case .collection: "List"
+        case .source: "Source"
+        case .list: "List"
         default: rawValue.replacingOccurrences(of: "_", with: " ").capitalized
         }
     }
@@ -375,8 +376,8 @@ private extension EntityType {
         case .note: "note.text"
         case .notePage: "doc"
         case .noteBlock: "square.dashed"
-        case .resource: "books.vertical"
-        case .collection: "folder"
+        case .source: "books.vertical"
+        case .list: "folder"
         default: "trash"
         }
     }

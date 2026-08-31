@@ -25,6 +25,13 @@ struct LearningManagementView: View {
     @State private var concepts: [IdentifiedPayload<ConceptPayload>] = []
     @State private var tests: [IdentifiedPayload<PracticeTestPayload>] = []
     @State private var automationGrants: [IdentifiedPayload<AutomationGrantPayload>] = []
+    @State private var deckCursor: EntityPageCursor?
+    @State private var cardCursor: EntityPageCursor?
+    @State private var goalCursor: EntityPageCursor?
+    @State private var questionCursor: EntityPageCursor?
+    @State private var conceptCursor: EntityPageCursor?
+    @State private var testCursor: EntityPageCursor?
+    @State private var automationCursor: EntityPageCursor?
     @State private var showNewDeck = false
     @State private var showNewAutomation = false
     @State private var automationMessage: String?
@@ -52,6 +59,7 @@ struct LearningManagementView: View {
                         )
                     }
                 }
+                loadMoreButton("Load more goals", cursor: goalCursor, action: loadMoreGoals)
             }
             Section("Questions") {
                 lifecycleEmpty(questions, "No questions")
@@ -66,6 +74,7 @@ struct LearningManagementView: View {
                         )
                     }
                 }
+                loadMoreButton("Load more questions", cursor: questionCursor, action: loadMoreQuestions)
             }
             Section("Decks") {
                 if decks.isEmpty { Text("No decks").foregroundStyle(.secondary) }
@@ -80,6 +89,7 @@ struct LearningManagementView: View {
                         )
                     }
                 }
+                loadMoreButton("Load more decks", cursor: deckCursor, action: loadMoreDecks)
                 Button("New deck", systemImage: "plus") { showNewDeck = true }
             }
             Section("Cards") {
@@ -100,6 +110,7 @@ struct LearningManagementView: View {
                         )
                     }
                 }
+                loadMoreButton("Load more cards", cursor: cardCursor, action: loadMoreCards)
             }
             Section("Concepts") {
                 if concepts.isEmpty { Text("No Concepts").foregroundStyle(.secondary) }
@@ -119,6 +130,7 @@ struct LearningManagementView: View {
                         )
                     }
                 }
+                loadMoreButton("Load more Concepts", cursor: conceptCursor, action: loadMoreConcepts)
             }
             Section("Tests") {
                 if tests.isEmpty { Text("No tests").foregroundStyle(.secondary) }
@@ -133,6 +145,7 @@ struct LearningManagementView: View {
                         )
                     }
                 }
+                loadMoreButton("Load more tests", cursor: testCursor, action: loadMoreTests)
             }
             Section("Proactive automation") {
                 Text("Study Next suggestions remain local. Automatic provider work runs only under an active permission listed here.")
@@ -156,6 +169,7 @@ struct LearningManagementView: View {
                         )
                     }
                 }
+                loadMoreButton("Load more permissions", cursor: automationCursor, action: loadMoreAutomationGrants)
                 Button("New permission", systemImage: "plus") { showNewAutomation = true }
                 Button("Run due automations", systemImage: "play") {
                     Task { await runDueAutomations() }
@@ -206,6 +220,17 @@ struct LearningManagementView: View {
         } icon: { Image(systemName: symbol).foregroundStyle(EpistoriaDesign.ink) }
     }
 
+    @ViewBuilder
+    private func loadMoreButton(
+        _ title: String,
+        cursor: EntityPageCursor?,
+        action: @escaping @MainActor () async -> Void
+    ) -> some View {
+        if cursor != nil {
+            Button(title) { Task { await action() } }
+        }
+    }
+
     private func topicName(_ id: UUID) -> String {
         topics.first { $0.id == id }?.payload.name ?? "Topic"
     }
@@ -247,27 +272,146 @@ struct LearningManagementView: View {
     private func load() async {
         guard let store = model.store else { return }
         do {
-            async let a = store.topics()
-            async let b = store.list(FlashcardDeckPayload.self)
-            async let c = store.list(FlashcardPayload.self)
-            async let d = store.list(FlashcardRevisionPayload.self)
-            async let e = store.list(StudyGoalPayload.self)
-            async let f = store.list(UnresolvedQuestionPayload.self)
-            async let g = store.list(ConceptPayload.self)
-            async let h = store.list(PracticeTestPayload.self)
-            async let i = store.list(AutomationGrantPayload.self)
-            let values = try await (a, b, c, d, e, f, g, h, i)
-            topics = values.0.filter { !$0.payload.archived }
-            decks = values.1.sorted { $0.payload.name < $1.payload.name }
-            cards = values.2.sorted { $0.payload.updatedAt > $1.payload.updatedAt }
-            revisions = Dictionary(uniqueKeysWithValues: values.3.map { ($0.id, $0) })
-            goals = values.4.sorted { $0.payload.updatedAt > $1.payload.updatedAt }
-            questions = values.5.sorted { $0.payload.updatedAt > $1.payload.updatedAt }
-            concepts = values.6.sorted { $0.payload.name < $1.payload.name }
-            tests = values.7.sorted { $0.payload.updatedAt > $1.payload.updatedAt }
-            automationGrants = values.8.sorted { $0.payload.updatedAt > $1.payload.updatedAt }
+            async let snapshotValue = store.learningSnapshot(
+                limits: LearningReadLimits(
+                    topics: 100,
+                    sessions: 1,
+                    cards: 50,
+                    reviews: 1,
+                    tests: 50,
+                    attempts: 1,
+                    goals: 50,
+                    questions: 50,
+                    recommendations: 1,
+                    recommendationResponses: 1,
+                    testResponses: 1
+                )
+            )
+            async let deckPageValue = store.listPage(FlashcardDeckPayload.self, limit: 50)
+            async let conceptPageValue = store.listPage(ConceptPayload.self, limit: 50)
+            async let automationPageValue = store.listPage(AutomationGrantPayload.self, limit: 50)
+            let (snapshot, deckPage, conceptPage, automationPage) = try await (
+                snapshotValue, deckPageValue, conceptPageValue, automationPageValue
+            )
+            topics = snapshot.topics.items.filter { !$0.payload.archived }
+            decks = deckPage.items.sorted { $0.payload.name < $1.payload.name }
+            deckCursor = deckPage.nextCursor
+            cards = snapshot.cards.items.sorted { $0.payload.updatedAt > $1.payload.updatedAt }
+            cardCursor = snapshot.cards.nextCursor
+            revisions = [:]
+            try await loadCurrentRevisions(store: store, cards: cards)
+            goals = snapshot.goals.items.sorted { $0.payload.updatedAt > $1.payload.updatedAt }
+            goalCursor = snapshot.goals.nextCursor
+            questions = snapshot.questions.items.sorted { $0.payload.updatedAt > $1.payload.updatedAt }
+            questionCursor = snapshot.questions.nextCursor
+            concepts = conceptPage.items.sorted { $0.payload.name < $1.payload.name }
+            conceptCursor = conceptPage.nextCursor
+            tests = snapshot.tests.items.sorted { $0.payload.updatedAt > $1.payload.updatedAt }
+            testCursor = snapshot.tests.nextCursor
+            automationGrants = automationPage.items.sorted { $0.payload.updatedAt > $1.payload.updatedAt }
+            automationCursor = automationPage.nextCursor
             errorMessage = nil
         } catch { errorMessage = error.localizedDescription }
+    }
+
+    private func loadMoreDecks() async {
+        guard let store = model.store, let cursor = deckCursor else { return }
+        await appendPage(
+            tryLoad: { try await store.listPage(FlashcardDeckPayload.self, limit: 50, after: cursor) },
+            values: $decks,
+            cursor: $deckCursor,
+            sort: { $0.payload.name < $1.payload.name }
+        )
+    }
+
+    private func loadMoreCards() async {
+        guard let store = model.store, let cursor = cardCursor else { return }
+        do {
+            let page = try await store.listPage(FlashcardPayload.self, limit: 50, after: cursor)
+            cards = merge(cards, page.items).sorted { $0.payload.updatedAt > $1.payload.updatedAt }
+            cardCursor = page.nextCursor
+            try await loadCurrentRevisions(store: store, cards: page.items)
+        } catch { errorMessage = error.localizedDescription }
+    }
+
+    private func loadMoreGoals() async {
+        guard let store = model.store, let cursor = goalCursor else { return }
+        await appendPage(
+            tryLoad: { try await store.listPage(StudyGoalPayload.self, limit: 50, after: cursor) },
+            values: $goals,
+            cursor: $goalCursor,
+            sort: { $0.payload.updatedAt > $1.payload.updatedAt }
+        )
+    }
+
+    private func loadMoreQuestions() async {
+        guard let store = model.store, let cursor = questionCursor else { return }
+        await appendPage(
+            tryLoad: { try await store.listPage(UnresolvedQuestionPayload.self, limit: 50, after: cursor) },
+            values: $questions,
+            cursor: $questionCursor,
+            sort: { $0.payload.updatedAt > $1.payload.updatedAt }
+        )
+    }
+
+    private func loadMoreConcepts() async {
+        guard let store = model.store, let cursor = conceptCursor else { return }
+        await appendPage(
+            tryLoad: { try await store.listPage(ConceptPayload.self, limit: 50, after: cursor) },
+            values: $concepts,
+            cursor: $conceptCursor,
+            sort: { $0.payload.name < $1.payload.name }
+        )
+    }
+
+    private func loadMoreTests() async {
+        guard let store = model.store, let cursor = testCursor else { return }
+        await appendPage(
+            tryLoad: { try await store.listPage(PracticeTestPayload.self, limit: 50, after: cursor) },
+            values: $tests,
+            cursor: $testCursor,
+            sort: { $0.payload.updatedAt > $1.payload.updatedAt }
+        )
+    }
+
+    private func loadMoreAutomationGrants() async {
+        guard let store = model.store, let cursor = automationCursor else { return }
+        await appendPage(
+            tryLoad: { try await store.listPage(AutomationGrantPayload.self, limit: 50, after: cursor) },
+            values: $automationGrants,
+            cursor: $automationCursor,
+            sort: { $0.payload.updatedAt > $1.payload.updatedAt }
+        )
+    }
+
+    private func loadCurrentRevisions(
+        store: EpistoriaStore,
+        cards newCards: [IdentifiedPayload<FlashcardPayload>]
+    ) async throws {
+        let missingIds = Array(Set(newCards.map(\.payload.currentRevisionId))).filter { revisions[$0] == nil }
+        let loaded = try await store.payloads(FlashcardRevisionPayload.self, ids: missingIds)
+        for revision in loaded { revisions[revision.id] = revision }
+    }
+
+    private func appendPage<Payload: EntityPayload>(
+        tryLoad: () async throws -> IdentifiedPayloadPage<Payload>,
+        values: Binding<[IdentifiedPayload<Payload>]>,
+        cursor: Binding<EntityPageCursor?>,
+        sort: (IdentifiedPayload<Payload>, IdentifiedPayload<Payload>) -> Bool
+    ) async {
+        do {
+            let page = try await tryLoad()
+            values.wrappedValue = merge(values.wrappedValue, page.items).sorted(by: sort)
+            cursor.wrappedValue = page.nextCursor
+        } catch { errorMessage = error.localizedDescription }
+    }
+
+    private func merge<Payload: EntityPayload>(
+        _ existing: [IdentifiedPayload<Payload>],
+        _ additions: [IdentifiedPayload<Payload>]
+    ) -> [IdentifiedPayload<Payload>] {
+        var seen = Set<UUID>()
+        return (existing + additions).filter { seen.insert($0.id).inserted }
     }
 
     private func runDueAutomations() async {

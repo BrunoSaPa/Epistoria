@@ -18,7 +18,7 @@ public extension EpistoriaStore {
         _ = try await topic(id: topicId)
         if let studySessionId {
             let session = try await payload(StudySessionPayload.self, id: studySessionId)
-            guard session.payload.courseId == topicId else { throw StoreError.sessionTopicRequired }
+            guard session.payload.topicId == topicId else { throw StoreError.sessionTopicRequired }
         }
         if let goalId {
             let goal = try await payload(StudyGoalPayload.self, id: goalId)

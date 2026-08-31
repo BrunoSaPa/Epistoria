@@ -6,26 +6,68 @@ enum AccountStorageScope: String, Codable, Equatable {
 }
 
 struct AccountConfiguration: Codable, Equatable {
+    static let currentSchemaGeneration = 2
+
     var accountId: UUID
     var deviceId: UUID
     var apiURL: URL?
     var serverConnected: Bool
     var storageScope: AccountStorageScope?
+    var notebookGenerationId: UUID
+    var schemaGeneration: Int
 
     init(
         accountId: UUID,
         deviceId: UUID,
         apiURL: URL?,
         serverConnected: Bool,
-        storageScope: AccountStorageScope? = nil
+        storageScope: AccountStorageScope? = nil,
+        notebookGenerationId: UUID? = nil,
+        schemaGeneration: Int = AccountConfiguration.currentSchemaGeneration
     ) {
         self.accountId = accountId
         self.deviceId = deviceId
         self.apiURL = apiURL
         self.serverConnected = serverConnected
         self.storageScope = storageScope
+        self.notebookGenerationId = notebookGenerationId ?? accountId
+        self.schemaGeneration = schemaGeneration
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case accountId
+        case deviceId
+        case apiURL
+        case serverConnected
+        case storageScope
+        case notebookGenerationId
+        case schemaGeneration
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        accountId = try values.decode(UUID.self, forKey: .accountId)
+        deviceId = try values.decode(UUID.self, forKey: .deviceId)
+        apiURL = try values.decodeIfPresent(URL.self, forKey: .apiURL)
+        serverConnected = try values.decode(Bool.self, forKey: .serverConnected)
+        storageScope = try values.decodeIfPresent(AccountStorageScope.self, forKey: .storageScope)
+        notebookGenerationId = try values.decodeIfPresent(
+            UUID.self,
+            forKey: .notebookGenerationId
+        ) ?? accountId
+        schemaGeneration = try values.decodeIfPresent(Int.self, forKey: .schemaGeneration) ?? 1
     }
 }
+
+#if DEBUG
+struct DevelopmentResetReceipt: Codable, Equatable {
+    var archiveFormat: String
+    var archiveSHA256: String
+    var priorAccountId: UUID?
+    var nextNotebookGenerationId: UUID
+    var resetAt: Date
+}
+#endif
 
 enum AccountStoragePurpose {
     case accountScoped
@@ -98,6 +140,9 @@ final class AccountConfigurationStore {
     }
 
     private let key = "epistoria.account-configuration.v1"
+    #if DEBUG
+    private let resetReceiptKey = "epistoria.development-reset-receipt.v1"
+    #endif
     private let defaults: UserDefaults
 
     init(defaults: UserDefaults = .standard) {
@@ -131,6 +176,20 @@ final class AccountConfigurationStore {
     #if DEBUG
     func clearForDevelopment() {
         defaults.removeObject(forKey: key)
+    }
+
+    func recordDevelopmentReset(_ receipt: DevelopmentResetReceipt) {
+        guard let data = try? JSONEncoder().encode(receipt) else { return }
+        defaults.set(data, forKey: resetReceiptKey)
+    }
+
+    var developmentResetReceipt: DevelopmentResetReceipt? {
+        guard let data = defaults.data(forKey: resetReceiptKey) else { return nil }
+        return try? JSONDecoder().decode(DevelopmentResetReceipt.self, from: data)
+    }
+
+    var pendingNotebookGenerationId: UUID? {
+        developmentResetReceipt?.nextNotebookGenerationId
     }
     #endif
 }

@@ -106,7 +106,7 @@ public enum StudyNextEngine {
         }
 
         for session in sessions where session.payload.state == .paused {
-            guard let topicId = session.payload.courseId, activeTopics[topicId] != nil else {
+            guard let topicId = session.payload.topicId, activeTopics[topicId] != nil else {
                 continue
             }
             values.append(LocalStudyRecommendation(

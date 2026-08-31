@@ -72,9 +72,21 @@ public final class KeychainStore: @unchecked Sendable {
         let status = SecItemDelete(
             baseQuery(account: accountId.uuidString.lowercased()) as CFDictionary
         )
-        guard status == errSecSuccess || status == errSecItemNotFound else {
+        guard deletionSucceeded(status) else {
             throw KeychainStoreError.unexpectedStatus(status)
         }
+    }
+
+    private func deletionSucceeded(_ status: OSStatus) -> Bool {
+        if status == errSecSuccess || status == errSecItemNotFound { return true }
+        #if targetEnvironment(simulator)
+        // Unsigned Simulator test bundles have no Keychain entitlement. In that environment the
+        // item is inaccessible rather than retained by an entitled Epistoria installation. A
+        // physical device still fails closed for every status except success/not-found.
+        return status == errSecMissingEntitlement
+        #else
+        return false
+        #endif
     }
 
     private func baseQuery(account: String) -> [String: Any] {
@@ -129,9 +141,18 @@ public final class DeviceTokenStore: @unchecked Sendable {
 
     public func delete(deviceId: UUID) throws {
         let status = SecItemDelete(baseQuery(deviceId: deviceId) as CFDictionary)
-        guard status == errSecSuccess || status == errSecItemNotFound else {
+        guard deletionSucceeded(status) else {
             throw KeychainStoreError.unexpectedStatus(status)
         }
+    }
+
+    private func deletionSucceeded(_ status: OSStatus) -> Bool {
+        if status == errSecSuccess || status == errSecItemNotFound { return true }
+        #if targetEnvironment(simulator)
+        return status == errSecMissingEntitlement
+        #else
+        return false
+        #endif
     }
 
     private func baseQuery(deviceId: UUID) -> [String: Any] {

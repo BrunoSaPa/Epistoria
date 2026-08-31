@@ -1,35 +1,20 @@
 import EpistoriaCore
 import SwiftUI
 
-struct CollectionDetailView: View {
+struct ListDetailView: View {
     @Bindable var model: AppModel
-    let collectionId: UUID
+    let listId: UUID
 
-    @State private var collection: IdentifiedPayload<CollectionPayload>?
-    @State private var allCollections: [IdentifiedPayload<CollectionPayload>] = []
-    @State private var childCollections: [IdentifiedPayload<CollectionPayload>] = []
+    @State private var collection: IdentifiedPayload<ListPayload>?
     @State private var notes: [IdentifiedPayload<NotePayload>] = []
-    @State private var resources: [IdentifiedPayload<ResourcePayload>] = []
+    @State private var resources: [IdentifiedPayload<SourcePayload>] = []
     @State private var showAddItem = false
-    @State private var showChildCollection = false
     @State private var showEditList = false
     @State private var pendingUnlinkNote: IdentifiedPayload<NotePayload>?
     @State private var errorMessage: String?
 
     var body: some View {
         List {
-            if !childCollections.isEmpty {
-                Section("Nested Lists") {
-                    ForEach(childCollections, id: \.id) { child in
-                        NavigationLink {
-                            CollectionDetailView(model: model, collectionId: child.id)
-                        } label: {
-                            Label(child.payload.name, systemImage: "folder")
-                        }
-                    }
-                }
-            }
-
             Section {
                 if notes.isEmpty { Text("No notes linked").foregroundStyle(.secondary) }
                 ForEach(notes, id: \.id) { note in
@@ -63,11 +48,11 @@ struct CollectionDetailView: View {
                 Text("A List groups reusable material. Linking a note does not move or duplicate it.")
             }
 
-            Section("Resources") {
-                if resources.isEmpty { Text("No resources linked").foregroundStyle(.secondary) }
+            Section("Sources") {
+                if resources.isEmpty { Text("No Sources linked").foregroundStyle(.secondary) }
                 ForEach(resources, id: \.id) { resource in
                     NavigationLink(resource.payload.title) {
-                        ResourceDetailView(model: model, resourceId: resource.id)
+                        SourceDetailView(model: model, sourceId: resource.id)
                     }
                 }
             }
@@ -78,26 +63,16 @@ struct CollectionDetailView: View {
                 Button("Edit List", systemImage: "slider.horizontal.3") { showEditList = true }
                 Button("Link existing item", systemImage: "link.badge.plus") { showAddItem = true }
                     .disabled(collection?.payload.archivedAt != nil)
-                Button("Nested List", systemImage: "folder.badge.plus") { showChildCollection = true }
-                    .disabled(collection?.payload.archivedAt != nil)
             } label: { Label("Add", systemImage: "plus") }
         }
         .sheet(isPresented: $showAddItem) {
-            AddCollectionItemView(model: model, collectionId: collectionId) { Task { await load() } }
-        }
-        .sheet(isPresented: $showChildCollection) {
-            NewCollectionView(
-                model: model,
-                collections: allCollections,
-                fixedParentId: collectionId
-            ) { Task { await load() } }
+            AddListItemView(model: model, listId: listId) { Task { await load() } }
         }
         .sheet(isPresented: $showEditList) {
             if let collection {
                 EditListView(
                     model: model,
-                    list: collection,
-                    allLists: allCollections
+                    list: collection
                 ) {
                     showEditList = false
                     Task { await load() }
@@ -132,21 +107,18 @@ struct CollectionDetailView: View {
         guard let store = model.store else { return }
         do {
             let trashedIds = try await store.trashedTargetIds()
-            collection = try await store.payload(CollectionPayload.self, id: collectionId)
-            allCollections = try await store.list(CollectionPayload.self)
-                .filter { !trashedIds.contains($0.id) }
-            childCollections = allCollections.filter { $0.payload.parentCollectionId == collectionId }
+            collection = try await store.payload(ListPayload.self, id: listId)
             let links = try await store.list(
                 RelationPayload.self,
-                parentId: collectionId,
-                entityTypeOverride: .collectionItem
+                parentId: listId,
+                entityTypeOverride: .listItem
             )
             var loadedNotes: [IdentifiedPayload<NotePayload>] = []
-            var loadedResources: [IdentifiedPayload<ResourcePayload>] = []
-            for link in links where link.payload.leftId == collectionId {
+            var loadedResources: [IdentifiedPayload<SourcePayload>] = []
+            for link in links where link.payload.leftId == listId {
                 if let note = try? await store.payload(NotePayload.self, id: link.payload.rightId) {
                     loadedNotes.append(note)
-                } else if let resource = try? await store.payload(ResourcePayload.self, id: link.payload.rightId) {
+                } else if let resource = try? await store.payload(SourcePayload.self, id: link.payload.rightId) {
                     loadedResources.append(resource)
                 }
             }
@@ -160,7 +132,7 @@ struct CollectionDetailView: View {
     private func unlinkNote(_ noteId: UUID) async {
         guard let store = model.store else { return }
         do {
-            try await store.unlinkNote(noteId, fromCollection: collectionId)
+            try await store.unlinkNote(noteId, fromList: listId)
             model.noteLocalMutation()
             await load()
         } catch { errorMessage = error.localizedDescription }
@@ -169,26 +141,21 @@ struct CollectionDetailView: View {
 
 private struct EditListView: View {
     @Bindable var model: AppModel
-    let list: IdentifiedPayload<CollectionPayload>
-    let allLists: [IdentifiedPayload<CollectionPayload>]
+    let list: IdentifiedPayload<ListPayload>
     let onSaved: () -> Void
     @State private var name: String
-    @State private var parentId: UUID?
     @State private var archived: Bool
     @State private var errorMessage: String?
 
     init(
         model: AppModel,
-        list: IdentifiedPayload<CollectionPayload>,
-        allLists: [IdentifiedPayload<CollectionPayload>],
+        list: IdentifiedPayload<ListPayload>,
         onSaved: @escaping () -> Void
     ) {
         self.model = model
         self.list = list
-        self.allLists = allLists
         self.onSaved = onSaved
         _name = State(initialValue: list.payload.name)
-        _parentId = State(initialValue: list.payload.parentCollectionId)
         _archived = State(initialValue: list.payload.archivedAt != nil)
     }
 
@@ -196,12 +163,6 @@ private struct EditListView: View {
         NavigationStack {
             Form {
                 TextField("List name", text: $name)
-                Picker("Inside", selection: $parentId) {
-                    Text("Top level").tag(UUID?.none)
-                    ForEach(allLists.filter { $0.id != list.id && $0.payload.archivedAt == nil }, id: \.id) {
-                        Text($0.payload.name).tag(Optional($0.id))
-                    }
-                }
                 Toggle("Archived", isOn: $archived)
                 Text("Archiving a List preserves every linked note and Source.")
                     .font(.caption).foregroundStyle(.secondary)
@@ -224,7 +185,6 @@ private struct EditListView: View {
             try await store.updateList(
                 id: list.id,
                 name: name,
-                parentListId: parentId,
                 archived: archived
             )
             model.noteLocalMutation()
@@ -233,21 +193,21 @@ private struct EditListView: View {
     }
 }
 
-private struct AddCollectionItemView: View {
+private struct AddListItemView: View {
     private enum Kind: String, CaseIterable, Identifiable {
         case note = "Note"
-        case resource = "Resource"
+        case resource = "Source"
         var id: Self { self }
     }
 
     @Bindable var model: AppModel
     @Environment(\.dismiss) private var dismiss
-    let collectionId: UUID
+    let listId: UUID
     let onAdded: () -> Void
 
     @State private var kind = Kind.note
     @State private var notes: [IdentifiedPayload<NotePayload>] = []
-    @State private var resources: [IdentifiedPayload<ResourcePayload>] = []
+    @State private var resources: [IdentifiedPayload<SourcePayload>] = []
     @State private var selection: UUID?
     @State private var errorMessage: String?
 
@@ -268,7 +228,7 @@ private struct AddCollectionItemView: View {
                 }
                 if let errorMessage { Text(errorMessage).foregroundStyle(.red) }
             }
-            .navigationTitle("Link to collection")
+            .navigationTitle("Link to List")
             .onChange(of: kind) { _, _ in selection = nil }
             .task { await load() }
             .toolbar {
@@ -284,11 +244,11 @@ private struct AddCollectionItemView: View {
         guard let store = model.store else { return }
         do {
             async let loadedNotes = store.list(NotePayload.self)
-            async let loadedResources = store.list(ResourcePayload.self)
+            async let loadedResources = store.list(SourcePayload.self)
             async let loadedLinks = store.list(
                 RelationPayload.self,
-                parentId: collectionId,
-                entityTypeOverride: .collectionItem
+                parentId: listId,
+                entityTypeOverride: .listItem
             )
             let (allNotes, allResources, links) = try await (
                 loadedNotes,
@@ -305,18 +265,18 @@ private struct AddCollectionItemView: View {
         guard let store = model.store, let selection else { return }
         do {
             if kind == .note {
-                _ = try await store.linkNote(selection, toCollection: collectionId)
+                _ = try await store.linkNote(selection, toList: listId)
             } else {
                 let relation = RelationPayload(
-                    kind: .collectionItem,
-                    leftId: collectionId,
+                    kind: .listItem,
+                    leftId: listId,
                     rightId: selection
                 )
                 _ = try await store.save(
                     payload: relation,
-                    parentId: collectionId,
-                    relationIds: [collectionId, selection],
-                    entityTypeOverride: .collectionItem
+                    parentId: listId,
+                    relationIds: [listId, selection],
+                    entityTypeOverride: .listItem
                 )
             }
             model.noteLocalMutation()

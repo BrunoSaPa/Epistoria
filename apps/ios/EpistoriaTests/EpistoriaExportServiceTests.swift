@@ -134,9 +134,11 @@ final class EpistoriaExportServiceTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: fixture.root) }
 
         let noteId = try await fixture.store.createNote(
-            title: "A durable thought",
-            canvas: NoteCanvasConfiguration(pageCount: 2)
+            title: "A durable thought"
         )
+        let initialPages = try await fixture.store.ensureNotePages(noteId: noteId)
+        let firstPageId = try XCTUnwrap(initialPages.first?.id)
+        let secondPageId = try await fixture.store.insertNotePage(noteId: noteId, after: firstPageId)
         let areaId = try await fixture.store.createArea(name: "Mathematics")
         let topicId = try await fixture.store.createTopic(name: "Algebra", primaryAreaId: areaId)
         _ = try await fixture.store.createFlashcard(
@@ -184,6 +186,7 @@ final class EpistoriaExportServiceTests: XCTestCase {
         let richText = Data("{\\rtf1 Portable rich text}".utf8)
         richBlock.drawingData = noteDrawing
         richBlock.richTextRtf = richText
+        richBlock.pageId = secondPageId
         let richBlockId = try await fixture.store.save(
             payload: richBlock,
             parentId: noteId,
@@ -204,7 +207,7 @@ final class EpistoriaExportServiceTests: XCTestCase {
             assetId: importedImage.assetId,
             filename: importedImage.filename,
             placement: NoteCanvasPlacement(x: 40, y: 80, width: 240, height: 180, zIndex: 2),
-            pageIndex: 1
+            pageId: secondPageId
         )
         let replacementPNG = UIGraphicsImageRenderer(size: CGSize(width: 2, height: 1)).pngData {
             UIColor.black.setFill()
@@ -284,7 +287,7 @@ final class EpistoriaExportServiceTests: XCTestCase {
         )
 
         var annotation = AnnotationPayload(
-            resourceId: imported.resourceId,
+            sourceId: imported.sourceId,
             annotationType: .drawing,
             pageNumber: 1,
             comment: "Margin idea"
@@ -292,7 +295,7 @@ final class EpistoriaExportServiceTests: XCTestCase {
         let annotationDrawing = Data([0x41, 0x4e, 0x4e, 0x4f, 0x54])
         annotation.drawingData = annotationDrawing
         let importedSource = try await fixture.store.payload(
-            SourcePayload.self, id: imported.resourceId)
+            SourcePayload.self, id: imported.sourceId)
         let annotationResult = try await fixture.store.createAnnotationEvidence(
             annotation: annotation,
             sourceVersionId: try XCTUnwrap(importedSource.payload.currentVersionId)
@@ -337,28 +340,28 @@ final class EpistoriaExportServiceTests: XCTestCase {
         XCTAssertEqual(
             try Data(
                 contentsOf: package.appendingPathComponent(
-                    "resources/originals/\(imported.assetId.uuidString.lowercased()).pdf"
+                    "sources/originals/\(imported.assetId.uuidString.lowercased()).pdf"
                 )),
             pdf
         )
         XCTAssertEqual(
             try Data(
                 contentsOf: package.appendingPathComponent(
-                    "resources/readable/\(importedCSV.resourceId.uuidString.lowercased()).csv"
+                    "sources/readable/\(importedCSV.sourceId.uuidString.lowercased()).csv"
                 )),
             csv
         )
         XCTAssertEqual(
             try Data(
                 contentsOf: package.appendingPathComponent(
-                    "resources/originals/\(importedHTML.assetId.uuidString.lowercased()).html"
+                    "sources/originals/\(importedHTML.assetId.uuidString.lowercased()).html"
                 )),
             webHTML
         )
         XCTAssertEqual(
             try String(
                 contentsOf: package.appendingPathComponent(
-                    "resources/readable/\(webSourceId.uuidString.lowercased()).txt"
+                    "sources/readable/\(webSourceId.uuidString.lowercased()).txt"
                 ),
                 encoding: .utf8
             ),
@@ -367,14 +370,14 @@ final class EpistoriaExportServiceTests: XCTestCase {
         XCTAssertEqual(
             try Data(
                 contentsOf: package.appendingPathComponent(
-                    "resources/originals/\(importedGoogleDocument.assetId.uuidString.lowercased()).docx"
+                    "sources/originals/\(importedGoogleDocument.assetId.uuidString.lowercased()).docx"
                 )),
             googleDocument
         )
         XCTAssertEqual(
             try String(
                 contentsOf: package.appendingPathComponent(
-                    "resources/readable/\(googleSourceId.uuidString.lowercased()).txt"
+                    "sources/readable/\(googleSourceId.uuidString.lowercased()).txt"
                 ),
                 encoding: .utf8
             ),
@@ -383,7 +386,7 @@ final class EpistoriaExportServiceTests: XCTestCase {
         XCTAssertEqual(
             try String(
                 contentsOf: package.appendingPathComponent(
-                    "resources/readable/\(youtubeSourceId.uuidString.lowercased()).txt"
+                    "sources/readable/\(youtubeSourceId.uuidString.lowercased()).txt"
                 ),
                 encoding: .utf8
             ),
@@ -442,9 +445,10 @@ final class EpistoriaExportServiceTests: XCTestCase {
             ),
             encoding: .utf8
         )
-        XCTAssertTrue(noteRecord.contains("\"pageCount\" : 2"))
-        XCTAssertTrue(noteRecord.contains("\"canvasPageIndex\" : 1"))
-        XCTAssertTrue(noteRecord.contains("\"schemaVersion\" : \"note-block/v7\""))
+        XCTAssertFalse(noteRecord.contains("\"pageCount\""))
+        XCTAssertFalse(noteRecord.contains("\"canvasPageIndex\""))
+        XCTAssertTrue(noteRecord.contains("\"schemaVersion\" : \"note-block/v8\""))
+        XCTAssertTrue(noteRecord.lowercased().contains(secondPageId.uuidString.lowercased()))
         XCTAssertTrue(noteRecord.contains("\"imageConfiguration\""))
         let metadata = try String(
             contentsOf: package.appendingPathComponent("metadata.json"), encoding: .utf8)
@@ -454,7 +458,7 @@ final class EpistoriaExportServiceTests: XCTestCase {
             contentsOf: package.appendingPathComponent("knowledge.json"), encoding: .utf8)
         let learning = try String(
             contentsOf: package.appendingPathComponent("learning.json"), encoding: .utf8)
-        XCTAssertTrue(metadata.contains("epistoria-export/7"))
+        XCTAssertTrue(metadata.contains("epistoria-export/8"))
         let entities = try String(
             contentsOf: package.appendingPathComponent("entities.json"),
             encoding: .utf8
@@ -603,19 +607,19 @@ final class EpistoriaExportServiceTests: XCTestCase {
         let topicId = try await source.store.createTopic(
             name: "Factorization", primaryAreaId: areaId)
         let noteId = try await source.store.createNote(
-            title: "Difference of squares", courseId: topicId)
+            title: "Difference of squares", topicId: topicId)
         _ = try await source.store.appendTextBlock(noteId: noteId, text: "a² - b²")
 
         let firstPDF = Data("%PDF-1.4\nfirst immutable version\n%%EOF\n".utf8)
         let secondPDF = Data("%PDF-1.4\nsecond immutable version\n%%EOF\n".utf8)
         let pdfURL = source.root.appendingPathComponent("factorization.pdf")
         try firstPDF.write(to: pdfURL, options: .atomic)
-        let imported = try await source.assetManager.importPDF(from: pdfURL, courseId: topicId)
+        let imported = try await source.assetManager.importPDF(from: pdfURL, topicId: topicId)
         try secondPDF.write(to: pdfURL, options: .atomic)
-        _ = try await source.assetManager.refreshSource(id: imported.resourceId, from: pdfURL)
+        _ = try await source.assetManager.refreshSource(id: imported.sourceId, from: pdfURL)
         let sourceVersions = try await source.store.list(
             SourceVersionPayload.self,
-            parentId: imported.resourceId
+            parentId: imported.sourceId
         )
         let assetIds = try sourceVersions.map { try XCTUnwrap($0.payload.originalAssetId) }
         XCTAssertEqual(assetIds.count, 2)
@@ -668,7 +672,7 @@ final class EpistoriaExportServiceTests: XCTestCase {
         let restoredTopic = try await targetStore.payload(TopicPayload.self, id: topicId)
         let restoredVersions = try await targetStore.list(
             SourceVersionPayload.self,
-            parentId: imported.resourceId
+            parentId: imported.sourceId
         )
         XCTAssertEqual(restoredNote.payload.title, "Difference of squares")
         XCTAssertEqual(restoredTopic.payload.name, "Factorization")
@@ -779,7 +783,7 @@ final class EpistoriaExportServiceTests: XCTestCase {
             includingDerivedAI: false
         )
         try Data("{}\n".utf8).write(
-            to: package.appendingPathComponent("collections.json"),
+            to: package.appendingPathComponent("lists.json"),
             options: .atomic
         )
         await assertValidationFails(fixture.service, directory: package)

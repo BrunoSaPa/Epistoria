@@ -81,5 +81,5 @@ def test_authenticated_metadata_cannot_be_changed() -> None:
             deterministic_envelope(),
             account_key=ACCOUNT_KEY,
             account_id=ACCOUNT_ID,
-            aad=entity_aad(ACCOUNT_ID, "RESOURCE", ENTITY_ID, 1),
+            aad=entity_aad(ACCOUNT_ID, "SOURCE", ENTITY_ID, 1),
         )

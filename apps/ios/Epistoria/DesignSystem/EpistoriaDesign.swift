@@ -16,7 +16,7 @@ enum EpistoriaSourceImportTypes {
     }()
 }
 
-extension ResourceKind {
+extension SourceKind {
     var epistoriaSymbol: String {
         switch self {
         case .audio, .lecture: "waveform"

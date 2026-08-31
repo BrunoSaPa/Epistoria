@@ -53,7 +53,7 @@ enum EpistoriaImportError: Error, LocalizedError {
         case .requiresEmptyNotebook:
             "Import requires an empty notebook. Existing data was not changed."
         case .unsupportedFormat:
-            "This export cannot be restored. Use an epistoria-export/5, epistoria-export/6, or epistoria-export/7 archive."
+            "This export cannot be restored. Use an epistoria-export/8 archive."
         case let .malformedManifest(field):
             "The export manifest is invalid at \(field). Existing data was not changed."
         case let .missingAsset(path):
@@ -129,8 +129,7 @@ actor EpistoriaPortableImportService {
                 requireMatchingAccount: false
             )
             let metadata = try readMetadata(in: package)
-            guard ["epistoria-export/5", "epistoria-export/6", "epistoria-export/7"]
-                .contains(metadata.formatVersion)
+            guard metadata.formatVersion == "epistoria-export/8"
             else {
                 throw EpistoriaImportError.unsupportedFormat
             }
@@ -149,8 +148,8 @@ actor EpistoriaPortableImportService {
                 recordCount: prepared.writes.count,
                 assetCount: prepared.assets.count,
                 noteCount: prepared.counts[.note, default: 0],
-                sourceCount: prepared.counts[.resource, default: 0],
-                topicCount: prepared.counts[.course, default: 0],
+                sourceCount: prepared.counts[.source, default: 0],
+                topicCount: prepared.counts[.topic, default: 0],
                 flashcardCount: prepared.counts[.flashcard, default: 0],
                 testCount: prepared.counts[.practiceTest, default: 0],
                 fileCount: validation.fileCount,

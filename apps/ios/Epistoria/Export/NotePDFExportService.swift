@@ -93,17 +93,23 @@ final class NotePDFExportService {
         let stablePages = try await store.ensureNotePages(noteId: noteId)
         async let loadedNote = store.payload(NotePayload.self, id: noteId)
         async let loadedBlocks = store.list(NoteBlockPayload.self, parentId: noteId)
-        async let loadedEvidence = store.list(EvidencePayload.self)
-        async let loadedSources = store.list(SourcePayload.self)
-        async let loadedVersions = store.list(SourceVersionPayload.self)
         async let loadedOCR = store.ocrArtifacts(parentId: noteId)
-        let (note, allBlocks, evidence, sources, versions, ocrArtifacts) = try await (
-            loadedNote, loadedBlocks, loadedEvidence, loadedSources, loadedVersions, loadedOCR
-        )
+        let (note, allBlocks, ocrArtifacts) = try await (loadedNote, loadedBlocks, loadedOCR)
         try Task.checkCancellation()
         let blocks = allBlocks
             .filter { !$0.payload.tombstone }
             .sorted { $0.payload.orderKey < $1.payload.orderKey }
+        let evidenceIds = Array(Set(blocks.compactMap(\.payload.evidenceId)))
+        let evidence = try await store.payloads(EvidencePayload.self, ids: evidenceIds)
+        async let loadedSources = store.payloads(
+            SourcePayload.self,
+            ids: Array(Set(evidence.map(\.payload.sourceId)))
+        )
+        async let loadedVersions = store.payloads(
+            SourceVersionPayload.self,
+            ids: Array(Set(evidence.map(\.payload.sourceVersionId)))
+        )
+        let (sources, versions) = try await (loadedSources, loadedVersions)
         let configuration = note.payload.canvas ?? NoteCanvasConfiguration()
         let allPlans = try pagePlans(
             pages: stablePages,
@@ -437,13 +443,14 @@ final class NotePDFExportService {
                 continue
             }
             for resolved in regions where !resolved.content.isEmpty {
-                let targetPageIndex = blocks.first(where: { $0.id == artifact.payload.targetId })
-                    .flatMap { block in
-                        block.payload.canvasPageId.flatMap { pageId in
-                            pages.firstIndex(where: { $0.id == pageId })
-                        } ?? block.payload.canvasPageIndex
-                    }
-                    ?? max((artifact.payload.pageNumber ?? 1) - 1, 0)
+                let targetBlock = blocks.first { $0.id == artifact.payload.targetId }
+                let targetPageIndex: Int
+                if let pageId = targetBlock?.payload.pageId,
+                   let index = pages.firstIndex(where: { $0.id == pageId }) {
+                    targetPageIndex = index
+                } else {
+                    targetPageIndex = max((artifact.payload.pageNumber ?? 1) - 1, 0)
+                }
                 for rectangle in resolved.region.rectangles {
                     layers.append(OCRTextLayer(
                         pageIndex: max(targetPageIndex, 0),
@@ -473,7 +480,11 @@ final class NotePDFExportService {
                 width: max(layer.rectangle.width * pageSize.width, 1),
                 height: max(layer.rectangle.height * pageSize.height, 1)
             )
-            let fontSize = max(5, min(rect.height * 0.75, 28))
+            // Fit the complete recognized region on one line. A height-only size can clip long
+            // OCR strings, which also removes the clipped suffix from PDF text extraction.
+            let estimatedGlyphWidth = max(CGFloat(layer.content.count), 1) * 0.55
+            let widthConstrainedSize = rect.width / estimatedGlyphWidth
+            let fontSize = max(5, min(rect.height * 0.75, widthConstrainedSize, 28))
             NSAttributedString(
                 string: layer.content,
                 attributes: [
@@ -682,10 +693,10 @@ final class NotePDFExportService {
     }
 
     private func belongsToPage(_ payload: NoteBlockPayload, plan: PagePlan) -> Bool {
-        if let pageId = plan.pageId, let blockPageId = payload.canvasPageId {
-            return pageId == blockPageId
+        if let pageId = plan.pageId {
+            return payload.pageId == pageId
         }
-        return max(payload.canvasPageIndex ?? 0, 0) == plan.pageIndex
+        return payload.pageId == nil && plan.pageIndex == 0
     }
 
     private func legacyPlacement(

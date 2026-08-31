@@ -1,16 +1,18 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://epistoria.local/contracts/entity-content-v1.schema.json",
-  "title": "Epistoria encrypted entity content v1",
+  "$id": "https://epistoria.local/contracts/entity-content-v2.schema.json",
+  "title": "Epistoria encrypted entity content v2",
+  "description": "Canonical generation-2 notebook payloads. Legacy Course, Collection, Resource, University, and page-index payloads are not accepted.",
   "oneOf": [
-    { "$ref": "#/$defs/collection" },
-    { "$ref": "#/$defs/institution" },
-    { "$ref": "#/$defs/academicTerm" },
-    { "$ref": "#/$defs/course" },
+    { "$ref": "#/$defs/area" },
+    { "$ref": "#/$defs/topicArea" },
+    { "$ref": "#/$defs/list" },
+    { "$ref": "#/$defs/topic" },
     { "$ref": "#/$defs/studySession" },
     { "$ref": "#/$defs/note" },
+    { "$ref": "#/$defs/notePage" },
     { "$ref": "#/$defs/noteBlock" },
-    { "$ref": "#/$defs/resource" },
+    { "$ref": "#/$defs/source" },
     { "$ref": "#/$defs/asset" },
     { "$ref": "#/$defs/annotation" },
     { "$ref": "#/$defs/relation" }
@@ -18,6 +20,8 @@
   "$defs": {
     "uuid": { "type": "string", "format": "uuid" },
     "dateTime": { "type": "string", "format": "date-time" },
+    "nullableUuid": { "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }] },
+    "nullableDateTime": { "anyOf": [{ "$ref": "#/$defs/dateTime" }, { "type": "null" }] },
     "base": {
       "type": "object",
       "required": ["schemaVersion", "createdAt", "updatedAt"],
@@ -27,7 +31,7 @@
         "updatedAt": { "$ref": "#/$defs/dateTime" }
       }
     },
-    "collection": {
+    "area": {
       "allOf": [
         { "$ref": "#/$defs/base" },
         {
@@ -35,16 +39,35 @@
           "additionalProperties": false,
           "required": ["schemaVersion", "name", "createdAt", "updatedAt"],
           "properties": {
-            "schemaVersion": { "const": "collection/v1" },
+            "schemaVersion": { "const": "area/v1" },
             "name": { "type": "string", "minLength": 1, "maxLength": 200 },
-            "parentCollectionId": { "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }] },
+            "areaDescription": { "type": ["string", "null"], "maxLength": 10000 },
+            "archivedAt": { "$ref": "#/$defs/nullableDateTime" },
             "createdAt": { "$ref": "#/$defs/dateTime" },
             "updatedAt": { "$ref": "#/$defs/dateTime" }
           }
         }
       ]
     },
-    "institution": {
+    "topicArea": {
+      "allOf": [
+        { "$ref": "#/$defs/base" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["schemaVersion", "topicId", "areaId", "role", "createdAt", "updatedAt"],
+          "properties": {
+            "schemaVersion": { "const": "topic-area/v1" },
+            "topicId": { "$ref": "#/$defs/uuid" },
+            "areaId": { "$ref": "#/$defs/uuid" },
+            "role": { "enum": ["PRIMARY", "RELATED"] },
+            "createdAt": { "$ref": "#/$defs/dateTime" },
+            "updatedAt": { "$ref": "#/$defs/dateTime" }
+          }
+        }
+      ]
+    },
+    "list": {
       "allOf": [
         { "$ref": "#/$defs/base" },
         {
@@ -52,34 +75,16 @@
           "additionalProperties": false,
           "required": ["schemaVersion", "name", "createdAt", "updatedAt"],
           "properties": {
-            "schemaVersion": { "const": "institution/v1" },
+            "schemaVersion": { "const": "list/v1" },
             "name": { "type": "string", "minLength": 1, "maxLength": 200 },
+            "archivedAt": { "$ref": "#/$defs/nullableDateTime" },
             "createdAt": { "$ref": "#/$defs/dateTime" },
             "updatedAt": { "$ref": "#/$defs/dateTime" }
           }
         }
       ]
     },
-    "academicTerm": {
-      "allOf": [
-        { "$ref": "#/$defs/base" },
-        {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["schemaVersion", "institutionId", "name", "createdAt", "updatedAt"],
-          "properties": {
-            "schemaVersion": { "const": "academic-term/v1" },
-            "institutionId": { "$ref": "#/$defs/uuid" },
-            "name": { "type": "string", "minLength": 1, "maxLength": 200 },
-            "startDate": { "type": ["string", "null"], "format": "date" },
-            "endDate": { "type": ["string", "null"], "format": "date" },
-            "createdAt": { "$ref": "#/$defs/dateTime" },
-            "updatedAt": { "$ref": "#/$defs/dateTime" }
-          }
-        }
-      ]
-    },
-    "course": {
+    "topic": {
       "allOf": [
         { "$ref": "#/$defs/base" },
         {
@@ -87,17 +92,18 @@
           "additionalProperties": false,
           "required": ["schemaVersion", "name", "archived", "createdAt", "updatedAt"],
           "properties": {
-            "schemaVersion": { "const": "course/v1" },
-            "institutionId": { "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }] },
-            "academicTermId": { "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }] },
+            "schemaVersion": { "const": "topic/v1" },
+            "primaryAreaId": { "$ref": "#/$defs/nullableUuid" },
             "name": { "type": "string", "minLength": 1, "maxLength": 200 },
+            "institution": { "type": ["string", "null"], "maxLength": 200 },
+            "term": { "type": ["string", "null"], "maxLength": 200 },
+            "officialClassName": { "type": ["string", "null"], "maxLength": 300 },
             "code": { "type": ["string", "null"], "maxLength": 80 },
             "professor": { "type": ["string", "null"], "maxLength": 200 },
-            "courseDescription": { "type": ["string", "null"], "maxLength": 10000 },
-            "startDate": { "type": ["string", "null"], "format": "date" },
-            "endDate": { "type": ["string", "null"], "format": "date" },
+            "topicDescription": { "type": ["string", "null"], "maxLength": 10000 },
+            "startDate": { "$ref": "#/$defs/nullableDateTime" },
+            "endDate": { "$ref": "#/$defs/nullableDateTime" },
             "archived": { "type": "boolean" },
-            "colorHex": { "type": ["string", "null"], "pattern": "^#[0-9A-Fa-f]{6}$" },
             "createdAt": { "$ref": "#/$defs/dateTime" },
             "updatedAt": { "$ref": "#/$defs/dateTime" }
           }
@@ -112,14 +118,19 @@
           "additionalProperties": false,
           "required": ["schemaVersion", "title", "state", "goals", "startedAt", "createdAt", "updatedAt"],
           "properties": {
-            "schemaVersion": { "const": "study-session/v1" },
+            "schemaVersion": { "const": "study-session/v2" },
             "title": { "type": "string", "minLength": 1, "maxLength": 300 },
-            "courseId": { "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }] },
-            "primaryCollectionId": { "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }] },
-            "state": { "enum": ["ACTIVE", "ENDED"] },
+            "topicId": { "$ref": "#/$defs/nullableUuid" },
+            "primaryListId": { "$ref": "#/$defs/nullableUuid" },
+            "state": { "enum": ["PLANNED", "ACTIVE", "PAUSED", "ENDED", "ABANDONED"] },
             "goals": { "type": "array", "maxItems": 20, "items": { "type": "string", "maxLength": 500 } },
+            "objective": { "type": ["string", "null"], "maxLength": 5000 },
+            "startingNotes": { "type": ["string", "null"], "maxLength": 10000 },
+            "plannedAt": { "$ref": "#/$defs/nullableDateTime" },
+            "pausedAt": { "$ref": "#/$defs/nullableDateTime" },
+            "abandonedAt": { "$ref": "#/$defs/nullableDateTime" },
             "startedAt": { "$ref": "#/$defs/dateTime" },
-            "endedAt": { "anyOf": [{ "$ref": "#/$defs/dateTime" }, { "type": "null" }] },
+            "endedAt": { "$ref": "#/$defs/nullableDateTime" },
             "createdAt": { "$ref": "#/$defs/dateTime" },
             "updatedAt": { "$ref": "#/$defs/dateTime" }
           }
@@ -134,11 +145,34 @@
           "additionalProperties": false,
           "required": ["schemaVersion", "title", "createdAt", "updatedAt"],
           "properties": {
-            "schemaVersion": { "const": "note/v1" },
+            "schemaVersion": { "const": "note/v5" },
             "title": { "type": "string", "minLength": 1, "maxLength": 300 },
-            "courseId": { "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }] },
-            "studySessionId": { "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }] },
-            "archivedAt": { "anyOf": [{ "$ref": "#/$defs/dateTime" }, { "type": "null" }] },
+            "topicId": { "$ref": "#/$defs/nullableUuid" },
+            "studySessionId": { "$ref": "#/$defs/nullableUuid" },
+            "archivedAt": { "$ref": "#/$defs/nullableDateTime" },
+            "pinnedAt": { "$ref": "#/$defs/nullableDateTime" },
+            "canvas": { "type": ["object", "null"] },
+            "createdAt": { "$ref": "#/$defs/dateTime" },
+            "updatedAt": { "$ref": "#/$defs/dateTime" }
+          }
+        }
+      ]
+    },
+    "notePage": {
+      "allOf": [
+        { "$ref": "#/$defs/base" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["schemaVersion", "noteId", "orderKey", "configuration", "trashed", "createdAt", "updatedAt"],
+          "properties": {
+            "schemaVersion": { "const": "note-page/v1" },
+            "noteId": { "$ref": "#/$defs/uuid" },
+            "orderKey": { "type": "string", "minLength": 1, "maxLength": 80 },
+            "configuration": { "type": "object" },
+            "trashed": { "type": "boolean" },
+            "previousOrderKey": { "type": ["string", "null"], "maxLength": 80 },
+            "thumbnailRevision": { "type": ["integer", "null"], "minimum": 0 },
             "createdAt": { "$ref": "#/$defs/dateTime" },
             "updatedAt": { "$ref": "#/$defs/dateTime" }
           }
@@ -153,15 +187,21 @@
           "additionalProperties": false,
           "required": ["schemaVersion", "noteId", "blockType", "orderKey", "plainText", "tombstone", "createdAt", "updatedAt"],
           "properties": {
-            "schemaVersion": { "const": "note-block/v1" },
+            "schemaVersion": { "const": "note-block/v8" },
             "noteId": { "$ref": "#/$defs/uuid" },
-            "blockType": { "enum": ["TEXT", "HANDWRITING", "IMAGE", "FILE", "PDF_REFERENCE", "VIDEO_REFERENCE", "EQUATION", "CODE", "CALLOUT"] },
+            "blockType": { "enum": ["TEXT", "HANDWRITING", "IMAGE", "FILE", "PDF_REFERENCE", "VIDEO_REFERENCE", "EQUATION", "CODE", "CALLOUT", "SHAPE"] },
             "orderKey": { "type": "string", "minLength": 1, "maxLength": 80 },
             "plainText": { "type": "string", "maxLength": 500000 },
             "richTextRtf": { "type": ["string", "null"], "contentEncoding": "base64" },
             "drawingData": { "type": ["string", "null"], "contentEncoding": "base64" },
-            "assetId": { "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }] },
+            "assetId": { "$ref": "#/$defs/nullableUuid" },
+            "evidenceId": { "$ref": "#/$defs/nullableUuid" },
             "transcription": { "type": ["string", "null"], "maxLength": 500000 },
+            "canvasPlacement": { "type": ["object", "null"] },
+            "canvasRole": { "type": ["string", "null"] },
+            "canvasShape": { "type": ["object", "null"] },
+            "imageConfiguration": { "type": ["object", "null"] },
+            "pageId": { "$ref": "#/$defs/nullableUuid" },
             "tombstone": { "type": "boolean" },
             "createdAt": { "$ref": "#/$defs/dateTime" },
             "updatedAt": { "$ref": "#/$defs/dateTime" }
@@ -169,21 +209,28 @@
         }
       ]
     },
-    "resource": {
+    "source": {
       "allOf": [
         { "$ref": "#/$defs/base" },
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["schemaVersion", "resourceType", "title", "authors", "importedAt", "createdAt", "updatedAt"],
+          "required": ["schemaVersion", "sourceType", "title", "authors", "identifiers", "relatedTopicIds", "listIds", "importState", "locallyAvailable", "importedAt", "createdAt", "updatedAt"],
           "properties": {
-            "schemaVersion": { "const": "resource/v1" },
-            "resourceType": { "enum": ["BOOK", "PDF", "PAPER", "VIDEO", "WEBSITE", "LECTURE", "IMAGE", "DOCUMENT", "COURSE_MATERIAL", "OTHER"] },
+            "schemaVersion": { "const": "source/v1" },
+            "sourceType": { "enum": ["BOOK", "PDF", "PAPER", "VIDEO", "WEBSITE", "LECTURE", "IMAGE", "DOCUMENT", "TOPIC_MATERIAL", "OTHER", "PASTED_TEXT", "MARKDOWN", "HTML", "EPUB", "DOCX", "ODT", "PPTX", "ODP", "CSV", "XLSX", "AUDIO", "YOUTUBE", "GOOGLE_DOCUMENT", "GOOGLE_SLIDES", "GOOGLE_SHEET"] },
             "title": { "type": "string", "minLength": 1, "maxLength": 500 },
             "authors": { "type": "array", "maxItems": 100, "items": { "type": "string", "maxLength": 200 } },
-            "url": { "type": ["string", "null"], "format": "uri" },
-            "externalIdentifier": { "type": ["string", "null"], "maxLength": 300 },
-            "originalAssetId": { "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }] },
+            "canonicalURL": { "type": ["string", "null"], "format": "uri" },
+            "identifiers": { "type": "array", "maxItems": 100, "items": { "type": "string", "maxLength": 300 } },
+            "originalAssetId": { "$ref": "#/$defs/nullableUuid" },
+            "currentVersionId": { "$ref": "#/$defs/nullableUuid" },
+            "primaryTopicId": { "$ref": "#/$defs/nullableUuid" },
+            "relatedTopicIds": { "type": "array", "maxItems": 64, "uniqueItems": true, "items": { "$ref": "#/$defs/uuid" } },
+            "listIds": { "type": "array", "maxItems": 64, "uniqueItems": true, "items": { "$ref": "#/$defs/uuid" } },
+            "importState": { "enum": ["PENDING", "READY", "FAILED"] },
+            "locallyAvailable": { "type": "boolean" },
+            "archivedAt": { "$ref": "#/$defs/nullableDateTime" },
             "importedAt": { "$ref": "#/$defs/dateTime" },
             "createdAt": { "$ref": "#/$defs/dateTime" },
             "updatedAt": { "$ref": "#/$defs/dateTime" }
@@ -218,29 +265,17 @@
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["schemaVersion", "resourceId", "annotationType", "comment", "rectangles", "createdAt", "updatedAt"],
+          "required": ["schemaVersion", "sourceId", "annotationType", "comment", "rectangles", "createdAt", "updatedAt"],
           "properties": {
             "schemaVersion": { "const": "annotation/v1" },
-            "resourceId": { "$ref": "#/$defs/uuid" },
-            "studySessionId": { "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }] },
-            "noteId": { "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }] },
+            "sourceId": { "$ref": "#/$defs/uuid" },
+            "studySessionId": { "$ref": "#/$defs/nullableUuid" },
+            "noteId": { "$ref": "#/$defs/nullableUuid" },
             "annotationType": { "enum": ["HIGHLIGHT", "COMMENT", "QUESTION", "IDEA", "IMPORTANT", "DISAGREEMENT", "SUMMARY", "BOOKMARK", "DRAWING"] },
             "pageNumber": { "type": ["integer", "null"], "minimum": 1 },
             "selectedText": { "type": ["string", "null"], "maxLength": 100000 },
             "comment": { "type": "string", "maxLength": 100000 },
-            "rectangles": {
-              "type": "array",
-              "maxItems": 1000,
-              "items": {
-                "type": "object",
-                "additionalProperties": false,
-                "required": ["x", "y", "width", "height"],
-                "properties": {
-                  "x": { "type": "number" }, "y": { "type": "number" },
-                  "width": { "type": "number", "minimum": 0 }, "height": { "type": "number", "minimum": 0 }
-                }
-              }
-            },
+            "rectangles": { "type": "array", "maxItems": 1000, "items": { "type": "object" } },
             "drawingData": { "type": ["string", "null"], "contentEncoding": "base64" },
             "createdAt": { "$ref": "#/$defs/dateTime" },
             "updatedAt": { "$ref": "#/$defs/dateTime" }
@@ -256,7 +291,7 @@
           "additionalProperties": false,
           "required": ["schemaVersion", "leftId", "rightId", "createdAt", "updatedAt"],
           "properties": {
-            "schemaVersion": { "enum": ["collection-item/v1", "session-note/v1", "session-resource/v1"] },
+            "schemaVersion": { "enum": ["list-item/v1", "session-note/v1", "session-source/v1"] },
             "leftId": { "$ref": "#/$defs/uuid" },
             "rightId": { "$ref": "#/$defs/uuid" },
             "createdAt": { "$ref": "#/$defs/dateTime" },
@@ -267,4 +302,3 @@
     }
   }
 }
-

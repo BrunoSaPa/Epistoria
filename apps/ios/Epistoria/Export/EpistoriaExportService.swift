@@ -8,6 +8,7 @@ struct EpistoriaExportResult: Identifiable, Sendable {
     let archiveURL: URL
     let fileCount: Int
     let byteCount: Int64
+    let sha256: String
 }
 
 struct EpistoriaExportValidation: Sendable {
@@ -51,7 +52,7 @@ actor EpistoriaExportService {
     }
 
     private struct Metadata: Codable {
-        var formatVersion = "epistoria-export/7"
+        var formatVersion = "epistoria-export/8"
         var exportedAt: Date
         var accountId: UUID
         var mode = "DECRYPTED"
@@ -62,12 +63,6 @@ actor EpistoriaExportService {
     private struct Record<Payload: Codable>: Codable {
         var id: UUID
         var payload: Payload
-    }
-
-    private struct UniversityRecords: Codable {
-        var institutions: [Record<InstitutionPayload>]
-        var academicTerms: [Record<AcademicTermPayload>]
-        var courses: [Record<CoursePayload>]
     }
 
     private struct TaxonomyRecords: Codable {
@@ -109,15 +104,15 @@ actor EpistoriaExportService {
         var learningSignals: [Record<LearningSignalPayload>]
     }
 
-    private struct CollectionRecords: Codable {
-        var collections: [Record<CollectionPayload>]
+    private struct ListRecords: Codable {
+        var lists: [Record<ListPayload>]
         var links: [Record<RelationPayload>]
     }
 
     private struct SessionRecords: Codable {
         var sessions: [Record<StudySessionPayload>]
         var noteLinks: [Record<RelationPayload>]
-        var resourceLinks: [Record<RelationPayload>]
+        var sourceLinks: [Record<RelationPayload>]
     }
 
     private struct NoteRecord: Codable {
@@ -127,9 +122,9 @@ actor EpistoriaExportService {
         var blocks: [Record<NoteBlockPayload>]
     }
 
-    private struct ResourceRecord: Codable {
+    private struct SourceRecord: Codable {
         var id: UUID
-        var resource: SourcePayload
+        var source: SourcePayload
         var originalPath: String?
         var readablePath: String?
     }
@@ -185,11 +180,16 @@ actor EpistoriaExportService {
         do {
             let producedArchive = try createArchive(from: prepared.package)
             archive = producedArchive
+            let inspection = try PortableArchiveInspector().inspect(
+                zipURL: producedArchive,
+                allowedFormats: ["epistoria-export/8"]
+            )
             try fileManager.removeItem(at: prepared.stagingRoot)
             return EpistoriaExportResult(
                 archiveURL: producedArchive,
                 fileCount: prepared.validation.fileCount,
-                byteCount: prepared.validation.byteCount
+                byteCount: prepared.validation.byteCount,
+                sha256: inspection.sha256
             )
         } catch {
             let originalError = error
@@ -284,16 +284,15 @@ actor EpistoriaExportService {
                 ),
                 to: package.appendingPathComponent("metadata.json")
             )
-            try await exportCollections(to: package)
+            try await exportLists(to: package)
             try Task.checkCancellation()
-            try await exportUniversity(to: package)
             try await exportTaxonomy(to: package)
             try Task.checkCancellation()
             try await exportSessions(to: package)
             try Task.checkCancellation()
             try await exportNotes(to: package)
             try Task.checkCancellation()
-            try await exportResources(to: package)
+            try await exportSources(to: package)
             try await exportEntityManifest(
                 to: package,
                 includingDerivedAI: includingDerivedAI
@@ -330,35 +329,18 @@ actor EpistoriaExportService {
         }
     }
 
-    private func exportCollections(to root: URL) async throws {
-        async let values = store.list(CollectionPayload.self)
+    private func exportLists(to root: URL) async throws {
+        async let values = store.list(ListPayload.self)
         async let links = store.list(
             RelationPayload.self,
-            entityTypeOverride: .collectionItem
+            entityTypeOverride: .listItem
         )
         let (resolvedValues, resolvedLinks) = try await (values, links)
-        let payload = CollectionRecords(
-            collections: resolvedValues.map { Record(id: $0.id, payload: $0.payload) },
+        let payload = ListRecords(
+            lists: resolvedValues.map { Record(id: $0.id, payload: $0.payload) },
             links: resolvedLinks.map { Record(id: $0.id, payload: $0.payload) }
         )
-        try write(payload, to: root.appendingPathComponent("collections.json"))
-    }
-
-    private func exportUniversity(to root: URL) async throws {
-        async let institutions = store.list(InstitutionPayload.self)
-        async let terms = store.list(AcademicTermPayload.self)
-        async let courses = store.list(CoursePayload.self)
-        let (resolvedInstitutions, resolvedTerms, resolvedCourses) = try await (
-            institutions,
-            terms,
-            courses
-        )
-        let payload = UniversityRecords(
-            institutions: resolvedInstitutions.map { Record(id: $0.id, payload: $0.payload) },
-            academicTerms: resolvedTerms.map { Record(id: $0.id, payload: $0.payload) },
-            courses: resolvedCourses.map { Record(id: $0.id, payload: $0.payload) }
-        )
-        try write(payload, to: root.appendingPathComponent("university.json"))
+        try write(payload, to: root.appendingPathComponent("lists.json"))
     }
 
     private func exportTaxonomy(to root: URL) async throws {
@@ -376,16 +358,16 @@ actor EpistoriaExportService {
     private func exportSessions(to root: URL) async throws {
         async let sessions = store.list(StudySessionPayload.self)
         async let noteLinks = store.list(RelationPayload.self, entityTypeOverride: .sessionNote)
-        async let resourceLinks = store.list(RelationPayload.self, entityTypeOverride: .sessionResource)
+        async let sourceLinks = store.list(RelationPayload.self, entityTypeOverride: .sessionSource)
         let (resolvedSessions, resolvedNoteLinks, resolvedResourceLinks) = try await (
             sessions,
             noteLinks,
-            resourceLinks
+            sourceLinks
         )
         let payload = SessionRecords(
             sessions: resolvedSessions.map { Record(id: $0.id, payload: $0.payload) },
             noteLinks: resolvedNoteLinks.map { Record(id: $0.id, payload: $0.payload) },
-            resourceLinks: resolvedResourceLinks.map { Record(id: $0.id, payload: $0.payload) }
+            sourceLinks: resolvedResourceLinks.map { Record(id: $0.id, payload: $0.payload) }
         )
         try write(payload, to: root.appendingPathComponent("sessions.json"))
     }
@@ -476,15 +458,15 @@ actor EpistoriaExportService {
         try write(canvasAssets, to: notesDirectory.appendingPathComponent("canvas-assets.json"))
     }
 
-    private func exportResources(to root: URL) async throws {
-        let resourcesDirectory = root.appendingPathComponent("resources", isDirectory: true)
-        let originalsDirectory = resourcesDirectory.appendingPathComponent("originals", isDirectory: true)
-        let readableDirectory = resourcesDirectory.appendingPathComponent("readable", isDirectory: true)
+    private func exportSources(to root: URL) async throws {
+        let sourcesDirectory = root.appendingPathComponent("sources", isDirectory: true)
+        let originalsDirectory = sourcesDirectory.appendingPathComponent("originals", isDirectory: true)
+        let readableDirectory = sourcesDirectory.appendingPathComponent("readable", isDirectory: true)
         try fileManager.createDirectory(at: originalsDirectory, withIntermediateDirectories: true)
         try fileManager.createDirectory(at: readableDirectory, withIntermediateDirectories: true)
-        let resources = try await store.list(SourcePayload.self)
-        var records: [ResourceRecord] = []
-        for resource in resources {
+        let sources = try await store.list(SourcePayload.self)
+        var records: [SourceRecord] = []
+        for resource in sources {
             var originalPath: String?
             var readablePath: String?
             if let assetId = resource.payload.originalAssetId {
@@ -501,7 +483,7 @@ actor EpistoriaExportService {
                     : nil
                 let extensionName = inferredExtension ?? safeOriginalExtension ?? "bin"
                 let filename = "\(assetId.uuidString.lowercased()).\(extensionName)"
-                let relativePath = "resources/originals/\(filename)"
+                let relativePath = "sources/originals/\(filename)"
                 let plaintext = try await assetManager.decryptedData(assetId: assetId)
                 if exportedAssetPaths[assetId] == nil {
                     try protectedWrite(
@@ -522,7 +504,7 @@ actor EpistoriaExportService {
                         readable,
                         to: readableDirectory.appendingPathComponent(readableFilename)
                     )
-                    readablePath = "resources/readable/\(readableFilename)"
+                    readablePath = "sources/readable/\(readableFilename)"
                 }
             } else if resource.payload.sourceType == .youtube,
                       let canonicalURL = resource.payload.canonicalURL {
@@ -534,18 +516,18 @@ actor EpistoriaExportService {
                     readable,
                     to: readableDirectory.appendingPathComponent(readableFilename)
                 )
-                readablePath = "resources/readable/\(readableFilename)"
+                readablePath = "sources/readable/\(readableFilename)"
             }
             records.append(
-                ResourceRecord(
+                SourceRecord(
                     id: resource.id,
-                    resource: resource.payload,
+                    source: resource.payload,
                     originalPath: originalPath,
                     readablePath: readablePath
                 )
             )
         }
-        try write(records, to: resourcesDirectory.appendingPathComponent("resources.json"))
+        try write(records, to: sourcesDirectory.appendingPathComponent("sources.json"))
     }
 
     /// The category files remain the public, readable representation. This complete manifest is
@@ -584,7 +566,7 @@ actor EpistoriaExportService {
                     relativePath = existing
                 } else {
                     let filename = "\(entity.id.uuidString.lowercased()).\(portableExtension(for: asset))"
-                    relativePath = "resources/assets/\(filename)"
+                    relativePath = "sources/assets/\(filename)"
                     let plaintext = try await assetManager.decryptedData(assetId: entity.id)
                     try protectedWrite(plaintext, to: root.appendingPathComponent(relativePath))
                     exportedAssetPaths[entity.id] = relativePath
@@ -878,10 +860,12 @@ actor EpistoriaExportService {
         directory: URL,
         requireMatchingAccount: Bool
     ) throws -> EpistoriaExportValidation {
-        var required = [
-            "metadata.json", "collections.json", "university.json", "sessions.json",
-            "resources/resources.json", "annotations.json", "ai-artifacts.json",
+        let required = [
+            "metadata.json", "lists.json", "sessions.json",
+            "sources/sources.json", "annotations.json", "ai-artifacts.json",
             "conflicts.json", "provenance.json", "checksums.sha256",
+            "notes/canvas-assets.json", "taxonomy.json", "knowledge.json",
+            "learning.json", "entities.json",
         ]
         let metadataURL = directory.appendingPathComponent("metadata.json")
         guard fileManager.fileExists(atPath: metadataURL.path) else {
@@ -895,32 +879,11 @@ actor EpistoriaExportService {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         let metadata = try decoder.decode(Metadata.self, from: metadataData)
-        guard [
-            "epistoria-export/1", "epistoria-export/2", "epistoria-export/3",
-            "epistoria-export/4", "epistoria-export/5", "epistoria-export/6",
-            "epistoria-export/7",
-        ].contains(metadata.formatVersion),
+        guard metadata.formatVersion == "epistoria-export/8",
               metadata.mode == "DECRYPTED",
               (!requireMatchingAccount || metadata.accountId == accountId)
         else {
             throw EpistoriaExportError.validationFailed("unsupported metadata version or mode")
-        }
-        if [
-            "epistoria-export/2", "epistoria-export/3", "epistoria-export/4",
-            "epistoria-export/5", "epistoria-export/6", "epistoria-export/7",
-        ].contains(metadata.formatVersion) {
-            required.append("notes/canvas-assets.json")
-        }
-        if [
-            "epistoria-export/3", "epistoria-export/4", "epistoria-export/5",
-            "epistoria-export/6", "epistoria-export/7",
-        ]
-            .contains(metadata.formatVersion) {
-            required.append(contentsOf: ["taxonomy.json", "knowledge.json", "learning.json"])
-        }
-        if ["epistoria-export/5", "epistoria-export/6", "epistoria-export/7"]
-            .contains(metadata.formatVersion) {
-            required.append("entities.json")
         }
         for path in required where !fileManager.fileExists(
             atPath: directory.appendingPathComponent(path).path

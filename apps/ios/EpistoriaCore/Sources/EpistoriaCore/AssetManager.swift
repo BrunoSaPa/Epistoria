@@ -3,7 +3,7 @@ import ImageIO
 import UniformTypeIdentifiers
 
 public struct ImportedResource: Equatable, Sendable {
-    public var resourceId: UUID
+    public var sourceId: UUID
     public var assetId: UUID
     public var reusedExistingAsset: Bool
 }
@@ -125,7 +125,7 @@ public actor AssetManager {
 
     public func importPDF(
         from sourceURL: URL,
-        courseId: UUID? = nil,
+        topicId: UUID? = nil,
         sessionId: UUID? = nil
     ) async throws -> ImportedResource {
         let accessed = sourceURL.startAccessingSecurityScopedResource()
@@ -147,14 +147,14 @@ public actor AssetManager {
             mimeType: "application/pdf",
             originalFilename: sourceURL.lastPathComponent
         )
-        let resourceId = try await createResource(
+        let sourceId = try await createResource(
             title: sourceURL.deletingPathExtension().lastPathComponent,
             assetId: imported.assetId,
-            courseId: courseId,
+            topicId: topicId,
             sessionId: sessionId
         )
         return ImportedResource(
-            resourceId: resourceId,
+            sourceId: sourceId,
             assetId: imported.assetId,
             reusedExistingAsset: imported.reusedExistingAsset
         )
@@ -223,7 +223,7 @@ public actor AssetManager {
         sessionId: UUID? = nil
     ) async throws -> ImportedResource {
         if sourceURL.pathExtension.lowercased() == "pdf" {
-            return try await importPDF(from: sourceURL, courseId: topicId, sessionId: sessionId)
+            return try await importPDF(from: sourceURL, topicId: topicId, sessionId: sessionId)
         }
         if let type = UTType(filenameExtension: sourceURL.pathExtension), type.conforms(to: .image) {
             let image = try await importImage(from: sourceURL)
@@ -235,7 +235,7 @@ public actor AssetManager {
                 sessionId: sessionId
             )
             return ImportedResource(
-                resourceId: sourceId,
+                sourceId: sourceId,
                 assetId: image.assetId,
                 reusedExistingAsset: image.reusedExistingAsset
             )
@@ -267,7 +267,7 @@ public actor AssetManager {
             sessionId: sessionId
         )
         return ImportedResource(
-            resourceId: sourceId,
+            sourceId: sourceId,
             assetId: imported.assetId,
             reusedExistingAsset: imported.reusedExistingAsset
         )
@@ -313,7 +313,7 @@ public actor AssetManager {
                 sessionId: sessionId
             )
             return ImportedResource(
-                resourceId: sourceId,
+                sourceId: sourceId,
                 assetId: imported.assetId,
                 reusedExistingAsset: imported.reusedExistingAsset
             )
@@ -329,7 +329,7 @@ public actor AssetManager {
                 sessionId: sessionId
             )
             return ImportedResource(
-                resourceId: sourceId,
+                sourceId: sourceId,
                 assetId: image.assetId,
                 reusedExistingAsset: image.reusedExistingAsset
             )
@@ -358,7 +358,7 @@ public actor AssetManager {
             sessionId: sessionId
         )
         return ImportedResource(
-            resourceId: sourceId,
+            sourceId: sourceId,
             assetId: imported.assetId,
             reusedExistingAsset: imported.reusedExistingAsset
         )
@@ -392,7 +392,7 @@ public actor AssetManager {
             primaryTopicId: topicId
         )
         return ImportedResource(
-            resourceId: sourceId,
+            sourceId: sourceId,
             assetId: imported.assetId,
             reusedExistingAsset: imported.reusedExistingAsset
         )
@@ -448,7 +448,7 @@ public actor AssetManager {
             sessionId: sessionId
         )
         return ImportedResource(
-            resourceId: sourceId,
+            sourceId: sourceId,
             assetId: imported.assetId,
             reusedExistingAsset: imported.reusedExistingAsset
         )
@@ -520,7 +520,7 @@ public actor AssetManager {
             sessionId: sessionId
         )
         return ImportedResource(
-            resourceId: sourceId,
+            sourceId: sourceId,
             assetId: imported.assetId,
             reusedExistingAsset: imported.reusedExistingAsset
         )
@@ -843,14 +843,14 @@ public actor AssetManager {
     private func createResource(
         title: String,
         assetId: UUID,
-        courseId: UUID?,
+        topicId: UUID?,
         sessionId: UUID?
     ) async throws -> UUID {
         try await store.createSource(
             type: .pdf,
             title: title.isEmpty ? "Imported PDF" : title,
             originalAssetId: assetId,
-            primaryTopicId: courseId,
+            primaryTopicId: topicId,
             sessionId: sessionId
         )
     }

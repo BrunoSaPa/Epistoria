@@ -47,6 +47,10 @@ final class LocalSemanticSearchTests: XCTestCase {
         )
 
         let hits = try await database.search("uncertainty predictions")
+        let immediate = try await database.search(
+            "uncertainty predictions",
+            includeRelated: false
+        )
 
         XCTAssertEqual(hits.first?.id, exactId)
         XCTAssertEqual(hits.first?.matchKind, .exact)
@@ -54,6 +58,8 @@ final class LocalSemanticSearchTests: XCTestCase {
         XCTAssertEqual(hits.dropFirst().first?.matchKind, .related)
         XCTAssertEqual(try XCTUnwrap(hits.dropFirst().first?.relevance), 1, accuracy: 0.0001)
         XCTAssertFalse(hits.contains { $0.id == unrelatedId })
+        XCTAssertEqual(immediate.map(\ .id), [exactId])
+        XCTAssertTrue(immediate.allSatisfy { $0.matchKind == .exact })
     }
 
     func testSearchAppliesScopeBeforeExactAndRelatedLimits() async throws {
@@ -65,7 +71,7 @@ final class LocalSemanticSearchTests: XCTestCase {
             semanticEmbeddingProvider: TestSemanticEmbeddingProvider()
         )
         let noteId = UUID()
-        let resourceId = UUID()
+        let sourceId = UUID()
         _ = try await database.saveLocal(
             id: noteId,
             entityType: .note,
@@ -73,8 +79,8 @@ final class LocalSemanticSearchTests: XCTestCase {
             search: SearchDocument(title: "Entropy", body: "Random variables")
         )
         _ = try await database.saveLocal(
-            id: resourceId,
-            entityType: .resource,
+            id: sourceId,
+            entityType: .source,
             content: Data("resource".utf8),
             search: SearchDocument(title: "Uncertainty reference", body: "Predictions")
         )

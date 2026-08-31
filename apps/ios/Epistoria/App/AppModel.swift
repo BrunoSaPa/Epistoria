@@ -93,6 +93,7 @@ final class AppModel {
         case loading
         case onboarding
         case ready
+        case resetRequired(String)
         case failed(String)
     }
 
@@ -138,6 +139,7 @@ final class AppModel {
     private let directTranscriptionClient: any ProviderTranscriptionClient
     private let crypto: EntityCrypto
     private let sharedCaptureImporter: SharedCaptureImporter?
+    private let isolatedUITestIdentity: (accountId: UUID, key: Data)?
     private let applicationSupportOverride: URL?
     private var isOpening = false
     private var automaticSyncTask: Task<Void, Never>?
@@ -171,6 +173,7 @@ final class AppModel {
         formulaModelManager: OnDeviceFormulaModelManager = OnDeviceFormulaModelManager(),
         workspacePreferences: WorkspacePreferences = WorkspacePreferences(),
         sharedCaptureImporter: SharedCaptureImporter? = .live(),
+        isolatedUITestIdentity: (accountId: UUID, key: Data)? = nil,
         crypto: EntityCrypto = EntityCrypto(),
         applicationSupportURL: URL? = nil
     ) {
@@ -185,6 +188,7 @@ final class AppModel {
         self.formulaModelManager = formulaModelManager
         self.workspacePreferences = workspacePreferences
         self.sharedCaptureImporter = sharedCaptureImporter
+        self.isolatedUITestIdentity = isolatedUITestIdentity
         formulaRecognitionEngine = CoreMLFormulaRecognitionEngine(modelManager: formulaModelManager)
         self.crypto = crypto
         applicationSupportOverride = applicationSupportURL
@@ -202,6 +206,51 @@ final class AppModel {
     }
 
     #if DEBUG
+    /// Creates and verifies the readable archive required by the destructive development reset.
+    /// When reset is requested from onboarding, the configured notebook is unlocked first. The
+    /// root reset sheet remains presented while the underlying phase changes to ready.
+    func createReadableDevelopmentArchiveForReset() async throws -> EpistoriaExportResult {
+        if case .onboarding = phase {
+            if database != nil, store != nil, assetManager != nil {
+                phase = .ready
+            } else {
+                guard !isOpening, !isLocking else {
+                    throw AppModelOperationError.unlockedSessionUnavailable
+                }
+                try configurationStore.validateForMutation()
+                guard let target = try configurationStore.loadValidated() else {
+                    throw AppModelOperationError.configuredNotebookUnavailable
+                }
+                guard let key = try accountKeyStore.accountKey(
+                    accountId: target.accountId,
+                    prompt: "Export Epistoria before reset"
+                ) else { throw AppModelOperationError.notebookKeyUnavailable }
+
+                isOpening = true
+                let generation = sessionGeneration
+                let purpose = storagePurpose(for: target)
+                do {
+                    try await open(
+                        configuration: target,
+                        key: key,
+                        generation: generation,
+                        storagePurpose: purpose
+                    )
+                    try persistResolvedStorageScopeIfNeeded(target, purpose: purpose)
+                } catch {
+                    let originalError = error
+                    await tearDown(nextPhase: .onboarding, honorDeferredRestart: false)
+                    isOpening = false
+                    throw originalError
+                }
+                // Do not start sync, indexing, automation, or inbox work for a notebook that
+                // is being opened only long enough to create its required reset archive.
+                isOpening = false
+            }
+        }
+        return try await createPortableExport(includingDerivedAI: true)
+    }
+
     var hasLocalDevelopmentNotebookData: Bool {
         if configurationStore.containsStoredConfiguration { return true }
         guard let support = try? applicationSupportURL() else { return false }
@@ -220,6 +269,10 @@ final class AppModel {
         isOpening = true
         let generation = sessionGeneration
         #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-ui-testing-ephemeral") {
+            await startEphemeralUITestNotebook(generation: generation)
+            return
+        }
         if ProcessInfo.processInfo.arguments.contains("-reset-onboarding") {
             // UI tests force the presentation state only. No Keychain, configuration, or
             // encrypted database content is deleted.
@@ -256,12 +309,65 @@ final class AppModel {
             await beginReadyWork()
         } catch {
             if generation == sessionGeneration, !isLocking, !(error is CancellationError) {
-                phase = .failed("Epistoria could not unlock its encrypted data: \(error.localizedDescription)")
+                if let databaseError = error as? LocalDatabaseError,
+                   case .incompatibleSchema = databaseError
+                {
+                    phase = .resetRequired(databaseError.localizedDescription)
+                } else {
+                    phase = .failed("Epistoria could not unlock its encrypted data: \(error.localizedDescription)")
+                }
             }
         }
         isOpening = false
         await honorDeferredRestartIfNeeded()
     }
+
+    #if DEBUG
+    /// Opens an isolated notebook used only by UI smoke tests. `EpistoriaApp` supplies separate
+    /// defaults, Keychain services, and Application Support storage before this path can run.
+    private func startEphemeralUITestNotebook(generation: UInt64) async {
+        do {
+            guard let identity = isolatedUITestIdentity, identity.key.count == 32 else {
+                throw AppModelOperationError.notebookKeyUnavailable
+            }
+            let configuration: AccountConfiguration
+            if let stored = try configurationStore.loadValidated() {
+                guard stored.accountId == identity.accountId else {
+                    throw AppModelOperationError.serverIdentityMismatch
+                }
+                configuration = stored
+            } else {
+                configuration = AccountConfiguration(
+                    accountId: identity.accountId,
+                    deviceId: identity.accountId,
+                    apiURL: nil,
+                    serverConnected: false,
+                    storageScope: .accountScoped
+                )
+                try configurationStore.save(configuration)
+            }
+            try await open(
+                configuration: configuration,
+                key: identity.key,
+                generation: generation,
+                storagePurpose: .accountScoped
+            )
+            if ProcessInfo.processInfo.arguments.contains("-reset-onboarding") {
+                // The isolated reset journey keeps its unlocked store available so the
+                // initialization screen can create the required readable archive safely.
+                phase = .onboarding
+            } else {
+                await beginReadyWork()
+            }
+        } catch {
+            if generation == sessionGeneration {
+                phase = .failed("The isolated UI test notebook could not open: \(error.localizedDescription)")
+            }
+        }
+        isOpening = false
+        restartRequested = false
+    }
+    #endif
 
     func lock() async {
         await tearDown(nextPhase: .loading, honorDeferredRestart: true)
@@ -371,8 +477,13 @@ final class AppModel {
             throw AppModelOperationError.existingLocalNotebook
         }
         let key = try crypto.randomKey()
+        #if DEBUG
+        let nextAccountId = configurationStore.pendingNotebookGenerationId ?? UUID()
+        #else
+        let nextAccountId = UUID()
+        #endif
         return NewAccountMaterial(
-            accountId: UUID(),
+            accountId: nextAccountId,
             deviceId: UUID(),
             accountKey: key,
             recoveryWords: try RecoveryKit.words(for: key)
@@ -1073,9 +1184,9 @@ final class AppModel {
         guard let database, let store, let assetManager else {
             throw AppModelOperationError.unlockedSessionUnavailable
         }
-        let resource = try await store.payload(ResourcePayload.self, id: sourceId).payload
+        let resource = try await store.payload(SourcePayload.self, id: sourceId).payload
         let source = try await store.payload(SourcePayload.self, id: sourceId).payload
-        guard resource.resourceType == .pdf,
+        guard resource.sourceType == .pdf,
               let versionId = source.currentVersionId,
               let version = try? await store.payload(SourceVersionPayload.self, id: versionId).payload,
               let assetId = version.originalAssetId
@@ -1122,7 +1233,7 @@ final class AppModel {
                 let chunk = PDFExtractionChunk(
                     schemaVersion: "pdf-extraction-chunk/v1",
                     jobId: jobId,
-                    resourceId: sourceId,
+                    sourceId: sourceId,
                     chunkIndex: index,
                     pages: Array(pages[start ..< min(start + 10, pages.count)])
                 )
@@ -1138,7 +1249,7 @@ final class AppModel {
             let manifest = PDFExtractionManifest(
                 schemaVersion: "ai-artifact/pdf-extraction/v2",
                 jobId: jobId,
-                resourceId: sourceId,
+                sourceId: sourceId,
                 generatedAt: .now,
                 pageCount: pages.count,
                 characterCount: pages.reduce(0) { $0 + $1.characterCount },
@@ -1902,13 +2013,22 @@ final class AppModel {
 
     /// Permanently removes the local development copy after a separate typed confirmation in the
     /// interface. This method is not compiled into release builds and never contacts the server.
-    func deleteLocalDevelopmentNotebook() async throws {
+    func deleteLocalDevelopmentNotebook(
+        verifiedArchive: PortableArchiveInspection
+    ) async throws {
         guard !isOpening,
               !isLocking,
               !isCreatingPortableExport,
               !isImportingPortableExport,
               !isCreatingNotePDF
         else { throw AppModelOperationError.unlockedSessionUnavailable }
+        guard ["epistoria-export/7", "epistoria-export/8"].contains(
+            verifiedArchive.formatVersion
+        ),
+              verifiedArchive.byteCount > 0,
+              verifiedArchive.sha256.count == 64,
+              verifiedArchive.sha256.allSatisfy({ $0.isHexDigit })
+        else { throw PortableArchiveError.unsupportedFormat }
         var storedConfiguration = try configurationStore.loadValidated()
         if let unresolved = storedConfiguration, unresolved.storageScope == nil {
             let resolved = try resolvedStorageConfiguration(
@@ -1927,14 +2047,27 @@ final class AppModel {
                 accountId: storedConfiguration.accountId,
                 purpose: storagePurpose(for: storedConfiguration)
             )
-            try tokenStore.delete(deviceId: storedConfiguration.deviceId)
-            try accountKeyStore.deleteAccountKey(accountId: storedConfiguration.accountId)
         } else {
             try resetter.removeLegacyStorage()
         }
+        // Once the encrypted store has been removed, never leave initialization pointing at that
+        // missing store. Credential cleanup follows and still reports any unexpected device error.
         configurationStore.clearForDevelopment()
+        configurationStore.recordDevelopmentReset(
+            DevelopmentResetReceipt(
+                archiveFormat: verifiedArchive.formatVersion,
+                archiveSHA256: verifiedArchive.sha256,
+                priorAccountId: storedConfiguration?.accountId,
+                nextNotebookGenerationId: UUID(),
+                resetAt: .now
+            )
+        )
         configuration = nil
         phase = .onboarding
+        if let storedConfiguration {
+            try tokenStore.delete(deviceId: storedConfiguration.deviceId)
+            try accountKeyStore.deleteAccountKey(accountId: storedConfiguration.accountId)
+        }
     }
     #endif
 
@@ -2576,8 +2709,12 @@ final class AppModel {
             key: try crypto.localDatabaseKey(
                 accountKey: key,
                 accountId: configuration.accountId
-            )
+            ),
+            schemaGeneration: configuration.schemaGeneration
         )
+        if try await database.workspaceSummaryNeedsRebuild() {
+            try await database.rebuildWorkspaceSummary()
+        }
         let store = EpistoriaStore(database: database)
         let assetManager = AssetManager(
             accountId: configuration.accountId,

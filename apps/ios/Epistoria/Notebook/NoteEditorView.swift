@@ -395,9 +395,9 @@ struct NoteEditorView: View {
                     let item = evidence.first(where: { $0.id == openedEvidenceId })
                 {
                     NavigationStack {
-                        ResourceDetailView(
+                        SourceDetailView(
                             model: model,
-                            resourceId: item.payload.sourceId,
+                            sourceId: item.payload.sourceId,
                             initialSourceVersionId: item.payload.sourceVersionId,
                             initialPageNumber: item.payload.locator.page,
                             highlightText: item.payload.excerpt,
@@ -597,6 +597,7 @@ struct NoteEditorView: View {
             isReadOnly: isArchived
         )
         .accessibilityIdentifier("note.spatial-canvas.\(pageIndex + 1)")
+        .accessibilityValue("\(canvasItems(on: pageIndex).count) canvas items")
         .dropDestination(for: String.self) { values, _ in
             guard let value = values.first, let evidenceId = UUID(uuidString: value),
                 evidence.contains(where: { $0.id == evidenceId })
@@ -1007,6 +1008,7 @@ struct NoteEditorView: View {
                         showMoreTools = false
                         showFindInNote = true
                     }
+                    .accessibilityIdentifier("note.more.find")
                     Button("Organize", systemImage: "folder.badge.plus") {
                         showMoreTools = false
                         showOrganization = true
@@ -1016,6 +1018,7 @@ struct NoteEditorView: View {
                         showPDFExportConfirmation = true
                     }
                     .disabled(isExportingPDF)
+                    .accessibilityIdentifier("note.more.export-pdf")
                     Button("Page and paper", systemImage: "doc.badge.gearshape") {
                         showMoreTools = false
                         showPageManager = configuration.pageFormat != .infinite
@@ -1026,15 +1029,18 @@ struct NoteEditorView: View {
                     PhotosPicker(selection: $selectedPhotoItem, matching: .images) {
                         Label("Photo Library", systemImage: "photo.on.rectangle")
                     }
+                    .accessibilityIdentifier("note.more.image.photos")
                     Button("Files", systemImage: "folder") {
                         showMoreTools = false
                         isImportingImage = true
                     }
+                    .accessibilityIdentifier("note.more.image.files")
                     Button("Paste Image", systemImage: "doc.on.clipboard") {
                         showMoreTools = false
                         Task { await pasteImage() }
                     }
                     .disabled(UIPasteboard.general.image == nil)
+                    .accessibilityIdentifier("note.more.image.paste")
                 }
                 Section("Customize") {
                     ForEach(NotebookToolID.optional) { tool in
@@ -1096,7 +1102,7 @@ struct NoteEditorView: View {
 
     private func openLearningHub() {
         model.learningLaunchContext = LearningLaunchContext(
-            topicId: note?.payload.courseId,
+            topicId: note?.payload.topicId,
             noteId: noteId,
             selectedObjectIds: lassoSelection.selectedBlockIds,
             destination: .overview
@@ -1342,7 +1348,7 @@ struct NoteEditorView: View {
     private var tutorOverlay: some View {
         AdaptiveTutorView(
             model: model,
-            topicId: note?.payload.courseId,
+            topicId: note?.payload.topicId,
             initialMessage: tutorSelectionMessage,
             preferredEvidenceIds: tutorSelectionEvidenceIds,
             compact: true
@@ -2044,7 +2050,7 @@ struct NoteEditorView: View {
     private var isArchived: Bool { note?.payload.archivedAt != nil }
 
     private var pageConfigurations: [NoteCanvasConfiguration] {
-        if pages.isEmpty { return Array(repeating: configuration, count: configuration.effectivePageCount) }
+        if pages.isEmpty { return [configuration] }
         return pages.map(\.payload.configuration)
     }
 
@@ -2062,12 +2068,12 @@ struct NoteEditorView: View {
 
     private func blockPageIndex(_ payload: NoteBlockPayload) -> Int {
         guard configuration.pageFormat != .infinite else { return 0 }
-        if let pageId = payload.canvasPageId,
+        if let pageId = payload.pageId,
            let index = pages.firstIndex(where: { $0.id == pageId })
         {
             return index
         }
-        return max(payload.canvasPageIndex ?? 0, 0)
+        return 0
     }
 
     private var pageLabel: String {
@@ -2105,49 +2111,67 @@ struct NoteEditorView: View {
         let isInitialLoad = isLoading
         do {
             let loadedPages = try await store.ensureNotePages(noteId: noteId)
-            async let loadedNote = store.payload(NotePayload.self, id: noteId)
+            let loadedNote = try await store.payload(NotePayload.self, id: noteId)
             async let loadedBlocks = store.list(NoteBlockPayload.self, parentId: noteId)
-            async let loadedEvidence = store.list(EvidencePayload.self)
-            async let loadedSources = store.list(SourcePayload.self)
-            async let loadedVersions = store.list(SourceVersionPayload.self)
-            async let loadedOCR = store.ocrArtifacts(parentId: noteId)
-            let result = try await (
-                loadedNote, loadedBlocks, loadedEvidence, loadedSources, loadedVersions, loadedOCR
+            async let loadedSourcePage = store.listPage(
+                SourcePayload.self,
+                parentId: loadedNote.payload.topicId,
+                limit: 50
             )
-            note = result.0
+            async let loadedOCR = store.ocrArtifacts(parentId: noteId)
+            let (loadedBlockValues, sourcePage, initialOCR) = try await (
+                loadedBlocks, loadedSourcePage, loadedOCR
+            )
+            note = loadedNote
             pages = loadedPages
             configuration = loadedPages.first?.payload.configuration
-                ?? result.0.payload.canvas
+                ?? loadedNote.payload.canvas
                 ?? NoteCanvasConfiguration()
-            if title != result.0.payload.title {
+            if title != loadedNote.payload.title {
                 suppressNextTitleChange = true
-                title = result.0.payload.title
+                title = loadedNote.payload.title
             }
-            blocks = result.1.sorted { $0.payload.orderKey < $1.payload.orderKey }
+            blocks = loadedBlockValues.sorted { $0.payload.orderKey < $1.payload.orderKey }
+            let shelfEvidence = try await store.list(
+                EvidencePayload.self,
+                parentIds: sourcePage.items.map(\.id),
+                limit: 500
+            )
+            let referencedEvidence = try await store.payloads(
+                EvidencePayload.self,
+                ids: Array(Set(blocks.compactMap(\.payload.evidenceId)))
+            )
+            var evidenceById = Dictionary(uniqueKeysWithValues: shelfEvidence.map { ($0.id, $0) })
+            for item in referencedEvidence { evidenceById[item.id] = item }
+            let loadedEvidence = Array(evidenceById.values)
+            var sourceById = Dictionary(uniqueKeysWithValues: sourcePage.items.map { ($0.id, $0) })
+            let missingSourceIds = Array(Set(loadedEvidence.map(\.payload.sourceId))).filter { sourceById[$0] == nil }
+            for source in try await store.payloads(SourcePayload.self, ids: missingSourceIds) {
+                sourceById[source.id] = source
+            }
+            let loadedVersions = try await store.payloads(
+                SourceVersionPayload.self,
+                ids: Array(Set(loadedEvidence.map(\.payload.sourceVersionId)))
+            )
             var reconciledOCR = false
-            for block in blocks where result.5.contains(where: {
+            for block in blocks where initialOCR.contains(where: {
                 $0.payload.targetKind == .notebookRegion
                     && $0.payload.targetId == block.id
                     && $0.payload.state == .current
                     && $0.payload.inputRevision != block.payload.ocrInputRevision
-            }) {
+                }) {
                 try await store.markOCRArtifactsStale(
                     targetId: block.id,
                     exceptInputRevision: block.payload.ocrInputRevision
                 )
                 reconciledOCR = true
             }
-            let availableSources = result.3.filter { source in
-                guard let topicId = result.0.payload.courseId else { return true }
-                return source.payload.primaryTopicId == topicId
-                    || source.payload.relatedTopicIds.contains(topicId)
-            }
-            sourcesById = Dictionary(uniqueKeysWithValues: availableSources.map { ($0.id, $0) })
-            sourceVersionsById = Dictionary(uniqueKeysWithValues: result.4.map { ($0.id, $0) })
+            sourcesById = sourceById
+            sourceVersionsById = Dictionary(uniqueKeysWithValues: loadedVersions.map { ($0.id, $0) })
             ocrArtifacts = reconciledOCR
                 ? try await store.ocrArtifacts(parentId: noteId)
-                : result.5
-            evidence = result.2.filter { sourcesById[$0.payload.sourceId] != nil }
+                : initialOCR
+            evidence = loadedEvidence.filter { sourcesById[$0.payload.sourceId] != nil }
                 .sorted { $0.payload.updatedAt > $1.payload.updatedAt }
             if configuration.pageFormat == .infinite {
                 currentPageIndex = 0
@@ -2269,7 +2293,6 @@ struct NoteEditorView: View {
         defer { creatingInkPages.remove(pageIndex) }
         let id = try await store.appendCanvasInkLayer(
             noteId: noteId,
-            pageIndex: pageIndex,
             pageId: pageId(at: pageIndex)
         )
         let block = try await store.payload(NoteBlockPayload.self, id: id)
@@ -2292,7 +2315,6 @@ struct NoteEditorView: View {
                 noteId: noteId,
                 text: content,
                 placement: placement,
-                pageIndex: currentPageIndex,
                 pageId: pageId(at: currentPageIndex)
             )
             model.noteLocalMutation()
@@ -2316,7 +2338,6 @@ struct NoteEditorView: View {
                 noteId: noteId,
                 evidenceId: evidenceId,
                 placement: placement,
-                pageIndex: pageIndex,
                 pageId: pageId(at: pageIndex)
             )
             model.noteLocalMutation()
@@ -2373,7 +2394,6 @@ struct NoteEditorView: View {
                 noteId: noteId,
                 shape: shape,
                 placement: placement,
-                pageIndex: pageIndex,
                 pageId: pageId(at: pageIndex)
             )
             model.noteLocalMutation()
@@ -2399,7 +2419,6 @@ struct NoteEditorView: View {
                 noteId: noteId,
                 symbol: selectedMathSymbol,
                 placement: placement,
-                pageIndex: pageIndex,
                 pageId: pageId(at: pageIndex)
             )
             model.noteLocalMutation()
@@ -2423,7 +2442,6 @@ struct NoteEditorView: View {
                 noteId: noteId,
                 symbol: value,
                 placement: placement,
-                pageIndex: currentPageIndex,
                 pageId: pageId(at: currentPageIndex)
             )
             model.noteLocalMutation()
@@ -2498,7 +2516,6 @@ struct NoteEditorView: View {
             assetId: imported.assetId,
             filename: imported.filename,
             placement: placement,
-            pageIndex: currentPageIndex,
             pageId: pageId(at: currentPageIndex)
         )
         model.noteLocalMutation()
@@ -2597,7 +2614,7 @@ struct NoteEditorView: View {
 
     private func savePlacement(id: UUID, placement: NoteCanvasPlacement) {
         guard !isArchived, var block = blocks.first(where: { $0.id == id }) else { return }
-        block.payload.schemaVersion = "note-block/v7"
+        block.payload.schemaVersion = "note-block/v8"
         block.payload.canvasPlacement = placement
         block.payload.updatedAt = .now
         replaceLocalBlock(block)
@@ -2616,7 +2633,7 @@ struct NoteEditorView: View {
                 from: NSRange(location: 0, length: attributedText.length),
                 documentAttributes: [.documentType: NSAttributedString.DocumentType.rtf]
             )
-            block.payload.schemaVersion = "note-block/v7"
+            block.payload.schemaVersion = "note-block/v8"
             block.payload.plainText = attributedText.string
             block.payload.richTextRtf = rtf
             block.payload.canvasPlacement = placement
@@ -2639,7 +2656,7 @@ struct NoteEditorView: View {
                 parentId: snapshot.noteId,
                 relationIds: [
                     snapshot.noteId,
-                    snapshot.canvasPageId,
+                    snapshot.pageId,
                     snapshot.assetId,
                     snapshot.imageConfiguration?.originalAssetId,
                     snapshot.evidenceId,
@@ -2677,7 +2694,7 @@ struct NoteEditorView: View {
         if pageIndex == currentPageIndex { inkSaveState = .saving }
         let previousDrawingData = inkBlock.payload.drawingData
         var snapshot = inkBlock.payload
-        snapshot.schemaVersion = "note-block/v7"
+        snapshot.schemaVersion = "note-block/v8"
         snapshot.drawingData = value
         snapshot.updatedAt = .now
         var localBlock = inkBlock
@@ -2691,7 +2708,7 @@ struct NoteEditorView: View {
                 id: inkBlock.id,
                 payload: snapshot,
                 parentId: snapshot.noteId,
-                relationIds: [snapshot.noteId, snapshot.canvasPageId].compactMap(\.self)
+                relationIds: [snapshot.noteId, snapshot.pageId].compactMap(\.self)
             )
             if inkSaveBuffer.isCurrent(generation, for: inkBlock.id),
                 pageIndex == currentPageIndex
@@ -2837,15 +2854,14 @@ struct NoteEditorView: View {
                 throw NoteEditorSaveError.multiPageRequiresFixedPaper
             }
             var changed = configuration
-            changed.schemaVersion = "note-canvas/v3"
+            changed.schemaVersion = "note-canvas/v4"
             changed.pageFormat = format
             changed.orientation = orientation
-            changed.pageCount = format == .infinite ? 1 : max(changed.pageCount, 1)
             try await persistCanvasConfiguration(changed)
             currentPageIndex =
                 format == .infinite
                 ? 0
-                : min(currentPageIndex, changed.effectivePageCount - 1)
+                : min(currentPageIndex, max(pages.count - 1, 0))
             requestedPageIndex = format == .infinite ? nil : currentPageIndex
             viewportCenter = pageCenter
         } catch { report(error) }
@@ -2854,7 +2870,7 @@ struct NoteEditorView: View {
     private func setPaperStyle(_ style: NotePaperStyle) async {
         do {
             var changed = configuration
-            changed.schemaVersion = "note-canvas/v3"
+            changed.schemaVersion = "note-canvas/v4"
             changed.paperStyle = style
             try await persistCanvasConfiguration(changed)
         } catch { report(error) }
@@ -2863,7 +2879,7 @@ struct NoteEditorView: View {
     private func setPaperSpacing(_ spacing: Double) async {
         do {
             var changed = configuration
-            changed.schemaVersion = "note-canvas/v3"
+            changed.schemaVersion = "note-canvas/v4"
             changed.paperSpacing = min(max(spacing, 12), 72)
             try await persistCanvasConfiguration(changed)
         } catch { report(error) }
@@ -2872,7 +2888,7 @@ struct NoteEditorView: View {
     private func setPaperColor(_ color: NotePaperColor) async {
         do {
             var changed = configuration
-            changed.schemaVersion = "note-canvas/v3"
+            changed.schemaVersion = "note-canvas/v4"
             changed.paperColor = color
             try await persistCanvasConfiguration(changed)
         } catch { report(error) }
@@ -2920,15 +2936,20 @@ struct NoteEditorView: View {
             throw NoteEditorSaveError.encryptedStoreUnavailable
         }
         try await flushPendingChanges()
-        if let currentPageId = pageId(at: currentPageIndex) {
-            try await store.updateNotePageConfiguration(
-                noteId: noteId,
-                pageId: currentPageId,
-                configuration: changed
-            )
-            pages = try await store.notePages(noteId: noteId)
-        }
-        configuration = changed
+        let currentPageId = pageId(at: currentPageIndex)
+        try await store.updateNoteCanvasConfiguration(
+            noteId: noteId,
+            pageId: currentPageId,
+            configuration: changed
+        )
+        note = try await store.payload(NotePayload.self, id: noteId)
+        pages = try await store.notePages(noteId: noteId)
+        blocks = try await store.list(NoteBlockPayload.self, parentId: noteId)
+            .sorted { $0.payload.orderKey < $1.payload.orderKey }
+        configuration = pages.first(where: { $0.id == currentPageId })?.payload.configuration
+            ?? pages.first?.payload.configuration
+            ?? note?.payload.canvas
+            ?? changed
         model.noteLocalMutation()
     }
 
@@ -2985,15 +3006,15 @@ struct NoteEditorView: View {
         }
         guard let store = model.store, var note else { return }
         guard (note.payload.archivedAt != nil) != archived else { return }
-        note.payload.schemaVersion = "note/v4"
+        note.payload.schemaVersion = "note/v5"
         note.payload.archivedAt = archived ? .now : nil
         note.payload.updatedAt = .now
         do {
             _ = try await store.save(
                 id: note.id,
                 payload: note.payload,
-                parentId: note.payload.courseId ?? note.payload.studySessionId,
-                relationIds: [note.payload.courseId, note.payload.studySessionId].compactMap(\.self)
+                parentId: note.payload.topicId ?? note.payload.studySessionId,
+                relationIds: [note.payload.topicId, note.payload.studySessionId].compactMap(\.self)
             )
             self.note = note
             model.noteLocalMutation()
@@ -3075,14 +3096,14 @@ struct NoteEditorView: View {
                 throw NoteEditorSaveError.encryptedStoreUnavailable
             }
             guard clean != note.payload.title else { return }
-            note.payload.schemaVersion = "note/v4"
+            note.payload.schemaVersion = "note/v5"
             note.payload.title = clean
             note.payload.updatedAt = .now
             _ = try await store.save(
                 id: note.id,
                 payload: note.payload,
-                parentId: note.payload.courseId ?? note.payload.studySessionId,
-                relationIds: [note.payload.courseId, note.payload.studySessionId].compactMap(\.self)
+                parentId: note.payload.topicId ?? note.payload.studySessionId,
+                relationIds: [note.payload.topicId, note.payload.studySessionId].compactMap(\.self)
             )
             self.note = note
             model.noteLocalMutation()
@@ -3390,6 +3411,7 @@ private struct NotePDFExportOptionsView: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Create PDF") { onExport(options) }
                         .disabled(pageSelection == .range && firstPage > lastPage)
+                        .accessibilityIdentifier("note.export-pdf.create")
                 }
             }
         }

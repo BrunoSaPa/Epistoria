@@ -2,11 +2,11 @@ import Foundation
 import UniformTypeIdentifiers
 
 public struct SourceRenderDescriptor: Equatable, Sendable {
-    public var kind: ResourceKind
+    public var kind: SourceKind
     public var mimeType: String
     public var prefersMonospacedText: Bool
 
-    public init(kind: ResourceKind, mimeType: String, prefersMonospacedText: Bool = false) {
+    public init(kind: SourceKind, mimeType: String, prefersMonospacedText: Bool = false) {
         self.kind = kind
         self.mimeType = mimeType
         self.prefersMonospacedText = prefersMonospacedText
@@ -14,7 +14,7 @@ public struct SourceRenderDescriptor: Equatable, Sendable {
 }
 
 public protocol SourceAdapter: Sendable {
-    var sourceType: ResourceKind { get }
+    var sourceType: SourceKind { get }
     var supportedExtensions: Set<String> { get }
     var maximumBytes: Int { get }
     func validate(data: Data, filename: String, mimeType: String) throws
@@ -59,11 +59,11 @@ public enum SourceAdapterError: Error, Equatable, LocalizedError {
 }
 
 public struct PlainTextSourceAdapter: SourceAdapter {
-    public let sourceType: ResourceKind
+    public let sourceType: SourceKind
     public let supportedExtensions: Set<String>
     public let maximumBytes = 32 * 1_024 * 1_024
 
-    public init(sourceType: ResourceKind, extensions: Set<String>) {
+    public init(sourceType: SourceKind, extensions: Set<String>) {
         self.sourceType = sourceType
         supportedExtensions = extensions
     }
@@ -106,7 +106,7 @@ public struct CSVSourceDocument: Equatable, Sendable {
 }
 
 public struct CSVSourceAdapter: SourceAdapter {
-    public let sourceType = ResourceKind.csv
+    public let sourceType = SourceKind.csv
     public let supportedExtensions: Set<String> = ["csv"]
     public let maximumBytes = 32 * 1_024 * 1_024
 
@@ -247,7 +247,7 @@ public struct SourceAdapterRegistry: Sendable {
         return adapter
     }
 
-    public func adapter(for sourceType: ResourceKind) throws -> any SourceAdapter {
+    public func adapter(for sourceType: SourceKind) throws -> any SourceAdapter {
         guard let adapter = adapters.first(where: { $0.sourceType == sourceType }) else {
             throw SourceAdapterError.unsupportedType
         }

@@ -26,6 +26,7 @@ const blockedContent = [
   ['internal source path', /(?:^|[\s`])(?:apps|services|packages|infra|scripts|\.github|\.agents)\//m],
   ['development command', /\b(?:make\s+[a-z]|xcodebuild|swift\s+test|npm\s+(?:run|ci)|docker\s+compose|pytest|mypy|ruff)\b/i],
   ['internal provider or cost configuration', /\b(?:OpenAI|gpt-[\w.-]+|token rates?|soft budget|per million tokens)\b/i],
+  ['legacy product terminology', /\b(?:Courses?|Collections?|Resources?|Universit(?:y|ies))\b/],
   ['internal QA identifier', /\b(?:A|IP|CN|SY|RC|EX|MW|AI|TF|PV|OP)-\d{2}\b/],
   ['exact currency amount', /(?:\$|USD\s*)\d/i],
   ['fenced code block', /^```/m],
@@ -137,6 +138,15 @@ for (const [file, document] of documents) {
     }
     if (decodedFragment && !documents.get(targetRelative)?.anchors.has(decodedFragment)) {
       problems.push(`${file}:${lineNumber(document.source, match.index)}: missing target heading: ${destination}`);
+    }
+  }
+}
+
+for (const [file, document] of documents) {
+  if (file === 'RELEASE_NOTES.md') continue;
+  for (const match of document.source.matchAll(/\bversion\s+(\d+)\s+(?:readable\s+)?export\b/gi)) {
+    if (match[1] !== '8') {
+      problems.push(`${file}:${lineNumber(document.source, match.index)}: unsupported current export version ${match[1]}`);
     }
   }
 }

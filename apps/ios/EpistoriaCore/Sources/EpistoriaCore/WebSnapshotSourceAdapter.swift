@@ -202,7 +202,7 @@ public struct WebSnapshotCaptureService: WebSnapshotCapturing, Sendable {
 }
 
 public struct HTMLSourceAdapter: SourceAdapter {
-    public let sourceType = ResourceKind.html
+    public let sourceType = SourceKind.html
     public let supportedExtensions: Set<String> = ["htm", "html"]
     public let maximumBytes = 32 * 1_024 * 1_024
 
@@ -228,7 +228,7 @@ public struct HTMLSourceAdapter: SourceAdapter {
 }
 
 public struct WebSnapshotSourceAdapter: SourceAdapter {
-    public let sourceType = ResourceKind.website
+    public let sourceType = SourceKind.website
     public let supportedExtensions: Set<String> = ["epistoriaweb"]
     public let maximumBytes = WebSnapshotCaptureService.maximumBytes
 

@@ -49,8 +49,8 @@ The app also provides:
 - Optional encrypted synchronization through a private server.
 - Explicit conflict review that preserves concurrent versions.
 - A readable ZIP export with JSON, original files, PencilKit data, and SHA-256 checksums.
-- Validated version 5, 6, and 7 export import into an empty notebook under a new local encryption
-  key.
+- Version 8 export import into an empty notebook under a new local encryption key. Earlier
+  development exports remain readable archives.
 - AI provider management for OpenAI, Anthropic, Gemini, and OpenAI-compatible local or hosted
   endpoints, with device-only Keychain storage.
 - An Adaptive Tutor that keeps durable encrypted transcripts, cites frozen Source Versions, and
@@ -80,7 +80,13 @@ filenames, annotations, extracted PDF text, prompts, or AI results.
 
 ## Selected challenge theme
 
-The selected challenge theme is **AI-augmented personal productivity tools**.
+The selected challenge is the **Wildcard Challenge: Build Intelligent Systems for the Future of
+Work**.
+
+Epistoria helps an individual plan, decide, and execute knowledge work. It combines source
+material, notes, learning history, and reviewed AI assistance to decide what to study next and
+verify understanding. This is decision support for a real task rather than a general chat
+interface.
 
 Epistoria treats AI as an optional processing feature. The notebook remains usable when the AI
 provider, Compute Node, or sync server is unavailable.
@@ -147,25 +153,25 @@ disclosure from encrypted sync. See the public
 
 ## How IBM Bob was used
 
-IBM Bob was used as a development assistant during the project. It helped with requirements
+IBM Bob was a core component of the project-development workflow. It was used for requirements
 analysis, implementation planning, code drafts, code review, troubleshooting, tests, and
-documentation updates.
+documentation updates. Its work covered the notebook data model, local-first boundaries, source
+grounding, learning workflows, and verification planning.
 
 The project owner selected the product requirements, privacy boundaries, architecture, and final
 changes. IBM Bob is not a runtime dependency. The running app does not send notebook content to
 IBM Bob.
 
+The [challenge submission checklist](CHALLENGE_SUBMISSION.md) maps the prototype and
+repository materials to the official requirements. The SkillsBuild activity, final commit and
+push, demonstration video, and Event Platform submission require owner action outside the
+codebase.
+
 ## Project status
 
-The repository is a personal beta candidate. The following automated checks passed on
-2026-08-28:
-
-- `make verify`
-- Full unsigned iOS Simulator bundle build, including assets and the privacy manifest
-- 119 Swift Core tests
-- 56 iOS app tests and 2 accessibility UI tests on an iPad Pro 13-inch Simulator
-- 7 API unit tests
-- 89 optional Compute Node worker tests
+The repository is a personal beta candidate. Automated verification covers Core, iOS, API,
+Compute Node, contracts, export, security, and documentation. Current evidence and incomplete
+gates are recorded in the internal verification log and the public known-limitations document.
 
 The following release checks are still open:
 

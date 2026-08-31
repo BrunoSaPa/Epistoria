@@ -349,7 +349,7 @@
         "accountId": { "$ref": "#/$defs/uuid" },
         "jobId": { "$ref": "#/$defs/uuid" },
         "sessionId": { "$ref": "#/$defs/uuid" },
-        "courseId": { "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }] },
+        "topicId": { "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }] },
         "sessionTitle": { "type": "string", "minLength": 1, "maxLength": 500 },
         "startedAt": { "type": "string", "format": "date-time" },
         "endedAt": { "type": "string", "format": "date-time" },
@@ -384,12 +384,12 @@
     "pdfExtractionRequest": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["schemaVersion", "accountId", "jobId", "resourceId", "assetId", "assetKey", "expectedDedupeTag", "title"],
+      "required": ["schemaVersion", "accountId", "jobId", "sourceId", "assetId", "assetKey", "expectedDedupeTag", "title"],
       "properties": {
         "schemaVersion": { "enum": ["pdf-extraction-request/v1", "pdf-extraction-request/v2"] },
         "accountId": { "$ref": "#/$defs/uuid" },
         "jobId": { "$ref": "#/$defs/uuid" },
-        "resourceId": { "$ref": "#/$defs/uuid" },
+        "sourceId": { "$ref": "#/$defs/uuid" },
         "assetId": { "$ref": "#/$defs/uuid" },
         "assetKey": { "type": "string", "pattern": "^[A-Za-z0-9_-]{43}$" },
         "expectedDedupeTag": { "type": "string", "pattern": "^[0-9a-f]{64}$" },

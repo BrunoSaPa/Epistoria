@@ -33,25 +33,67 @@ struct AppRootView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var workspacePresentation = EpistoriaWorkspacePresentation()
+    #if DEBUG
+    @State private var showDevelopmentReset = false
+    #endif
 
     var body: some View {
-        switch model.phase {
-        case .loading:
-            ProgressView("Unlocking Epistoria…")
-        case .onboarding:
-            OnboardingView(model: model)
-        case let .failed(message):
-            ContentUnavailableView {
-                Label("Epistoria is locked", systemImage: "lock.trianglebadge.exclamationmark")
-            } description: {
-                Text(message)
-            } actions: {
-                Button("Restore with recovery words") { model.beginRecovery() }
-                    .buttonStyle(.borderedProminent)
-                    .tint(EpistoriaDesign.ink)
+        Group {
+            switch model.phase {
+            case .loading:
+                ProgressView("Unlocking Epistoria…")
+            case .onboarding:
+                OnboardingView(
+                    model: model,
+                    onRequestDevelopmentReset: {
+                        #if DEBUG
+                        showDevelopmentReset = true
+                        #endif
+                    }
+                )
+            case let .resetRequired(message):
+                ContentUnavailableView {
+                    Label("Development reset required", systemImage: "externaldrive.badge.exclamationmark")
+                } description: {
+                    Text(message)
+                } actions: {
+                    #if DEBUG
+                    Button("Create archive and reset") { showDevelopmentReset = true }
+                        .buttonStyle(.borderedProminent)
+                        .tint(EpistoriaDesign.ink)
+                    #endif
+                }
+            case let .failed(message):
+                ContentUnavailableView {
+                    Label("Epistoria is locked", systemImage: "lock.trianglebadge.exclamationmark")
+                } description: {
+                    Text(message)
+                } actions: {
+                    Button("Restore with recovery words") { model.beginRecovery() }
+                        .buttonStyle(.borderedProminent)
+                        .tint(EpistoriaDesign.ink)
+                }
+            case .ready:
+                workspace
             }
-        case .ready:
-            NavigationSplitView(columnVisibility: $columnVisibility) {
+        }
+        #if DEBUG
+        .sheet(isPresented: $showDevelopmentReset) {
+            DeveloperNotebookResetView(
+                onReadableExport: {
+                    try await model.createReadableDevelopmentArchiveForReset()
+                },
+                onEncryptedExport: { try await model.createEncryptedDevelopmentBackup() },
+                onDelete: { archive in
+                    try await model.deleteLocalDevelopmentNotebook(verifiedArchive: archive)
+                }
+            )
+        }
+        #endif
+    }
+
+    private var workspace: some View {
+        NavigationSplitView(columnVisibility: $columnVisibility) {
                 List(selection: sectionSelection) {
                     Section {
                         HStack(spacing: 12) {
@@ -124,7 +166,6 @@ struct AppRootView: View {
             .onChange(of: model.isImportingPortableExport) { _, isImporting in
                 if isImporting { model.selectedSection = .settings }
             }
-        }
     }
 
     private func setColumnVisibility(_ visibility: NavigationSplitViewVisibility) {

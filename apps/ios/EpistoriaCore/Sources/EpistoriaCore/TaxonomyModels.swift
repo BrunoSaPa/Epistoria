@@ -18,15 +18,15 @@ public struct AreaPayload: EntityPayload, Equatable {
     }
 }
 
-/// User-facing replacement for `CoursePayload`. The encrypted transport discriminator remains
-/// `COURSE`, so existing IDs, links, sync envelopes, and restored backups remain valid.
+/// One subject inside the notebook. Academic information is optional text metadata rather than
+/// a second hierarchy of institutions and terms.
 public struct TopicPayload: EntityPayload, Equatable {
-    public static let entityType = EntityType.course
-    public var schemaVersion: String
+    public static let entityType = EntityType.topic
+    public var schemaVersion = "topic/v1"
     public var primaryAreaId: UUID?
-    public var institutionId: UUID?
-    public var academicTermId: UUID?
     public var name: String
+    public var institution: String?
+    public var term: String?
     public var officialClassName: String?
     public var code: String?
     public var professor: String?
@@ -40,18 +40,17 @@ public struct TopicPayload: EntityPayload, Equatable {
     public init(
         name: String,
         primaryAreaId: UUID? = nil,
-        institutionId: UUID? = nil,
-        academicTermId: UUID? = nil,
+        institution: String? = nil,
+        term: String? = nil,
         officialClassName: String? = nil,
         code: String? = nil,
         professor: String? = nil,
         now: Date = .now
     ) {
-        schemaVersion = "topic/v1"
         self.primaryAreaId = primaryAreaId
-        self.institutionId = institutionId
-        self.academicTermId = academicTermId
         self.name = name
+        self.institution = institution
+        self.term = term
         self.officialClassName = officialClassName
         self.code = code
         self.professor = professor
@@ -63,57 +62,6 @@ public struct TopicPayload: EntityPayload, Equatable {
         updatedAt = now
     }
 
-    private enum CodingKeys: String, CodingKey {
-        case schemaVersion, primaryAreaId, institutionId, academicTermId, name
-        case officialClassName, code, professor, topicDescription, courseDescription
-        case startDate, endDate, archived, createdAt, updatedAt
-    }
-
-    public init(from decoder: Decoder) throws {
-        let values = try decoder.container(keyedBy: CodingKeys.self)
-        let decodedSchema = try values.decodeIfPresent(String.self, forKey: .schemaVersion)
-            ?? "course/v1"
-        guard decodedSchema == "course/v1" || decodedSchema == "topic/v1" else {
-            throw DecodingError.dataCorruptedError(
-                forKey: .schemaVersion,
-                in: values,
-                debugDescription: "Unsupported Topic schema \(decodedSchema)"
-            )
-        }
-        schemaVersion = decodedSchema
-        primaryAreaId = try values.decodeIfPresent(UUID.self, forKey: .primaryAreaId)
-        institutionId = try values.decodeIfPresent(UUID.self, forKey: .institutionId)
-        academicTermId = try values.decodeIfPresent(UUID.self, forKey: .academicTermId)
-        name = try values.decode(String.self, forKey: .name)
-        officialClassName = try values.decodeIfPresent(String.self, forKey: .officialClassName)
-        code = try values.decodeIfPresent(String.self, forKey: .code)
-        professor = try values.decodeIfPresent(String.self, forKey: .professor)
-        topicDescription = try values.decodeIfPresent(String.self, forKey: .topicDescription)
-            ?? values.decodeIfPresent(String.self, forKey: .courseDescription)
-        startDate = try values.decodeIfPresent(Date.self, forKey: .startDate)
-        endDate = try values.decodeIfPresent(Date.self, forKey: .endDate)
-        archived = try values.decodeIfPresent(Bool.self, forKey: .archived) ?? false
-        createdAt = try values.decode(Date.self, forKey: .createdAt)
-        updatedAt = try values.decode(Date.self, forKey: .updatedAt)
-    }
-
-    public func encode(to encoder: Encoder) throws {
-        var values = encoder.container(keyedBy: CodingKeys.self)
-        try values.encode("topic/v1", forKey: .schemaVersion)
-        try values.encodeIfPresent(primaryAreaId, forKey: .primaryAreaId)
-        try values.encodeIfPresent(institutionId, forKey: .institutionId)
-        try values.encodeIfPresent(academicTermId, forKey: .academicTermId)
-        try values.encode(name, forKey: .name)
-        try values.encodeIfPresent(officialClassName, forKey: .officialClassName)
-        try values.encodeIfPresent(code, forKey: .code)
-        try values.encodeIfPresent(professor, forKey: .professor)
-        try values.encodeIfPresent(topicDescription, forKey: .topicDescription)
-        try values.encodeIfPresent(startDate, forKey: .startDate)
-        try values.encodeIfPresent(endDate, forKey: .endDate)
-        try values.encode(archived, forKey: .archived)
-        try values.encode(createdAt, forKey: .createdAt)
-        try values.encode(updatedAt, forKey: .updatedAt)
-    }
 }
 
 public enum TopicAreaRole: String, Codable, Sendable {
@@ -136,24 +84,5 @@ public struct TopicAreaRelationPayload: EntityPayload, Equatable {
         self.role = role
         createdAt = now
         updatedAt = now
-    }
-}
-
-public struct TaxonomyMigrationJournal: Codable, Equatable, Sendable {
-    public var schemaVersion = "taxonomy-migration-journal/v1"
-    public var migrationId: UUID
-    public var startedAt: Date
-    public var completedAt: Date?
-    public var upgradedTopicIds: [UUID]
-    public var verifiedTopicIds: [UUID]
-    public var failure: String?
-
-    public init(migrationId: UUID = UUID(), now: Date = .now) {
-        self.migrationId = migrationId
-        startedAt = now
-        completedAt = nil
-        upgradedTopicIds = []
-        verifiedTopicIds = []
-        failure = nil
     }
 }

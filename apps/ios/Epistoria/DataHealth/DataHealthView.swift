@@ -87,8 +87,13 @@ struct DataHealthView: View {
             #if DEBUG
             .sheet(isPresented: $showDevelopmentReset) {
                 DeveloperNotebookResetView(
-                    onExport: { try await model.createEncryptedDevelopmentBackup() },
-                    onDelete: { try await model.deleteLocalDevelopmentNotebook() }
+                    onReadableExport: {
+                        try await model.createReadableDevelopmentArchiveForReset()
+                    },
+                    onEncryptedExport: { try await model.createEncryptedDevelopmentBackup() },
+                    onDelete: { archive in
+                        try await model.deleteLocalDevelopmentNotebook(verifiedArchive: archive)
+                    }
                 )
             }
             #endif
@@ -644,6 +649,14 @@ private struct ExportReadyView: View {
                     .foregroundStyle(EpistoriaDesign.positive)
                 Text("\(result.fileCount) files · \(ByteCountFormatter.string(fromByteCount: result.byteCount, countStyle: .file))")
                     .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("SHA-256")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Text(result.sha256)
+                        .font(.caption.monospaced())
+                        .textSelection(.enabled)
+                }
                 Label(
                     "This archive is readable personal data. Save it only to an encrypted drive or another location you trust.",
                     systemImage: "exclamationmark.shield"

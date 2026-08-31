@@ -10,19 +10,17 @@ public enum EntityPayloadValidator {
         switch entityType {
         case .area: _ = try CanonicalJSON.decode(AreaPayload.self, from: content)
         case .topicArea: _ = try CanonicalJSON.decode(TopicAreaRelationPayload.self, from: content)
-        case .collection: _ = try CanonicalJSON.decode(CollectionPayload.self, from: content)
-        case .collectionItem, .sessionNote, .sessionResource:
+        case .list: _ = try CanonicalJSON.decode(ListPayload.self, from: content)
+        case .listItem, .sessionNote, .sessionSource:
             let relation = try CanonicalJSON.decode(RelationPayload.self, from: content)
             guard relation.resolvedEntityType == entityType else { throw ValidationError.typeMismatch }
-        case .institution: _ = try CanonicalJSON.decode(InstitutionPayload.self, from: content)
-        case .academicTerm: _ = try CanonicalJSON.decode(AcademicTermPayload.self, from: content)
-        case .course: _ = try CanonicalJSON.decode(TopicPayload.self, from: content)
+        case .topic: _ = try CanonicalJSON.decode(TopicPayload.self, from: content)
         case .studySession: _ = try CanonicalJSON.decode(StudySessionPayload.self, from: content)
         case .note: _ = try CanonicalJSON.decode(NotePayload.self, from: content)
         case .notePage: _ = try CanonicalJSON.decode(NotePagePayload.self, from: content)
         case .noteBlock: _ = try CanonicalJSON.decode(NoteBlockPayload.self, from: content)
         case .trashEntry: _ = try CanonicalJSON.decode(TrashEntryPayload.self, from: content)
-        case .resource: _ = try CanonicalJSON.decode(SourcePayload.self, from: content)
+        case .source: _ = try CanonicalJSON.decode(SourcePayload.self, from: content)
         case .asset: _ = try CanonicalJSON.decode(AssetPayload.self, from: content)
         case .annotation: _ = try CanonicalJSON.decode(AnnotationPayload.self, from: content)
         case .aiArtifact:
@@ -86,19 +84,17 @@ public enum EntityPayloadValidator {
         switch entityType {
         case .area: ["area/v1"]
         case .topicArea: ["topic-area/v1"]
-        case .collection: ["collection/v1", "collection/v2"]
-        case .collectionItem: ["collection-item/v1"]
+        case .list: ["list/v1"]
+        case .listItem: ["list-item/v1"]
         case .sessionNote: ["session-note/v1"]
-        case .sessionResource: ["session-resource/v1"]
-        case .institution: ["institution/v1"]
-        case .academicTerm: ["academic-term/v1"]
-        case .course: ["course/v1", "topic/v1"]
-        case .studySession: ["study-session/v1"]
-        case .note: ["note/v1", "note/v2", "note/v3", "note/v4"]
+        case .sessionSource: ["session-source/v1"]
+        case .topic: ["topic/v1"]
+        case .studySession: ["study-session/v2"]
+        case .note: ["note/v5"]
         case .notePage: ["note-page/v1"]
-        case .noteBlock: ["note-block/v1", "note-block/v2", "note-block/v3", "note-block/v4", "note-block/v5", "note-block/v6", "note-block/v7"]
+        case .noteBlock: ["note-block/v8"]
         case .trashEntry: ["trash-entry/v1"]
-        case .resource: ["resource/v1", "source/v1"]
+        case .source: ["source/v1"]
         case .asset: ["asset/v1"]
         case .annotation: ["annotation/v1"]
         case .aiArtifact: [

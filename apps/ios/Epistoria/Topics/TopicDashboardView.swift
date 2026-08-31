@@ -75,7 +75,7 @@ struct TopicDashboardView: View {
         .task { await load() }
         .refreshable { await load() }
         .sheet(isPresented: $showNewNote) {
-            NewNoteView(model: model, courseId: topicId) { _ in Task { await load() } }
+            NewNoteView(model: model, topicId: topicId) { _ in Task { await load() } }
         }
         .sheet(isPresented: $showNewSession) {
             NewTopicSessionView(model: model, topicId: topicId) { Task { await load() } }
@@ -213,7 +213,7 @@ struct TopicDashboardView: View {
             EpistoriaSectionHeading(title: "Knowledge", subtitle: "Sources and Concepts stay anchored to this Topic.")
             ForEach(sources.prefix(4), id: \.id) { source in
                 NavigationLink {
-                    ResourceDetailView(model: model, resourceId: source.id)
+                    SourceDetailView(model: model, sourceId: source.id)
                 } label: {
                     dashboardRow(title: source.payload.title, detail: source.payload.sourceType.displayName, symbol: source.payload.sourceType.epistoriaSymbol)
                 }
@@ -263,32 +263,30 @@ struct TopicDashboardView: View {
         guard let store = model.store else { return }
         do {
             async let loadedTopic = store.topic(id: topicId)
-            async let loadedNotes = store.list(NotePayload.self)
-            async let loadedSources = store.list(SourcePayload.self)
-            async let loadedSessions = store.list(StudySessionPayload.self)
-            async let loadedConcepts = store.list(ConceptPayload.self)
-            async let loadedCards = store.list(FlashcardPayload.self)
-            async let loadedTests = store.list(PracticeTestPayload.self)
-            async let loadedQuestions = store.list(UnresolvedQuestionPayload.self)
-            async let loadedGoals = store.list(StudyGoalPayload.self)
-            async let loadedRecommendations = store.list(StudyRecommendationPayload.self)
-            async let loadedTrash = store.trashedTargetIds()
-            let values = try await (loadedTopic, loadedNotes, loadedSources, loadedSessions, loadedConcepts, loadedCards, loadedTests, loadedQuestions, loadedGoals, loadedRecommendations, loadedTrash)
+            async let loadedNotes = store.listPage(NotePayload.self, parentId: topicId, limit: 24)
+            async let loadedSources = store.listPage(SourcePayload.self, parentId: topicId, limit: 24)
+            async let loadedSessions = store.listPage(StudySessionPayload.self, parentId: topicId, limit: 24)
+            async let loadedConcepts = store.listPage(ConceptPayload.self, parentId: topicId, limit: 100)
+            async let loadedCards = store.listPage(FlashcardPayload.self, parentId: topicId, limit: 100)
+            async let loadedTests = store.listPage(PracticeTestPayload.self, parentId: topicId, limit: 100)
+            async let loadedQuestions = store.listPage(UnresolvedQuestionPayload.self, parentId: topicId, limit: 100)
+            async let loadedGoals = store.listPage(StudyGoalPayload.self, parentId: topicId, limit: 100)
+            async let loadedRecommendations = store.listPage(StudyRecommendationPayload.self, parentId: topicId, limit: 100)
+            let values = try await (loadedTopic, loadedNotes, loadedSources, loadedSessions, loadedConcepts, loadedCards, loadedTests, loadedQuestions, loadedGoals, loadedRecommendations)
             topic = values.0
-            notes = values.1.filter {
-                $0.payload.courseId == topicId && $0.payload.archivedAt == nil && !values.10.contains($0.id)
+            notes = values.1.items.filter {
+                $0.payload.topicId == topicId && $0.payload.archivedAt == nil
             }.sorted { $0.payload.updatedAt > $1.payload.updatedAt }
-            sources = values.2.filter {
-                ($0.payload.primaryTopicId == topicId || $0.payload.relatedTopicIds.contains(topicId))
-                    && !values.10.contains($0.id)
+            sources = values.2.items.filter {
+                $0.payload.primaryTopicId == topicId || $0.payload.relatedTopicIds.contains(topicId)
             }.sorted { $0.payload.updatedAt > $1.payload.updatedAt }
-            sessions = values.3.filter { $0.payload.courseId == topicId }.sorted { $0.payload.startedAt > $1.payload.startedAt }
-            concepts = values.4.filter { $0.payload.topicIds.contains(topicId) }
-            cards = values.5.filter { $0.payload.topicId == topicId && $0.payload.archivedAt == nil }
-            tests = values.6.filter { $0.payload.topicId == topicId && $0.payload.state != .archived }
-            questions = values.7.filter { $0.payload.topicId == topicId && $0.payload.resolvedAt == nil }
-            goals = values.8.filter { $0.payload.topicId == topicId }
-            recommendations = values.9.filter { $0.payload.topicId == topicId }.sorted { $0.payload.score > $1.payload.score }
+            sessions = values.3.items.filter { $0.payload.topicId == topicId }.sorted { $0.payload.startedAt > $1.payload.startedAt }
+            concepts = values.4.items.filter { $0.payload.topicIds.contains(topicId) }
+            cards = values.5.items.filter { $0.payload.topicId == topicId && $0.payload.archivedAt == nil }
+            tests = values.6.items.filter { $0.payload.topicId == topicId && $0.payload.state != .archived }
+            questions = values.7.items.filter { $0.payload.topicId == topicId && $0.payload.resolvedAt == nil }
+            goals = values.8.items.filter { $0.payload.topicId == topicId }
+            recommendations = values.9.items.filter { $0.payload.topicId == topicId }.sorted { $0.payload.score > $1.payload.score }
             errorMessage = nil
         } catch { errorMessage = error.localizedDescription }
     }
@@ -513,7 +511,7 @@ private struct NewTopicSessionView: View {
             let cleanNotes = startingNotes.trimmingCharacters(in: .whitespacesAndNewlines)
             _ = try await store.startSession(
                 title: cleanObjective,
-                courseId: topicId,
+                topicId: topicId,
                 goals: [cleanObjective],
                 requireTopic: true,
                 objective: cleanObjective,
@@ -538,6 +536,6 @@ private extension StudySessionState {
     }
 }
 
-private extension ResourceKind {
+private extension SourceKind {
     var displayName: String { rawValue.replacingOccurrences(of: "_", with: " ").capitalized }
 }

@@ -9,8 +9,9 @@ Epistoria remains in personal beta. The following limits apply to the current pr
 
 ## Recovery and export
 
-- The app imports version 5, 6, or 7 readable exports only into an empty notebook. It does not
-  merge with or replace existing data. Versions 1 through 4 must be recreated before import.
+- The current development generation imports version 8 readable exports only into an empty
+  notebook. It does not merge with or replace existing data. Earlier development exports remain
+  readable archives and are not accepted by the current importer.
 - An export with an unresolved binary file conflict cannot be imported until that conflict is
   resolved in the source notebook.
 - A note can be exported as a readable PDF. The PDF cannot be imported as an editable note.
@@ -54,7 +55,6 @@ Epistoria remains in personal beta. The following limits apply to the current pr
 
 - Notes, Topics, Sources, Lists, goals, decks, cards, Concepts, and tests support lifecycle
   controls appropriate to each record.
-- Institutions and academic terms do not yet have complete lifecycle controls.
 - Archiving a List preserves its links and does not archive linked items.
 - Archiving a deck does not archive its cards. Cards must be suspended or archived separately.
 - Trash covers notes, pages, Sources, Lists, and canvas items and is removed manually. Permanent

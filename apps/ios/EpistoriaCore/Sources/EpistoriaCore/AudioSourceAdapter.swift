@@ -2,7 +2,7 @@ import Foundation
 import AVFAudio
 
 public struct AudioSourceAdapter: SourceAdapter {
-    public let sourceType = ResourceKind.audio
+    public let sourceType = SourceKind.audio
     public let supportedExtensions: Set<String> = ["aac", "caf", "m4a", "mp3", "wav"]
     public let maximumBytes = 384 * 1_024 * 1_024
 

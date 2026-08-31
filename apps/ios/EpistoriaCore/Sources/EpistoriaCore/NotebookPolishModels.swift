@@ -21,9 +21,7 @@ public struct NotePagePayload: EntityPayload, Equatable {
     ) {
         self.noteId = noteId
         self.orderKey = orderKey
-        var pageConfiguration = configuration
-        pageConfiguration.pageCount = 1
-        self.configuration = pageConfiguration
+        self.configuration = configuration
         trashedAt = nil
         thumbnailRevision = 0
         createdAt = now

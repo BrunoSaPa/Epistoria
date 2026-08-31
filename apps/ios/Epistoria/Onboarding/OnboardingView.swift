@@ -7,6 +7,7 @@ struct OnboardingView: View {
     }
 
     @Bindable var model: AppModel
+    var onRequestDevelopmentReset: (() -> Void)?
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var material: NewAccountMaterial?
@@ -17,9 +18,6 @@ struct OnboardingView: View {
     @State private var errorMessage: String?
     @State private var showRestore = false
     @State private var showLegacyNotebookChoice = false
-    #if DEBUG
-    @State private var showDevelopmentReset = false
-    #endif
 
     var body: some View {
         NavigationStack {
@@ -47,21 +45,13 @@ struct OnboardingView: View {
             .sheet(isPresented: $showRestore) {
                 RestoreAccountView(model: model)
             }
-            #if DEBUG
-            .sheet(isPresented: $showDevelopmentReset) {
-                DeveloperNotebookResetView(
-                    onExport: { try await model.createEncryptedDevelopmentBackup() },
-                    onDelete: { try await model.deleteLocalDevelopmentNotebook() }
-                )
-            }
-            #endif
             .alert("An older notebook is on this iPad", isPresented: $showLegacyNotebookChoice) {
                 Button("Recover older notebook") {
                     showRestore = true
                 }
                 #if DEBUG
                 Button("Delete local development notebook", role: .destructive) {
-                    showDevelopmentReset = true
+                    onRequestDevelopmentReset?()
                 }
                 #endif
                 Button("Cancel", role: .cancel) {}
@@ -149,7 +139,7 @@ struct OnboardingView: View {
                         .tracking(0.5)
                         .foregroundStyle(EpistoriaDesign.mutedInk)
                     Button {
-                        showDevelopmentReset = true
+                        onRequestDevelopmentReset?()
                     } label: {
                         Label("Delete local development notebook…", systemImage: "trash")
                     }

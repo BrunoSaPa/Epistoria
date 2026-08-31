@@ -71,7 +71,7 @@ public enum WeeklyReviewEngine {
         let attemptById = Dictionary(uniqueKeysWithValues: attempts.map { ($0.id, $0.payload) })
 
         let completedSessions = sessions.filter {
-            guard let topicId = $0.payload.courseId else { return false }
+            guard let topicId = $0.payload.topicId else { return false }
             return $0.payload.state == .ended
                 && activeTopicIds.contains(topicId)
                 && isWithin($0.payload.endedAt, start: periodStart, end: now)
@@ -91,7 +91,7 @@ public enum WeeklyReviewEngine {
 
         var activityByTopic: [UUID: WeeklyTopicActivity] = [:]
         for session in completedSessions {
-            guard let topicId = session.payload.courseId else { continue }
+            guard let topicId = session.payload.topicId else { continue }
             var value = activityByTopic[topicId] ?? WeeklyTopicActivity(
                 topicId: topicId,
                 completedSessions: 0,

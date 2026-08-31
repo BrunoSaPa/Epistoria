@@ -46,6 +46,48 @@ public struct StoredEntity: Equatable, Sendable {
     }
 }
 
+public struct EntityPageCursor: Codable, Equatable, Sendable {
+    public var modifiedAt: Date
+    public var entityId: UUID
+
+    public init(modifiedAt: Date, entityId: UUID) {
+        self.modifiedAt = modifiedAt
+        self.entityId = entityId
+    }
+}
+
+public struct StoredEntityPage: Equatable, Sendable {
+    public var entities: [StoredEntity]
+    public var nextCursor: EntityPageCursor?
+
+    public init(entities: [StoredEntity], nextCursor: EntityPageCursor?) {
+        self.entities = entities
+        self.nextCursor = nextCursor
+    }
+}
+
+public struct EntitySnapshotRequest: Equatable, Sendable {
+    public var type: EntityType
+    public var parentId: UUID?
+    public var limit: Int
+
+    public init(type: EntityType, parentId: UUID? = nil, limit: Int) {
+        self.type = type
+        self.parentId = parentId
+        self.limit = limit
+    }
+}
+
+public struct EntitySnapshotSlice: Equatable, Sendable {
+    public var request: EntitySnapshotRequest
+    public var page: StoredEntityPage
+}
+
+public struct BoundedEntitySnapshot: Equatable, Sendable {
+    public var readAt: Date
+    public var slices: [EntitySnapshotSlice]
+}
+
 public struct LocalEntityWrite: Equatable, Sendable {
     public var id: UUID
     public var entityType: EntityType
@@ -168,36 +210,6 @@ public struct SearchProjectionWrite: Equatable, Sendable {
         self.sourceEntityId = sourceEntityId
         self.segments = segments
     }
-}
-
-public struct LocalMigrationBatch: Equatable, Sendable {
-    public var id: UUID
-    public var name: String
-    public var backupEntityId: UUID
-    public var backupContent: Data
-    public var startedAt: Date
-
-    public init(
-        id: UUID = UUID(),
-        name: String,
-        backupEntityId: UUID,
-        backupContent: Data,
-        startedAt: Date = .now
-    ) {
-        self.id = id
-        self.name = name
-        self.backupEntityId = backupEntityId
-        self.backupContent = backupContent
-        self.startedAt = startedAt
-    }
-}
-
-public struct LocalMigrationJournalEntry: Equatable, Sendable {
-    public var id: UUID
-    public var name: String
-    public var startedAt: Date
-    public var completedAt: Date?
-    public var failureCode: String?
 }
 
 public struct PendingMutation: Equatable, Sendable {
@@ -381,6 +393,7 @@ public enum LocalDatabaseError: Error, Equatable, LocalizedError {
     case invalidRow
     case payloadTooLarge
     case cursorRegression
+    case incompatibleSchema(Int)
 
     public var errorDescription: String? {
         switch self {
@@ -396,6 +409,8 @@ public enum LocalDatabaseError: Error, Equatable, LocalizedError {
             "This item is larger than the local notebook limit. The previous saved version remains available."
         case .cursorRegression:
             "Epistoria rejected an older synchronization position. Local data was not changed."
+        case .incompatibleSchema:
+            "This development notebook uses an older storage generation. Create and verify its readable archive before resetting it. No local data was changed."
         }
     }
 }
@@ -425,18 +440,20 @@ public actor SQLCipherDatabase {
     private let semanticEmbeddingProvider: any LocalSemanticEmbeddingProviding
     public nonisolated let url: URL
 
-    public init(url: URL, key: Data) throws {
+    public init(url: URL, key: Data, schemaGeneration: Int = 2) throws {
         try self.init(
             url: url,
             key: key,
-            semanticEmbeddingProvider: AppleLocalSemanticEmbeddingProvider()
+            semanticEmbeddingProvider: AppleLocalSemanticEmbeddingProvider(),
+            schemaGeneration: schemaGeneration
         )
     }
 
     init(
         url: URL,
         key: Data,
-        semanticEmbeddingProvider: any LocalSemanticEmbeddingProviding
+        semanticEmbeddingProvider: any LocalSemanticEmbeddingProviding,
+        schemaGeneration: Int = 2
     ) throws {
         guard key.count == 32 else { throw LocalDatabaseError.keyRejected }
         self.url = url
@@ -475,7 +492,14 @@ public actor SQLCipherDatabase {
             try Self.execute(database, "PRAGMA journal_mode = WAL")
             try Self.execute(database, "PRAGMA synchronous = FULL")
             try Self.execute(database, "PRAGMA temp_store = MEMORY")
-            try Self.migrate(database)
+            let existingVersion = try Self.userVersion(database)
+            guard existingVersion <= 6 else {
+                throw LocalDatabaseError.incompatibleSchema(existingVersion)
+            }
+            if schemaGeneration >= 2, (1 ... 4).contains(existingVersion) {
+                throw LocalDatabaseError.incompatibleSchema(existingVersion)
+            }
+            try Self.migrate(database, schemaGeneration: schemaGeneration)
             Self.applyFileProtection(url)
             connection = SQLCipherConnection(database)
         } catch {
@@ -553,6 +577,14 @@ public actor SQLCipherDatabase {
                 projection: searchProjection,
                 modifiedAt: modifiedAt
             )
+            try updateWorkspaceSummary(
+                id: id,
+                entityType: entityType,
+                parentId: parentId,
+                content: content,
+                tombstone: false,
+                modifiedAt: modifiedAt
+            )
         }
         return StoredEntity(
             id: id,
@@ -573,7 +605,6 @@ public actor SQLCipherDatabase {
         _ writes: [LocalEntityWrite],
         deleting deletionIds: [UUID] = [],
         deletedAt: Date = .now,
-        migration: LocalMigrationBatch? = nil,
         registeringAssets assets: [LocalAsset] = [],
         registeringConflicts conflicts: [ImportedLocalConflict] = []
     ) throws {
@@ -612,25 +643,7 @@ public actor SQLCipherDatabase {
         }
         do {
             try transaction {
-                if let migration {
-                    try run(
-                        "INSERT INTO migration_journal(id, name, started_at) VALUES (?, ?, ?)",
-                        [
-                            .text(canonical(migration.id)), .text(migration.name),
-                            .real(migration.startedAt.timeIntervalSince1970),
-                        ]
-                    )
-                    try run(
-                        """
-                        INSERT OR IGNORE INTO migration_backups(entity_id, migration_name, content, created_at)
-                        VALUES (?, ?, ?, ?)
-                        """,
-                        [
-                            .text(canonical(migration.backupEntityId)), .text(migration.name),
-                            .blob(migration.backupContent), .real(migration.startedAt.timeIntervalSince1970),
-                        ]
-                    )
-                }
+                var affectedSearchOwners = Set<String>()
                 for item in prepared {
                     let write = item.write
                     try run(
@@ -678,11 +691,20 @@ public actor SQLCipherDatabase {
                             .real(Date.now.timeIntervalSince1970),
                         ]
                     )
-                    try updateSearch(
+                    affectedSearchOwners.formUnion(try updateSearch(
                         id: write.id,
                         entityType: write.entityType,
                         document: write.search,
                         projection: write.searchProjection,
+                        modifiedAt: write.modifiedAt,
+                        rebuildOwners: false
+                    ))
+                    try updateWorkspaceSummary(
+                        id: write.id,
+                        entityType: write.entityType,
+                        parentId: write.parentId,
+                        content: write.content,
+                        tombstone: false,
                         modifiedAt: write.modifiedAt
                     )
                 }
@@ -711,11 +733,16 @@ public actor SQLCipherDatabase {
                             .real(Date.now.timeIntervalSince1970),
                         ]
                     )
-                    try updateSearch(
+                    affectedSearchOwners.formUnion(try updateSearch(
                         id: current.id,
                         entityType: current.entityType,
                         document: nil,
-                        modifiedAt: deletedAt
+                        modifiedAt: deletedAt,
+                        rebuildOwners: false
+                    ))
+                    try run(
+                        "DELETE FROM workspace_summary WHERE entity_id=?",
+                        [.text(canonical(current.id))]
                     )
                 }
                 for asset in assets {
@@ -748,102 +775,13 @@ public actor SQLCipherDatabase {
                         [.text(canonical(conflict.entityId))]
                     )
                 }
-                if let migration {
-                    try run(
-                        "UPDATE migration_journal SET completed_at=?, failure_code=NULL WHERE id=?",
-                        [.real(Date.now.timeIntervalSince1970), .text(canonical(migration.id))]
-                    )
+                for owner in affectedSearchOwners.sorted() {
+                    try rebuildOwnerSearchDocument(ownerEntityId: owner)
                 }
             }
         } catch {
-            if let migration {
-                try? run(
-                    """
-                    INSERT OR REPLACE INTO migration_journal(id, name, started_at, completed_at, failure_code)
-                    VALUES (?, ?, ?, NULL, ?)
-                    """,
-                    [
-                        .text(canonical(migration.id)), .text(migration.name),
-                        .real(migration.startedAt.timeIntervalSince1970),
-                        .text(String(String(describing: type(of: error)).prefix(128))),
-                    ]
-                )
-            }
             throw error
         }
-    }
-
-    public func recordMigrationStarted(name: String, id: UUID = UUID(), at date: Date = .now) throws -> UUID {
-        try run(
-            "INSERT INTO migration_journal(id, name, started_at) VALUES (?, ?, ?)",
-            [.text(canonical(id)), .text(name), .real(date.timeIntervalSince1970)]
-        )
-        return id
-    }
-
-    public func recordMigrationCompleted(id: UUID, at date: Date = .now) throws {
-        try run(
-            "UPDATE migration_journal SET completed_at=?, failure_code=NULL WHERE id=?",
-            [.real(date.timeIntervalSince1970), .text(canonical(id))]
-        )
-    }
-
-    public func recordMigrationFailed(id: UUID, failureCode: String) throws {
-        try run(
-            "UPDATE migration_journal SET failure_code=? WHERE id=?",
-            [.text(String(failureCode.prefix(128))), .text(canonical(id))]
-        )
-    }
-
-    public func migrationJournal() throws -> [LocalMigrationJournalEntry] {
-        try query("SELECT * FROM migration_journal ORDER BY started_at DESC").compactMap { row in
-            guard case let .text(idText) = row["id"],
-                  let id = UUID(uuidString: idText),
-                  case let .text(name) = row["name"],
-                  case let .real(started) = row["started_at"]
-            else { throw LocalDatabaseError.invalidRow }
-            let completed: Date?
-            if case let .real(value)? = row["completed_at"] { completed = Date(timeIntervalSince1970: value) }
-            else { completed = nil }
-            let failure: String?
-            if case let .text(value)? = row["failure_code"] { failure = value }
-            else { failure = nil }
-            return LocalMigrationJournalEntry(
-                id: id,
-                name: name,
-                startedAt: Date(timeIntervalSince1970: started),
-                completedAt: completed,
-                failureCode: failure
-            )
-        }
-    }
-
-    public func preserveMigrationBackup(
-        entityId: UUID,
-        migrationName: String,
-        content: Data,
-        at date: Date = .now
-    ) throws {
-        try run(
-            """
-            INSERT OR IGNORE INTO migration_backups(entity_id, migration_name, content, created_at)
-            VALUES (?, ?, ?, ?)
-            """,
-            [
-                .text(canonical(entityId)), .text(migrationName), .blob(content),
-                .real(date.timeIntervalSince1970),
-            ]
-        )
-    }
-
-    public func migrationBackup(entityId: UUID, migrationName: String) throws -> Data? {
-        let rows = try query(
-            "SELECT content FROM migration_backups WHERE entity_id=? AND migration_name=? LIMIT 1",
-            [.text(canonical(entityId)), .text(migrationName)]
-        )
-        guard let row = rows.first else { return nil }
-        guard case let .blob(content)? = row["content"] else { throw LocalDatabaseError.invalidRow }
-        return content
     }
 
     public func deleteLocal(id: UUID, modifiedAt: Date = .now) throws {
@@ -877,6 +815,7 @@ public actor SQLCipherDatabase {
             try run("DELETE FROM search_index WHERE entity_id=?", [.text(canonical(id))])
             try run("DELETE FROM search_embeddings WHERE entity_id=?", [.text(canonical(id))])
             try run("DELETE FROM search_embedding_status WHERE entity_id=?", [.text(canonical(id))])
+            try run("DELETE FROM workspace_summary WHERE entity_id=?", [.text(canonical(id))])
         }
     }
 
@@ -904,6 +843,268 @@ public actor SQLCipherDatabase {
         }
         sql += " ORDER BY client_modified_at DESC, id ASC"
         return try query(sql, values).map(entityFromRow)
+    }
+
+    /// Reads a bounded set of authoritative entities in one database operation. The returned
+    /// order follows the requested identifiers and excludes tombstoned or trashed records.
+    public func entities(ids: [UUID]) throws -> [StoredEntity] {
+        let uniqueIds = Array(Set(ids))
+        guard uniqueIds.count <= 500 else { throw LocalDatabaseError.invalidRow }
+        guard !uniqueIds.isEmpty else { return [] }
+        let placeholders = Array(repeating: "?", count: uniqueIds.count).joined(separator: ",")
+        let rows = try query(
+            """
+            SELECT * FROM entities
+            WHERE id IN (\(placeholders))
+              AND tombstone=0
+              AND NOT EXISTS (
+                    SELECT 1 FROM workspace_summary trash
+                    WHERE trash.entity_type='TRASH_ENTRY'
+                      AND trash.parent_id=entities.id
+                  )
+            """,
+            uniqueIds.map { .text(canonical($0)) }
+        ).map(entityFromRow)
+        let byId = Dictionary(uniqueKeysWithValues: rows.map { ($0.id, $0) })
+        return ids.compactMap { byId[$0] }
+    }
+
+    /// Reads children of several known parents without scanning the complete entity type.
+    public func entities(
+        type: EntityType,
+        parentIds: [UUID],
+        limit: Int = 500
+    ) throws -> [StoredEntity] {
+        let uniqueParentIds = Array(Set(parentIds))
+        guard uniqueParentIds.count <= 500 else { throw LocalDatabaseError.invalidRow }
+        guard !uniqueParentIds.isEmpty else { return [] }
+        let boundedLimit = min(max(limit, 1), 500)
+        let placeholders = Array(repeating: "?", count: uniqueParentIds.count).joined(separator: ",")
+        var values: [SQLValue] = [.text(type.rawValue)]
+        values.append(contentsOf: uniqueParentIds.map { .text(canonical($0)) })
+        values.append(.integer(Int64(boundedLimit)))
+        return try query(
+            """
+            SELECT * FROM entities
+            WHERE entity_type=?
+              AND parent_id IN (\(placeholders))
+              AND tombstone=0
+              AND NOT EXISTS (
+                    SELECT 1 FROM workspace_summary trash
+                    WHERE trash.entity_type='TRASH_ENTRY'
+                      AND trash.parent_id=entities.id
+                  )
+            ORDER BY client_modified_at DESC, id ASC
+            LIMIT ?
+            """,
+            values
+        ).map(entityFromRow)
+    }
+
+    /// Reads one bounded page using a stable `(modifiedAt, id)` cursor. Cursors are local query
+    /// state; they never synchronize and can be discarded after a projection rebuild.
+    public func entitiesPage(
+        type: EntityType,
+        parentId: UUID? = nil,
+        includeTombstones: Bool = false,
+        limit: Int = 50,
+        after cursor: EntityPageCursor? = nil
+    ) throws -> StoredEntityPage {
+        try entitiesPageInsideSnapshot(
+            type: type,
+            parentId: parentId,
+            includeTombstones: includeTombstones,
+            limit: limit,
+            after: cursor
+        )
+    }
+
+    /// Produces all requested first pages on the database actor without allowing another read or
+    /// write to interleave. This is the common foundation for Today, Notebook, Library, Topics,
+    /// and Learning snapshots.
+    public func boundedSnapshot(_ requests: [EntitySnapshotRequest]) throws -> BoundedEntitySnapshot {
+        guard requests.count <= 32 else { throw LocalDatabaseError.invalidRow }
+        let slices = try requests.map { request in
+            EntitySnapshotSlice(
+                request: request,
+                page: try entitiesPageInsideSnapshot(
+                    type: request.type,
+                    parentId: request.parentId,
+                    includeTombstones: false,
+                    limit: request.limit,
+                    after: nil
+                )
+            )
+        }
+        return BoundedEntitySnapshot(readAt: .now, slices: slices)
+    }
+
+    public func workspaceSummary(
+        types: Set<EntityType> = [],
+        topicId: UUID? = nil,
+        lifecycleState: String? = nil,
+        limit: Int = 100
+    ) throws -> [WorkspaceSummaryRecord] {
+        let boundedLimit = min(max(limit, 1), 500)
+        var clauses: [String] = []
+        var values: [SQLValue] = []
+        if !types.isEmpty {
+            clauses.append("entity_type IN (\(Array(repeating: "?", count: types.count).joined(separator: ",")))")
+            values.append(contentsOf: types.sorted { $0.rawValue < $1.rawValue }.map { .text($0.rawValue) })
+        }
+        if let topicId {
+            clauses.append("topic_id=?")
+            values.append(.text(canonical(topicId)))
+        }
+        if let lifecycleState {
+            clauses.append("lifecycle_state=?")
+            values.append(.text(lifecycleState))
+        }
+        var sql = "SELECT * FROM workspace_summary"
+        if !clauses.isEmpty { sql += " WHERE " + clauses.joined(separator: " AND ") }
+        sql += " ORDER BY COALESCE(pinned_at, activity_at) DESC, activity_at DESC, entity_id ASC LIMIT ?"
+        values.append(.integer(Int64(boundedLimit)))
+        return try query(sql, values).map(workspaceSummaryFromRow)
+    }
+
+    public func sourceInboxCount() throws -> Int {
+        try scalarInteger(
+            """
+            SELECT count(*)
+            FROM workspace_summary source
+            WHERE source.entity_type='SOURCE'
+              AND source.topic_id IS NULL
+              AND source.lifecycle_state != 'ARCHIVED'
+              AND NOT EXISTS (
+                SELECT 1 FROM workspace_summary trash
+                WHERE trash.entity_type='TRASH_ENTRY'
+                  AND trash.parent_id=source.entity_id
+              )
+            """
+        )
+    }
+
+    /// Returns due card identifiers from the disposable local projection. The latest review is
+    /// selected deterministically; archived, suspended, trashed, and tombstoned cards are omitted.
+    public func dueFlashcardIds(now: Date, limit: Int = 100) throws -> [UUID] {
+        let boundedLimit = min(max(limit, 1), 500)
+        let rows = try query(
+            """
+            SELECT card.entity_id
+            FROM workspace_summary card
+            WHERE card.entity_type='FLASHCARD'
+              AND card.lifecycle_state='ACTIVE'
+              AND COALESCE(
+                    (
+                        SELECT review.due_at
+                        FROM workspace_summary review
+                        WHERE review.entity_type='FLASHCARD_REVIEW'
+                          AND review.parent_id=card.entity_id
+                        ORDER BY review.activity_at DESC, review.entity_id DESC
+                        LIMIT 1
+                    ),
+                    card.due_at
+                  ) <= ?
+              AND NOT EXISTS (
+                    SELECT 1 FROM workspace_summary trash
+                    WHERE trash.entity_type='TRASH_ENTRY'
+                      AND trash.parent_id=card.entity_id
+                  )
+            ORDER BY COALESCE(
+                        (
+                            SELECT review.due_at
+                            FROM workspace_summary review
+                            WHERE review.entity_type='FLASHCARD_REVIEW'
+                              AND review.parent_id=card.entity_id
+                            ORDER BY review.activity_at DESC, review.entity_id DESC
+                            LIMIT 1
+                        ),
+                        card.due_at
+                     ) ASC,
+                     card.entity_id ASC
+            LIMIT ?
+            """,
+            [.real(now.timeIntervalSince1970), .integer(Int64(boundedLimit))]
+        )
+        return try rows.map { row in
+            guard case let .text(raw) = row["entity_id"], let id = UUID(uuidString: raw)
+            else { throw LocalDatabaseError.invalidRow }
+            return id
+        }
+    }
+
+    /// Counts all due cards by Topic without loading card or review payloads.
+    public func dueFlashcardCountsByTopic(now: Date) throws -> [UUID: Int] {
+        let rows = try query(
+            """
+            SELECT card.topic_id, count(*) AS due_count
+            FROM workspace_summary card
+            WHERE card.entity_type='FLASHCARD'
+              AND card.lifecycle_state='ACTIVE'
+              AND card.topic_id IS NOT NULL
+              AND COALESCE(
+                    (
+                        SELECT review.due_at
+                        FROM workspace_summary review
+                        WHERE review.entity_type='FLASHCARD_REVIEW'
+                          AND review.parent_id=card.entity_id
+                        ORDER BY review.activity_at DESC, review.entity_id DESC
+                        LIMIT 1
+                    ),
+                    card.due_at
+                  ) <= ?
+              AND NOT EXISTS (
+                    SELECT 1 FROM workspace_summary trash
+                    WHERE trash.entity_type='TRASH_ENTRY'
+                      AND trash.parent_id=card.entity_id
+                  )
+            GROUP BY card.topic_id
+            """,
+            [.real(now.timeIntervalSince1970)]
+        )
+        return try Dictionary(uniqueKeysWithValues: rows.map { row in
+            guard case let .text(rawTopicId) = row["topic_id"],
+                  let topicId = UUID(uuidString: rawTopicId),
+                  case let .integer(count) = row["due_count"]
+            else { throw LocalDatabaseError.invalidRow }
+            return (topicId, Int(count))
+        })
+    }
+
+    /// Deletes and reconstructs only the disposable summary projection from authoritative rows.
+    public func rebuildWorkspaceSummary() throws {
+        let liveEntities = try query("SELECT * FROM entities WHERE tombstone=0").map(entityFromRow)
+        try transaction {
+            try run("DELETE FROM workspace_summary")
+            for entity in liveEntities {
+                try updateWorkspaceSummary(
+                    id: entity.id,
+                    entityType: entity.entityType,
+                    parentId: entity.parentId,
+                    content: entity.content,
+                    tombstone: false,
+                    modifiedAt: entity.clientModifiedAt
+                )
+            }
+            try run(
+                "UPDATE local_projection_state SET is_current=1 WHERE name='workspace-summary-v1'"
+            )
+        }
+    }
+
+    public func workspaceSummaryNeedsRebuild() throws -> Bool {
+        try scalarInteger(
+            "SELECT is_current FROM local_projection_state WHERE name='workspace-summary-v1'"
+        ) == 0
+    }
+
+    public func invalidateWorkspaceSummary() throws {
+        try transaction {
+            try run("DELETE FROM workspace_summary")
+            try run(
+                "UPDATE local_projection_state SET is_current=0 WHERE name='workspace-summary-v1'"
+            )
+        }
     }
 
     /// Returns every live entity for complete portability snapshots.
@@ -1092,7 +1293,8 @@ public actor SQLCipherDatabase {
     public func search(
         _ text: String,
         entityTypes: [EntityType]? = nil,
-        limit: Int = 50
+        limit: Int = 50,
+        includeRelated: Bool = true
     ) throws -> [SearchHit] {
         let tokens = text
             .split { !$0.isLetter && !$0.isNumber }
@@ -1165,7 +1367,10 @@ public actor SQLCipherDatabase {
             )
         }
         let exact = exactOrder.prefix(resultLimit).compactMap { exactById[$0] }
-        guard exact.count < resultLimit, semanticEmbeddingProvider.isAvailable else {
+        guard includeRelated,
+              exact.count < resultLimit,
+              semanticEmbeddingProvider.isAvailable
+        else {
             return exact
         }
         _ = try? rebuildSemanticSearchIndex(batchLimit: 8)
@@ -1538,7 +1743,7 @@ public actor SQLCipherDatabase {
         _ = try query("PRAGMA wal_checkpoint(FULL)")
     }
 
-    private static func migrate(_ database: OpaquePointer) throws {
+    private static func migrate(_ database: OpaquePointer, schemaGeneration: Int) throws {
         let migrations = """
         CREATE TABLE IF NOT EXISTS entities (
             id TEXT PRIMARY KEY,
@@ -1554,6 +1759,31 @@ public actor SQLCipherDatabase {
         CREATE INDEX IF NOT EXISTS entities_type_modified
             ON entities(entity_type, client_modified_at DESC);
         CREATE INDEX IF NOT EXISTS entities_parent ON entities(parent_id);
+
+        CREATE TABLE IF NOT EXISTS workspace_summary (
+            entity_id TEXT PRIMARY KEY,
+            entity_type TEXT NOT NULL,
+            parent_id TEXT,
+            topic_id TEXT,
+            lifecycle_state TEXT NOT NULL,
+            pinned_at REAL,
+            due_at REAL,
+            activity_at REAL NOT NULL,
+            FOREIGN KEY(entity_id) REFERENCES entities(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS workspace_summary_type_activity
+            ON workspace_summary(entity_type, activity_at DESC);
+        CREATE INDEX IF NOT EXISTS workspace_summary_topic_activity
+            ON workspace_summary(topic_id, activity_at DESC);
+        CREATE INDEX IF NOT EXISTS workspace_summary_due
+            ON workspace_summary(due_at ASC) WHERE due_at IS NOT NULL;
+
+        CREATE TABLE IF NOT EXISTS local_projection_state (
+            name TEXT PRIMARY KEY,
+            is_current INTEGER NOT NULL CHECK (is_current IN (0, 1))
+        );
+        INSERT OR IGNORE INTO local_projection_state(name, is_current)
+            VALUES ('workspace-summary-v1', 0);
 
         CREATE TABLE IF NOT EXISTS outbox (
             mutation_id TEXT PRIMARY KEY,
@@ -1667,20 +1897,6 @@ public actor SQLCipherDatabase {
             FOREIGN KEY(entity_id) REFERENCES entities(id) ON DELETE CASCADE
         );
 
-        CREATE TABLE IF NOT EXISTS migration_journal (
-            id TEXT PRIMARY KEY,
-            name TEXT NOT NULL,
-            started_at REAL NOT NULL,
-            completed_at REAL,
-            failure_code TEXT
-        );
-        CREATE TABLE IF NOT EXISTS migration_backups (
-            entity_id TEXT NOT NULL,
-            migration_name TEXT NOT NULL,
-            content BLOB NOT NULL,
-            created_at REAL NOT NULL,
-            PRIMARY KEY(entity_id, migration_name)
-        );
         """
         try execute(database, migrations)
         let version = try userVersion(database)
@@ -1720,6 +1936,12 @@ public actor SQLCipherDatabase {
                 """
             )
             try execute(database, "PRAGMA user_version = 4;")
+        }
+        if schemaGeneration >= 2, version < 5 {
+            try execute(database, "PRAGMA user_version = 5;")
+        }
+        if schemaGeneration >= 2, version < 6 {
+            try execute(database, "PRAGMA user_version = 6;")
         }
     }
 
@@ -1849,13 +2071,15 @@ public actor SQLCipherDatabase {
         }
     }
 
+    @discardableResult
     private func updateSearch(
         id: UUID,
         entityType: EntityType,
         document: SearchDocument?,
         projection: SearchProjectionWrite? = nil,
-        modifiedAt: Date
-    ) throws {
+        modifiedAt: Date,
+        rebuildOwners: Bool = true
+    ) throws -> Set<String> {
         let entityId = canonical(id)
         let previousOwners = try query(
             "SELECT DISTINCT owner_entity_id FROM search_segments WHERE source_entity_id=?",
@@ -1888,9 +2112,13 @@ public actor SQLCipherDatabase {
         }
         try replaceSearchProjectionInsideTransaction(resolvedProjection)
         let currentOwners = Set(resolvedProjection.segments.map { canonical($0.ownerEntityId) })
-        for owner in Set(previousOwners).union(currentOwners) {
-            try rebuildOwnerSearchDocument(ownerEntityId: owner)
+        let affectedOwners = Set(previousOwners).union(currentOwners)
+        if rebuildOwners {
+            for owner in affectedOwners.sorted() {
+                try rebuildOwnerSearchDocument(ownerEntityId: owner)
+            }
         }
+        return affectedOwners
     }
 
     private func replaceSearchProjectionInsideTransaction(_ projection: SearchProjectionWrite) throws {
@@ -1965,7 +2193,7 @@ public actor SQLCipherDatabase {
 
     private static func defaultSearchOrigin(for entityType: EntityType) -> SearchSegmentOrigin {
         switch entityType {
-        case .resource, .sourceVersion: .sourceExtraction
+        case .source, .sourceVersion: .sourceExtraction
         case .transcriptCorrection: .transcript
         case .evidence: .evidence
         default: .writtenText
@@ -1974,7 +2202,7 @@ public actor SQLCipherDatabase {
 
     private static func defaultSearchAuthority(for entityType: EntityType) -> Int {
         switch entityType {
-        case .resource, .sourceVersion, .transcriptCorrection: 70
+        case .source, .sourceVersion, .transcriptCorrection: 70
         default: 100
         }
     }
@@ -2182,6 +2410,139 @@ public actor SQLCipherDatabase {
             entityType: entity.entityType,
             document: entity.tombstone ? nil : search,
             modifiedAt: entity.clientModifiedAt
+        )
+        try updateWorkspaceSummary(
+            id: entity.id,
+            entityType: entity.entityType,
+            parentId: entity.parentId,
+            content: entity.content,
+            tombstone: entity.tombstone,
+            modifiedAt: entity.clientModifiedAt
+        )
+    }
+
+    private func entitiesPageInsideSnapshot(
+        type: EntityType,
+        parentId: UUID?,
+        includeTombstones: Bool,
+        limit: Int,
+        after cursor: EntityPageCursor?
+    ) throws -> StoredEntityPage {
+        let boundedLimit = min(max(limit, 1), 200)
+        var sql = "SELECT * FROM entities WHERE entity_type=?"
+        var values: [SQLValue] = [.text(type.rawValue)]
+        if let parentId {
+            sql += " AND parent_id=?"
+            values.append(.text(canonical(parentId)))
+        }
+        if !includeTombstones { sql += " AND tombstone=0" }
+        sql += " AND NOT EXISTS (SELECT 1 FROM workspace_summary trash WHERE trash.entity_type='TRASH_ENTRY' AND trash.parent_id=entities.id)"
+        if let cursor {
+            sql += " AND (client_modified_at < ? OR (client_modified_at = ? AND id > ?))"
+            values.append(.real(cursor.modifiedAt.timeIntervalSince1970))
+            values.append(.real(cursor.modifiedAt.timeIntervalSince1970))
+            values.append(.text(canonical(cursor.entityId)))
+        }
+        sql += " ORDER BY client_modified_at DESC, id ASC LIMIT ?"
+        values.append(.integer(Int64(boundedLimit + 1)))
+        let decoded = try query(sql, values).map(entityFromRow)
+        let hasMore = decoded.count > boundedLimit
+        let pageEntities = Array(decoded.prefix(boundedLimit))
+        let nextCursor: EntityPageCursor?
+        if hasMore, let last = pageEntities.last {
+            nextCursor = EntityPageCursor(modifiedAt: last.clientModifiedAt, entityId: last.id)
+        } else {
+            nextCursor = nil
+        }
+        return StoredEntityPage(entities: pageEntities, nextCursor: nextCursor)
+    }
+
+    private func updateWorkspaceSummary(
+        id: UUID,
+        entityType: EntityType,
+        parentId: UUID?,
+        content: Data,
+        tombstone: Bool,
+        modifiedAt: Date
+    ) throws {
+        guard !tombstone,
+              let record = WorkspaceSummaryIndexer.record(
+                id: id,
+                entityType: entityType,
+                parentId: parentId,
+                content: content,
+                modifiedAt: modifiedAt
+              )
+        else {
+            try run("DELETE FROM workspace_summary WHERE entity_id=?", [.text(canonical(id))])
+            return
+        }
+        try run(
+            """
+            INSERT INTO workspace_summary(
+                entity_id, entity_type, parent_id, topic_id, lifecycle_state,
+                pinned_at, due_at, activity_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(entity_id) DO UPDATE SET
+                entity_type=excluded.entity_type,
+                parent_id=excluded.parent_id,
+                topic_id=excluded.topic_id,
+                lifecycle_state=excluded.lifecycle_state,
+                pinned_at=excluded.pinned_at,
+                due_at=excluded.due_at,
+                activity_at=excluded.activity_at
+            """,
+            [
+                .text(canonical(record.id)),
+                .text(record.entityType.rawValue),
+                record.parentId.map { .text(canonical($0)) } ?? .null,
+                record.topicId.map { .text(canonical($0)) } ?? .null,
+                .text(record.lifecycleState),
+                record.pinnedAt.map { .real($0.timeIntervalSince1970) } ?? .null,
+                record.dueAt.map { .real($0.timeIntervalSince1970) } ?? .null,
+                .real(record.activityAt.timeIntervalSince1970),
+            ]
+        )
+    }
+
+    private func workspaceSummaryFromRow(_ row: [String: SQLValue]) throws -> WorkspaceSummaryRecord {
+        guard case let .text(idRaw) = row["entity_id"],
+              let id = UUID(uuidString: idRaw),
+              case let .text(typeRaw) = row["entity_type"],
+              let entityType = EntityType(rawValue: typeRaw),
+              case let .text(lifecycleState) = row["lifecycle_state"],
+              case let .real(activityRaw) = row["activity_at"],
+              activityRaw.isFinite
+        else { throw LocalDatabaseError.invalidRow }
+        func optionalUUID(_ key: String) throws -> UUID? {
+            guard let value = row[key] else { throw LocalDatabaseError.invalidRow }
+            switch value {
+            case .null: return nil
+            case let .text(raw):
+                guard let value = UUID(uuidString: raw) else { throw LocalDatabaseError.invalidRow }
+                return value
+            default: throw LocalDatabaseError.invalidRow
+            }
+        }
+        func optionalDate(_ key: String) throws -> Date? {
+            guard let value = row[key] else { throw LocalDatabaseError.invalidRow }
+            switch value {
+            case .null: return nil
+            case let .real(raw):
+                guard raw.isFinite else { throw LocalDatabaseError.invalidRow }
+                return Date(timeIntervalSince1970: raw)
+            default: throw LocalDatabaseError.invalidRow
+            }
+        }
+        return WorkspaceSummaryRecord(
+            id: id,
+            entityType: entityType,
+            parentId: try optionalUUID("parent_id"),
+            topicId: try optionalUUID("topic_id"),
+            lifecycleState: lifecycleState,
+            pinnedAt: try optionalDate("pinned_at"),
+            dueAt: try optionalDate("due_at"),
+            activityAt: Date(timeIntervalSince1970: activityRaw)
         )
     }
 

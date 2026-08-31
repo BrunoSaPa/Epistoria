@@ -46,6 +46,7 @@ struct SettingsView: View {
                             symbol: "trash"
                         )
                     }
+                    .accessibilityIdentifier("settings.trash")
                 }
 
                 Section("AI and Learning") {

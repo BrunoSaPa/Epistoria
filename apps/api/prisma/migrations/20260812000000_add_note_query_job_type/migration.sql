@@ -1,2 +1,0 @@
--- AlterEnum: Add NOTE_QUERY to AIJobType
-ALTER TYPE "AIJobType" ADD VALUE 'NOTE_QUERY';

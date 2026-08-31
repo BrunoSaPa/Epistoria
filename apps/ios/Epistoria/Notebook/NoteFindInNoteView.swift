@@ -140,12 +140,12 @@ struct NoteFindInNoteView: View {
     }
 
     private func pageIndex(for block: NoteBlockPayload) -> Int {
-        if let pageId = block.canvasPageId,
+        if let pageId = block.pageId,
            let index = pages.firstIndex(where: { $0.id == pageId })
         {
             return index
         }
-        return max(block.canvasPageIndex ?? 0, 0)
+        return 0
     }
 
     private func pageColor(at index: Int) -> Color {
