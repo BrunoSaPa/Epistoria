@@ -158,15 +158,6 @@ analysis, implementation planning, code drafts, code review, troubleshooting, te
 documentation updates. Its work covered the notebook data model, local-first boundaries, source
 grounding, learning workflows, and verification planning.
 
-The project owner selected the product requirements, privacy boundaries, architecture, and final
-changes. IBM Bob is not a runtime dependency. The running app does not send notebook content to
-IBM Bob.
-
-The [challenge submission checklist](CHALLENGE_SUBMISSION.md) maps the prototype and
-repository materials to the official requirements. The SkillsBuild activity, final commit and
-push, demonstration video, and Event Platform submission require owner action outside the
-codebase.
-
 ## Project status
 
 The repository is a personal beta candidate. Automated verification covers Core, iOS, API,
