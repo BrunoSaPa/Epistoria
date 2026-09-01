@@ -28,7 +28,7 @@ ocr-macos = [
 ocr-formula = [
   "numpy>=2.2,<3",
   "paddleocr>=3.4,<4",
-  "paddlepaddle==3.3.0; platform_system == 'Darwin' and platform_machine == 'arm64'",
+  "paddlepaddle==3.3.1; platform_system == 'Darwin' and platform_machine == 'arm64'",
 ]
 dev = [
   "mypy>=1.17,<2",
