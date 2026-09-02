@@ -32,7 +32,7 @@
     <key>NSFaceIDUsageDescription</key>
     <string>Unlock your encrypted Epistoria account key.</string>
     <key>NSLocalNetworkUsageDescription</key>
-    <string>Connect to your private Epistoria sync server on your local network.</string>
+    <string>Connect to private sync servers, local AI providers, and optional Compute Nodes that you configure on your network.</string>
     <key>UIApplicationSupportsIndirectInputEvents</key>
     <true/>
     <key>UILaunchScreen</key>

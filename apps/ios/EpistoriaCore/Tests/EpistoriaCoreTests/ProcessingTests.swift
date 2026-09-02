@@ -115,4 +115,42 @@ final class ProcessingTests: XCTestCase {
             .computeNode
         )
     }
+
+    func testRelaunchFailsOnlyOrphanedRunningJobs() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("EpistoriaInterruptedJobs-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let database = try SQLCipherDatabase(
+            url: directory.appendingPathComponent("epistoria.sqlite"),
+            key: Data(0 ..< 32)
+        )
+        let running = ProcessingJob(
+            kind: "DIRECT_PROVIDER_TEXT",
+            inputFingerprint: String(repeating: "b", count: 64),
+            requiredCapabilities: [.hostedProvider],
+            selectedRoute: .directProvider
+        )
+        let waiting = ProcessingJob(
+            kind: "PDF_EXTRACTION",
+            state: .waitingForCapability,
+            inputFingerprint: String(repeating: "c", count: 64),
+            requiredCapabilities: [.sourceExtraction]
+        )
+        _ = try await database.saveProcessingJob(running)
+        _ = try await database.transitionProcessingJob(
+            id: running.id,
+            to: .running,
+            route: .directProvider
+        )
+        _ = try await database.saveProcessingJob(waiting)
+
+        let interruptedCount = try await database.failInterruptedProcessingJobs()
+        XCTAssertEqual(interruptedCount, 1)
+        let recovered = try await database.processingJob(id: running.id)
+        XCTAssertEqual(recovered?.state, .failed)
+        XCTAssertEqual(recovered?.errorCode, "INTERRUPTED_BY_RELAUNCH")
+        let preservedWaiting = try await database.processingJob(id: waiting.id)
+        XCTAssertEqual(preservedWaiting?.state, .waitingForCapability)
+    }
 }

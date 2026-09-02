@@ -230,6 +230,9 @@ private struct AIProviderEditorView: View {
     @State private var makeActive: Bool
     @State private var errorMessage: String?
     @State private var isSaving = false
+    @State private var isTesting = false
+    @State private var connectionResult: String?
+    @State private var connectionTestTask: Task<Void, Never>?
     let onSaved: () async -> Void
 
     init(model: AppModel, profile: AIProviderProfile, onSaved: @escaping () async -> Void) {
@@ -288,6 +291,13 @@ private struct AIProviderEditorView: View {
             } footer: {
                 if profile.adapter == .openAICompatible {
                     Text("This iPad resolves this URL. HTTP is accepted only for loopback, private-network, or .local addresses. Leave the key empty for a local server that does not require one.")
+                    if usesLoopbackAddress {
+                        #if targetEnvironment(simulator)
+                        Text("Loopback reaches the Mac from the iPad Simulator. A physical iPad must use the Mac's private IP address or .local hostname.")
+                        #else
+                        Text("127.0.0.1 and localhost refer to this iPad, not your Mac. For Ollama on a Mac, use http://MAC-IP:11434/v1 and expose Ollama to the local network first.")
+                        #endif
+                    }
                 } else {
                     Text("The API key is stored in device-only Keychain. Leave this field empty when editing to retain the existing key.")
                 }
@@ -308,6 +318,44 @@ private struct AIProviderEditorView: View {
                     )
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
+                }
+            }
+
+            Section {
+                Button {
+                    if isTesting {
+                        connectionTestTask?.cancel()
+                    } else {
+                        connectionTestTask = Task { await testConnection() }
+                    }
+                } label: {
+                    if isTesting {
+                        Label("Stop connection test", systemImage: "stop.circle")
+                    } else {
+                        Label("Test server and model", systemImage: "bolt.horizontal.circle")
+                    }
+                }
+                .disabled(!isTesting && (!isValid || isSaving))
+
+                if isTesting {
+                    HStack(spacing: 10) {
+                        ProgressView()
+                        Text("Waiting for the model… The first Ollama load can take longer.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                } else if let connectionResult {
+                    Label(connectionResult, systemImage: "checkmark.circle.fill")
+                        .font(.caption)
+                        .foregroundStyle(EpistoriaDesign.positive)
+                }
+            } header: {
+                Text("Connection test")
+            } footer: {
+                if profile.adapter == .openAICompatible {
+                    Text("Epistoria first checks /v1/models for the exact model name, then requests a short response. The model response has a three-minute timeout and is not saved.")
+                } else {
+                    Text("Epistoria requests a short response and discards it. The model response has a three-minute timeout and does not change notebook data.")
                 }
             }
 
@@ -362,6 +410,9 @@ private struct AIProviderEditorView: View {
             }
         }
         .interactiveDismissDisabled(isSaving)
+        .onDisappear { connectionTestTask?.cancel() }
+        .onChange(of: profile) { _, _ in connectionResult = nil }
+        .onChange(of: apiKey) { _, _ in connectionResult = nil }
         .alert("Could not save provider", isPresented: Binding(
             get: { errorMessage != nil },
             set: { if !$0 { errorMessage = nil } }
@@ -402,6 +453,13 @@ private struct AIProviderEditorView: View {
         profile.state == .local && profile.adapter != .openAICompatible
     }
 
+    private var usesLoopbackAddress: Bool {
+        guard profile.adapter == .openAICompatible,
+              let host = profile.baseURL.host()?.lowercased()
+        else { return false }
+        return host == "localhost" || host == "127.0.0.1" || host == "::1"
+    }
+
     private func capability(_ value: AIProviderCapability) -> Binding<Bool> {
         Binding(
             get: { profile.capabilities.contains(value) },
@@ -436,6 +494,41 @@ private struct AIProviderEditorView: View {
             errorMessage = error.localizedDescription
             isSaving = false
         }
+    }
+
+    @MainActor
+    private func testConnection() async {
+        guard let normalized = AIProviderURLPolicy.normalized(
+            profile.baseURL.absoluteString,
+            adapter: profile.adapter
+        ) else { return }
+        isTesting = true
+        connectionResult = nil
+        errorMessage = nil
+        defer {
+            isTesting = false
+            connectionTestTask = nil
+        }
+        var tested = profile
+        tested.baseURL = normalized
+        tested.displayName = tested.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        tested.textModel = tested.textModel.trimmingCharacters(in: .whitespacesAndNewlines)
+        do {
+            let result = try await model.testAIProviderProfile(
+                tested,
+                replacementSecret: apiKey
+            )
+            connectionResult = "Connected to \(result.verifiedModel) in \(formattedDuration(result.elapsedMilliseconds))."
+        } catch is CancellationError {
+            connectionResult = nil
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func formattedDuration(_ milliseconds: Int) -> String {
+        if milliseconds < 1_000 { return "\(milliseconds) ms" }
+        return String(format: "%.1f s", Double(milliseconds) / 1_000)
     }
 }
 

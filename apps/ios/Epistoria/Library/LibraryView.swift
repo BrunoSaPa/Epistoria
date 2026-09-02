@@ -651,6 +651,8 @@ struct SourceDetailView: View {
     @State private var pageCount = 0
     @State private var annotations: [IdentifiedPayload<AnnotationPayload>] = []
     @State private var extraction: IdentifiedPayload<PDFExtractionManifest>?
+    @State private var isExtractingText = false
+    @State private var extractionStatusMessage: String?
     @State private var ocrArtifacts: [IdentifiedPayload<OCRArtifactPayload>] = []
     @State private var isShowingOCRReview = false
     @State private var sourceAnalysis: IdentifiedPayload<SourceAnalysisArtifact>?
@@ -1159,18 +1161,49 @@ struct SourceDetailView: View {
                                 .font(.caption)
                                 .foregroundStyle(EpistoriaDesign.attention)
                         }
+                        if isRecognizingSourcePages {
+                            HStack(spacing: 10) {
+                                ProgressView()
+                                Text("Recognizing scanned pages privately on this iPad…")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
                         if !ocrArtifacts.isEmpty {
                             Button("Review recognized pages (\(ocrArtifacts.count))") {
                                 isShowingOCRReview = true
                             }
+                            Label("Local OCR finished. Review the recognized pages before using them for learning.", systemImage: "checkmark.circle.fill")
+                                .font(.caption)
+                                .foregroundStyle(EpistoriaDesign.positive)
                         }
                     } else {
-                        Button("Extract text on this iPad", systemImage: "text.viewfinder") {
+                        Button {
                             Task { await queueExtraction() }
+                        } label: {
+                            if isExtractingText {
+                                Label("Extracting text…", systemImage: "text.viewfinder")
+                            } else {
+                                Label("Extract text on this iPad", systemImage: "text.viewfinder")
+                            }
+                        }
+                        .disabled(isExtractingText)
+                        if isExtractingText {
+                            HStack(spacing: 10) {
+                                ProgressView()
+                                Text("Reading embedded text privately on this iPad. You can keep using the Source after this finishes.")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
                         }
                         Text("This local operation does not call an AI provider. The decrypted PDF remains in iPad memory while text is extracted.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                    }
+                    if let extractionStatusMessage {
+                        Label(extractionStatusMessage, systemImage: "checkmark.circle.fill")
+                            .font(.caption)
+                            .foregroundStyle(EpistoriaDesign.positive)
                     }
                 } }
 
@@ -1813,10 +1846,24 @@ struct SourceDetailView: View {
     }
 
     private func queueExtraction() async {
+        guard !isExtractingText else { return }
+        isExtractingText = true
+        extractionStatusMessage = nil
+        defer { isExtractingText = false }
         do {
             _ = try await model.extractPDFOnDevice(sourceId: sourceId)
             model.noteLocalMutation()
             await load()
+            if let extraction {
+                if extraction.payload.pagesNeedingOcr.isEmpty {
+                    extractionStatusMessage = "Text extraction finished. This Source is searchable."
+                } else {
+                    let count = extraction.payload.pagesNeedingOcr.count
+                    extractionStatusMessage = "Embedded text extraction finished. \(count) page\(count == 1 ? "" : "s") still need\(count == 1 ? "s" : "") OCR."
+                }
+            } else {
+                extractionStatusMessage = "Text extraction finished."
+            }
         }
         catch { errorMessage = error.localizedDescription }
     }

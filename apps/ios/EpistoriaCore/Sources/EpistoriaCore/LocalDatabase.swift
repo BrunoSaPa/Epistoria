@@ -1232,6 +1232,20 @@ public actor SQLCipherDatabase {
         return jobs.count
     }
 
+    /// A running task cannot survive process termination. Mark only those orphaned rows as failed
+    /// when a newly unlocked app session begins; queued and waiting work remains untouched.
+    public func failInterruptedProcessingJobs(at date: Date = .now) throws -> Int {
+        let interrupted = try processingJobs(states: [.running])
+        for var job in interrupted {
+            job.state = .failed
+            job.progress = nil
+            job.errorCode = "INTERRUPTED_BY_RELAUNCH"
+            job.updatedAt = date
+            _ = try saveProcessingJob(job)
+        }
+        return interrupted.count
+    }
+
     /// Replaces disposable local search state without mutating or synchronizing an entity.
     public func replaceSearchProjection(_ projection: SearchProjectionWrite) throws {
         try transaction {

@@ -5,6 +5,8 @@ public enum DirectProviderError: Error, Equatable, LocalizedError {
     case missingCredential
     case requestTooLarge
     case transport
+    case timedOut
+    case modelUnavailable
     case rejected(statusCode: Int)
     case invalidResponse
 
@@ -14,6 +16,8 @@ public enum DirectProviderError: Error, Equatable, LocalizedError {
         case .missingCredential: "This provider requires an API key on this iPad."
         case .requestTooLarge: "The approved provider request is too large."
         case .transport: "The provider could not be reached. The request remains available to retry."
+        case .timedOut: "The provider did not finish within three minutes. The request was stopped and can be retried."
+        case .modelUnavailable: "The configured model is not available from this provider. For Ollama, copy the exact name shown by ollama list."
         case let .rejected(statusCode): "The provider rejected the request (HTTP \(statusCode))."
         case .invalidResponse: "The provider returned an unsupported response."
         }
@@ -65,6 +69,8 @@ public final class DirectProviderClient: ProviderClient, ProviderTranscriptionCl
             (data, response) = try await session.data(for: urlRequest)
         } catch is CancellationError {
             throw CancellationError()
+        } catch let error as URLError where error.code == .timedOut {
+            throw DirectProviderError.timedOut
         } catch {
             throw DirectProviderError.transport
         }
@@ -76,6 +82,28 @@ public final class DirectProviderClient: ProviderClient, ProviderTranscriptionCl
         }
         guard data.count <= 8_000_000 else { throw DirectProviderError.invalidResponse }
         return try parse(data, route: route, requestId: http.value(forHTTPHeaderField: "x-request-id"))
+    }
+
+    public func testConnection(
+        route: AIProviderRouteSnapshot,
+        apiKey: String?
+    ) async throws -> ProviderConnectionResult {
+        if route.adapter == .openAICompatible {
+            try await verifyCompatibleModel(route: route, apiKey: apiKey)
+        }
+        let startedAt = Date()
+        let prompt = route.structuredOutput
+            ? #"Return exactly this JSON object and nothing else: {"status":"ok"}"#
+            : "Reply with OK and nothing else."
+        _ = try await performText(
+            ProviderTextRequest(prompt: prompt, maximumOutputTokens: 24),
+            route: route,
+            apiKey: apiKey
+        )
+        return ProviderConnectionResult(
+            elapsedMilliseconds: Int(Date().timeIntervalSince(startedAt) * 1_000),
+            verifiedModel: route.textModel
+        )
     }
 
     public func performTranscription(
@@ -112,6 +140,8 @@ public final class DirectProviderClient: ProviderClient, ProviderTranscriptionCl
             (data, response) = try await session.data(for: urlRequest)
         } catch is CancellationError {
             throw CancellationError()
+        } catch let error as URLError where error.code == .timedOut {
+            throw DirectProviderError.timedOut
         } catch {
             throw DirectProviderError.transport
         }
@@ -158,6 +188,7 @@ public final class DirectProviderClient: ProviderClient, ProviderTranscriptionCl
 
         var result = URLRequest(url: endpoint)
         result.httpMethod = "POST"
+        result.timeoutInterval = 180
         result.setValue("application/json", forHTTPHeaderField: "Content-Type")
         result.setValue("application/json", forHTTPHeaderField: "Accept")
         switch route.adapter {
@@ -208,11 +239,16 @@ public final class DirectProviderClient: ProviderClient, ProviderTranscriptionCl
                 "role": "user",
                 "content": userContent,
             ])
-            object = [
+            var value: [String: Any] = [
                 "model": route.textModel,
                 "messages": genericMessages,
                 "max_tokens": request.maximumOutputTokens,
+                "stream": false,
             ]
+            if route.structuredOutput {
+                value["response_format"] = ["type": "json_object"]
+            }
+            object = value
         case .anthropicMessages:
             let userContent: Any = request.images.isEmpty
                 ? request.prompt
@@ -398,6 +434,47 @@ public final class DirectProviderClient: ProviderClient, ProviderTranscriptionCl
             .flatMap { $0 }
             .compactMap { $0["text"] as? String }
             .joined(separator: "\n")
+    }
+
+    private func verifyCompatibleModel(
+        route: AIProviderRouteSnapshot,
+        apiKey: String?
+    ) async throws {
+        guard let baseURL = Self.validatedBaseURL(route.baseURL) else {
+            throw DirectProviderError.invalidRoute
+        }
+        var request = URLRequest(url: baseURL.appending(path: "models"))
+        request.httpMethod = "GET"
+        request.timeoutInterval = 15
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        if let apiKey, !apiKey.isEmpty {
+            request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        }
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await session.data(for: request)
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch let error as URLError where error.code == .timedOut {
+            throw DirectProviderError.timedOut
+        } catch {
+            throw DirectProviderError.transport
+        }
+        guard let http = response as? HTTPURLResponse else {
+            throw DirectProviderError.invalidResponse
+        }
+        guard (200 ..< 300).contains(http.statusCode) else {
+            throw DirectProviderError.rejected(statusCode: http.statusCode)
+        }
+        guard data.count <= 2_000_000,
+              let root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let models = root["data"] as? [[String: Any]]
+        else { throw DirectProviderError.invalidResponse }
+        let configured = route.textModel.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard models.contains(where: { ($0["id"] as? String) == configured }) else {
+            throw DirectProviderError.modelUnavailable
+        }
     }
 
     private static func validatedBaseURL(_ value: String) -> URL? {

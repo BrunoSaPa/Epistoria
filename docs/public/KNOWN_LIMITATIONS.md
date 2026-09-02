@@ -114,6 +114,10 @@ Epistoria remains in personal beta. The following limits apply to the current pr
 - Provider connections do not transfer to a fresh iPad. Enter the key again after recovery.
 - A local provider can keep approved content off a hosted service, but quality, speed, context,
   vision, transcription, and reliable structured output depend on the selected model and server.
+- A physical iPad cannot reach a Mac provider through `127.0.0.1` or `localhost`. Ollama must be
+  exposed on a trusted private network and addressed by the Mac's private address or `.local`
+  hostname. Provider model responses stop after three minutes; the first model load can approach
+  that limit.
 - Anthropic and Gemini native connections support text and optional vision only. Timestamped
   transcription requires the official Responses or a compatible connection.
 - A live paid AI evaluation is not part of the current release evidence.

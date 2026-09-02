@@ -155,7 +155,7 @@ struct ProcessingActivityView: View {
             }
         }
         .navigationTitle("Processing Activity")
-        .task { await load() }
+        .task { await observeJobs() }
         .refreshable { await load() }
         .alert("Processing problem", isPresented: .constant(errorMessage != nil)) {
             Button("OK", role: .cancel) { errorMessage = nil }
@@ -178,6 +178,13 @@ struct ProcessingActivityView: View {
                 .foregroundStyle(.secondary)
             if let progress = job.progress {
                 ProgressView(value: progress)
+            } else if job.state == .running {
+                ProgressView()
+            }
+            if let errorCode = job.errorCode {
+                Text(errorDescription(errorCode))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
             if job.state == .failed {
                 Button("Retry on iPad") { Task { await retryOnIPad(job) } }
@@ -203,6 +210,17 @@ struct ProcessingActivityView: View {
     @MainActor private func load() async {
         do { jobs = try await model.database?.processingJobs() ?? [] }
         catch { errorMessage = error.localizedDescription }
+    }
+
+    @MainActor private func observeJobs() async {
+        while !Task.isCancelled {
+            await load()
+            do {
+                try await Task.sleep(for: activeJobs.isEmpty ? .seconds(5) : .seconds(1))
+            } catch {
+                return
+            }
+        }
     }
 
     @MainActor private func transition(_ job: ProcessingJob, to state: ProcessingJobState) async {
@@ -256,6 +274,21 @@ struct ProcessingActivityView: View {
         case .directProvider: "Direct provider request from this iPad"
         case .computeNode: "Using an approved optional Compute Node"
         case nil: "Waiting for a compatible approved route"
+        }
+    }
+
+    private func errorDescription(_ code: String) -> String {
+        switch code {
+        case "PROVIDER_UNREACHABLE":
+            "The provider could not be reached. Check its address and network access."
+        case "PROVIDER_REQUEST_FAILED":
+            "The provider rejected the request or returned an unsupported response."
+        case "PDF_EXTRACTION_FAILED":
+            "The PDF could not be read on this iPad."
+        case "INTERRUPTED_BY_RELAUNCH":
+            "The app closed before this work finished. Return to the original action to try again."
+        default:
+            "Processing stopped with \(code.lowercased().replacingOccurrences(of: "_", with: " "))."
         }
     }
 }

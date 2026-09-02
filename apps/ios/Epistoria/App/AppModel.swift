@@ -705,6 +705,44 @@ final class AppModel {
         await refreshAIJobProviderRoute(accountId: accountId)
     }
 
+    /// Tests the exact unsaved route shown in Settings. The response is discarded and no
+    /// processing record, notebook content, or provider credential is synchronized.
+    func testAIProviderProfile(
+        _ proposed: AIProviderProfile,
+        replacementSecret: String?
+    ) async throws -> ProviderConnectionResult {
+        guard let accountId = configuration?.accountId else {
+            throw AppModelOperationError.aiProviderUnavailable
+        }
+        guard AIProviderURLPolicy.normalized(
+            proposed.baseURL.absoluteString,
+            adapter: proposed.adapter
+        ) == proposed.baseURL else {
+            throw AppModelOperationError.aiProviderURLInvalid
+        }
+        let profiles = try aiProviderProfileStore.load(accountId: accountId)
+        let existing = profiles.first(where: { $0.id == proposed.id })
+        let replacement = replacementSecret?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let storedSecret = try aiProviderSecretStore.secret(
+            accountId: accountId,
+            profileId: proposed.id
+        )
+        let secret = replacement?.isEmpty == false
+            ? replacement
+            : (existing?.adapter == proposed.adapter ? storedSecret : nil)
+        if proposed.adapter != .openAICompatible, secret?.isEmpty != false {
+            throw AppModelOperationError.aiProviderSecretRequired
+        }
+        var tested = proposed
+        tested.displayName = tested.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        tested.textModel = tested.textModel.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !tested.capabilities.contains(.text) { tested.capabilities.append(.text) }
+        return try await directProviderClient.testConnection(
+            route: tested.routeSnapshot,
+            apiKey: secret
+        )
+    }
+
     func activateAIProviderProfile(id: UUID) async throws {
         guard let accountId = configuration?.accountId else {
             throw AppModelOperationError.aiProviderUnavailable
@@ -1192,9 +1230,6 @@ final class AppModel {
               let assetId = version.originalAssetId
         else { throw AIJobCoordinatorError.resourceHasNoPDF }
         let data = try await assetManager.decryptedData(assetId: assetId)
-        guard let document = PDFDocument(data: data), document.pageCount > 0 else {
-            throw AIJobCoordinatorError.resourceHasNoPDF
-        }
         let jobId = UUID()
         let fingerprint = SHA256.hash(data: data)
             .map { String(format: "%02x", $0) }.joined()
@@ -1209,21 +1244,7 @@ final class AppModel {
         _ = try await database.saveProcessingJob(job)
         _ = try await database.transitionProcessingJob(id: jobId, to: .running, route: .onDevice)
         do {
-            var pages: [ExtractedPDFPage] = []
-            for index in 0 ..< document.pageCount {
-                try Task.checkCancellation()
-                let raw = document.page(at: index)?.string ?? ""
-                let text = String(raw.prefix(100_000))
-                let count = text.count
-                pages.append(
-                    ExtractedPDFPage(
-                        pageNumber: index + 1,
-                        text: text,
-                        characterCount: count,
-                        needsOcr: text.trimmingCharacters(in: .whitespacesAndNewlines).count < 24
-                    )
-                )
-            }
+            let pages = try await Self.extractEmbeddedPDFText(data)
             var chunkIds: [UUID] = []
             for (index, start) in stride(from: 0, to: pages.count, by: 10).enumerated() {
                 let id = DirectWorkflowGeneration.artifactId(
@@ -1276,6 +1297,35 @@ final class AppModel {
             )
             throw error
         }
+    }
+
+    /// PDFKit parsing can be expensive on image-heavy files. Keep it away from the MainActor so
+    /// Pencil, navigation, and the visible progress state remain responsive.
+    private nonisolated static func extractEmbeddedPDFText(
+        _ data: Data
+    ) async throws -> [ExtractedPDFPage] {
+        try await Task.detached(priority: .userInitiated) {
+            guard let document = PDFDocument(data: data), document.pageCount > 0 else {
+                throw AIJobCoordinatorError.resourceHasNoPDF
+            }
+            var pages: [ExtractedPDFPage] = []
+            pages.reserveCapacity(document.pageCount)
+            for index in 0 ..< document.pageCount {
+                try Task.checkCancellation()
+                let raw = document.page(at: index)?.string ?? ""
+                let text = String(raw.prefix(100_000))
+                let count = text.count
+                pages.append(
+                    ExtractedPDFPage(
+                        pageNumber: index + 1,
+                        text: text,
+                        characterCount: count,
+                        needsOcr: text.trimmingCharacters(in: .whitespacesAndNewlines).count < 24
+                    )
+                )
+            }
+            return pages
+        }.value
     }
 
     func prepareDirectSource(
@@ -2478,6 +2528,7 @@ final class AppModel {
     private func beginReadyWork() async {
         try? ProtectedVideoFileStore.removeAllTemporaryFiles()
         let generation = sessionGeneration
+        _ = try? await database?.failInterruptedProcessingJobs()
         do {
             try await pendingSaves.flushAll()
             pendingSaveWarning = nil

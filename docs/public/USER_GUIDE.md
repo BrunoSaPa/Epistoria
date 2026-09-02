@@ -662,8 +662,11 @@ Already completed drafts remain available for review.
 4. Enter the exact model name. Enter a service address only for a compatible service.
 5. Enable only the capabilities supported by that service.
 6. Enter the provider key. A local service that does not require a key can leave it empty.
-7. Review the destination statement and select **Save**.
-8. Confirm that the provider shows **Ready**.
+7. Select **Test server and model**. Wait for the success result before saving. The test checks
+   the exact model name and requests a short response. The model response stops after three
+   minutes.
+8. Review the destination statement and select **Save**.
+9. Confirm that the provider shows **Ready**.
 
 Only one provider is active. Swipe a ready inactive provider and select **Use** to activate it.
 Open a provider to update its model, capabilities, price estimates, or key. Swipe from the other
@@ -685,6 +688,25 @@ Direct provider addresses are reached from the iPad. A loopback address refers t
 Remote addresses require HTTPS. A separately selected Compute Node route uses that node's
 network. Provider keys stay in device-only Keychain storage, do not synchronize, and do not
 appear in readable notebook exports. A fresh iPad requires the key to be entered again.
+
+### Connect Ollama running on a Mac
+
+1. Put the iPad and Mac on the same trusted private network.
+2. On the Mac, run `ollama list` and copy the complete model name, including its tag. For example,
+   use `qwen3-vl:8b` only when that exact name appears.
+3. Ollama listens only on the Mac loopback address by default. Set `OLLAMA_HOST` to
+   `0.0.0.0:11434`, restart Ollama, and allow the connection through the Mac firewall. Do not
+   expose this unauthenticated address to a public or untrusted network.
+4. Find the Mac's private network address or `.local` hostname.
+5. On the iPad, add a **compatible** provider. Enter
+   `http://MAC-IP:11434/v1`, the exact model name, and no API key unless the local gateway adds
+   authentication.
+6. Enable **Vision input** only for a vision-capable model.
+7. Select **Test server and model**. The first test can take longer while Ollama loads the model.
+
+`127.0.0.1` and `localhost` are not valid Mac addresses from a physical iPad. They refer to the
+iPad itself. If the server check fails, confirm the Mac address, Ollama bind setting, firewall,
+Local Network permission, model name, and Wi-Fi network before retrying.
 
 ## Search
 

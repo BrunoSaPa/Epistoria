@@ -272,6 +272,42 @@ public protocol ProviderClient: Sendable {
         route: AIProviderRouteSnapshot,
         apiKey: String?
     ) async throws -> ProviderTextResponse
+
+    func testConnection(
+        route: AIProviderRouteSnapshot,
+        apiKey: String?
+    ) async throws -> ProviderConnectionResult
+}
+
+public struct ProviderConnectionResult: Equatable, Sendable {
+    public var elapsedMilliseconds: Int
+    public var verifiedModel: String
+
+    public init(elapsedMilliseconds: Int, verifiedModel: String) {
+        self.elapsedMilliseconds = max(elapsedMilliseconds, 0)
+        self.verifiedModel = String(verifiedModel.prefix(200))
+    }
+}
+
+public extension ProviderClient {
+    func testConnection(
+        route: AIProviderRouteSnapshot,
+        apiKey: String?
+    ) async throws -> ProviderConnectionResult {
+        let startedAt = Date()
+        let prompt = route.structuredOutput
+            ? #"Return exactly this JSON object and nothing else: {"status":"ok"}"#
+            : "Reply with OK and nothing else."
+        _ = try await performText(
+            ProviderTextRequest(prompt: prompt, maximumOutputTokens: 24),
+            route: route,
+            apiKey: apiKey
+        )
+        return ProviderConnectionResult(
+            elapsedMilliseconds: Int(Date().timeIntervalSince(startedAt) * 1_000),
+            verifiedModel: route.textModel
+        )
+    }
 }
 
 public struct ProviderTranscriptionRequest: Equatable, Sendable {
