@@ -6,7 +6,7 @@ import Observation
 import PDFKit
 import UIKit
 
-private enum AppModelOperationError: Error, LocalizedError {
+enum AppModelOperationError: Error, LocalizedError {
     case accountSetupRollbackFailed
     case existingLocalNotebook
     case configuredNotebookUnavailable
@@ -133,9 +133,9 @@ final class AppModel {
     private let configurationStore: AccountConfigurationStore
     private let accountKeyStore: KeychainStore
     private let tokenStore: DeviceTokenStore
-    private let aiProviderProfileStore: AIProviderProfileStore
-    private let aiProviderSecretStore: AIProviderSecretStore
-    private let directProviderClient: any ProviderClient
+    let aiProviderProfileStore: AIProviderProfileStore
+    let aiProviderSecretStore: AIProviderSecretStore
+    let directProviderClient: any ProviderClient
     private let directTranscriptionClient: any ProviderTranscriptionClient
     private let crypto: EntityCrypto
     private let sharedCaptureImporter: SharedCaptureImporter?
@@ -158,6 +158,7 @@ final class AppModel {
     private var isLocking = false
     private var restartRequested = false
     private var sessionGeneration: UInt64 = 0
+    private var recoveredProcessingAccounts: Set<UUID> = []
     private var isReconfiguringSync = false
     private var pendingSaveWarning: String?
 
@@ -177,6 +178,7 @@ final class AppModel {
         crypto: EntityCrypto = EntityCrypto(),
         applicationSupportURL: URL? = nil
     ) {
+        _ = Self.processingProcessStartedAt
         self.configurationStore = configurationStore
         self.accountKeyStore = accountKeyStore
         self.tokenStore = tokenStore
@@ -703,44 +705,6 @@ final class AppModel {
         upsert(saved, in: &profiles)
         try aiProviderProfileStore.save(profiles, accountId: accountId)
         await refreshAIJobProviderRoute(accountId: accountId)
-    }
-
-    /// Tests the exact unsaved route shown in Settings. The response is discarded and no
-    /// processing record, notebook content, or provider credential is synchronized.
-    func testAIProviderProfile(
-        _ proposed: AIProviderProfile,
-        replacementSecret: String?
-    ) async throws -> ProviderConnectionResult {
-        guard let accountId = configuration?.accountId else {
-            throw AppModelOperationError.aiProviderUnavailable
-        }
-        guard AIProviderURLPolicy.normalized(
-            proposed.baseURL.absoluteString,
-            adapter: proposed.adapter
-        ) == proposed.baseURL else {
-            throw AppModelOperationError.aiProviderURLInvalid
-        }
-        let profiles = try aiProviderProfileStore.load(accountId: accountId)
-        let existing = profiles.first(where: { $0.id == proposed.id })
-        let replacement = replacementSecret?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let storedSecret = try aiProviderSecretStore.secret(
-            accountId: accountId,
-            profileId: proposed.id
-        )
-        let secret = replacement?.isEmpty == false
-            ? replacement
-            : (existing?.adapter == proposed.adapter ? storedSecret : nil)
-        if proposed.adapter != .openAICompatible, secret?.isEmpty != false {
-            throw AppModelOperationError.aiProviderSecretRequired
-        }
-        var tested = proposed
-        tested.displayName = tested.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
-        tested.textModel = tested.textModel.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !tested.capabilities.contains(.text) { tested.capabilities.append(.text) }
-        return try await directProviderClient.testConnection(
-            route: tested.routeSnapshot,
-            apiKey: secret
-        )
     }
 
     func activateAIProviderProfile(id: UUID) async throws {
@@ -2525,10 +2489,19 @@ final class AppModel {
         await synchronize(reportMissingServer: false)
     }
 
+    private static let processingProcessStartedAt = Date()
+
     private func beginReadyWork() async {
         try? ProtectedVideoFileStore.removeAllTemporaryFiles()
         let generation = sessionGeneration
-        _ = try? await database?.failInterruptedProcessingJobs()
+        if let accountId = configuration?.accountId, let database,
+           recoveredProcessingAccounts.insert(accountId).inserted {
+            do {
+                _ = try await database.failInterruptedProcessingJobs(before: Self.processingProcessStartedAt)
+            } catch {
+                recoveredProcessingAccounts.remove(accountId)
+            }
+        }
         do {
             try await pendingSaves.flushAll()
             pendingSaveWarning = nil

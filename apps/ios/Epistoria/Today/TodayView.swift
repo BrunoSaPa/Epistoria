@@ -11,6 +11,8 @@ private enum TodayDestination: Hashable {
 
 struct TodayView: View {
     @Bindable var model: AppModel
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @State private var loadState: WorkspaceLoadState = .loading
 
     @State private var notes: [IdentifiedPayload<NotePayload>] = []
     @State private var sessions: [IdentifiedPayload<StudySessionPayload>] = []
@@ -38,13 +40,15 @@ struct TodayView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 32) {
                     welcomeHeader
-                    syncStatusCard
+                    if model.syncError != nil || model.unresolvedConflictCount > 0 {
+                        syncStatusCard
+                    }
                     quickActions
                     activeSessionCard
                     recentSection
                     if hasLearningActivity { learningOverview }
                 }
-                .padding(.horizontal, EpistoriaDesign.Spacing.page)
+                .padding(.horizontal, horizontalSizeClass == .compact ? 16 : EpistoriaDesign.Spacing.page)
                 .padding(.vertical, EpistoriaDesign.Spacing.xLarge)
                 .frame(maxWidth: EpistoriaDesign.Layout.pageWidth)
                 .frame(maxWidth: .infinity)
@@ -137,7 +141,7 @@ struct TodayView: View {
                 .foregroundStyle(EpistoriaDesign.mutedInk)
             Text(greeting)
                 .font(.largeTitle.weight(.bold))
-            Text("Choose the next useful action. Everything remains available offline.")
+            Text("Notes and Sources, in one place.")
                 .font(.body)
                 .foregroundStyle(EpistoriaDesign.mutedInk)
         }
@@ -185,12 +189,11 @@ struct TodayView: View {
     private var quickActions: some View {
         VStack(alignment: .leading, spacing: 14) {
             EpistoriaSectionHeading(
-                title: "Start something",
-                subtitle: "Capture a thought, focus your time, or bring in a document."
+                title: "Write and collect"
             )
             LazyVGrid(columns: actionColumns, spacing: 10) {
                 EpistoriaQuickAction(
-                    title: "Quick note",
+                    title: isWorking ? "Creating note…" : "Quick note",
                     subtitle: "Capture now · organize later",
                     symbol: "square.and.pencil",
                     prominent: true
@@ -201,36 +204,43 @@ struct TodayView: View {
                 .accessibilityIdentifier("today.quick-note")
 
                 EpistoriaQuickAction(
-                    title: activeSession == nil ? "Start a session" : "Continue session",
-                    subtitle: activeSession == nil ? "Set an intention" : activeSession?.payload.title ?? "Return to your work",
-                    symbol: activeSession == nil ? "play.circle" : "timer"
-                ) {
-                    if let activeSession {
-                        destination = .session(activeSession.id)
-                    } else {
-                        showNewSession = true
-                    }
-                }
-                .accessibilityIdentifier("today.session")
-
-                EpistoriaQuickAction(
                     title: "Add Source",
-                    subtitle: "PDF, image, text, Markdown, or HTML",
+                    subtitle: "Import a document, image, or text",
                     symbol: "doc.badge.plus"
                 ) {
                     isImporting = true
                 }
                 .accessibilityIdentifier("today.import-pdf")
 
-                EpistoriaQuickAction(
-                    title: "Learn",
-                    subtitle: "Sessions, review, Tutor, and history",
-                    symbol: "graduationcap"
-                ) {
-                    model.learningLaunchContext = LearningLaunchContext(destination: .overview)
-                    model.selectedSection = .learning
-                }
-                .accessibilityIdentifier("today.learn")
+
+            }
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 20) { secondaryActions }
+                VStack(alignment: .leading, spacing: 8) { secondaryActions }
+            }
+            .buttonStyle(.borderless)
+            .font(.subheadline)
+
+        }
+    }
+
+    @ViewBuilder
+    private var secondaryActions: some View {
+        Button {
+            model.learningLaunchContext = LearningLaunchContext(destination: .overview)
+            model.selectedSection = .learning
+        } label: { Label("Learn", systemImage: "graduationcap").frame(minHeight: 44) }
+        .accessibilityIdentifier("today.learn")
+        Button {
+            if let activeSession { destination = .session(activeSession.id) }
+            else { showNewSession = true }
+        } label: {
+            Label(activeSession == nil ? "Start session" : "Continue session", systemImage: "timer").frame(minHeight: 44)
+        }
+        .accessibilityIdentifier("today.session")
+        if sourceInboxCount > 0 {
+            Button { model.selectedSection = .library } label: {
+                Label("Source Inbox (\(sourceInboxCount))", systemImage: "tray").frame(minHeight: 44)
             }
         }
     }
@@ -323,7 +333,14 @@ struct TodayView: View {
                 subtitle: "Open the notes and Sources you touched most recently."
             )
 
-            if notes.isEmpty && resources.isEmpty {
+            if loadState == .loading {
+                EpistoriaLoadingRows()
+            } else if loadState == .failed {
+                ContentUnavailableView {
+                    Label("Couldn’t load recent work", systemImage: "exclamationmark.triangle")
+                } description: { Text("Your saved content has not been changed.") }
+                actions: { Button("Try again") { Task { await load() } } }
+            } else if notes.isEmpty && resources.isEmpty {
                 HStack(spacing: 14) {
                     Image(systemName: "doc.text")
                         .font(.title3)
@@ -332,7 +349,7 @@ struct TodayView: View {
                     VStack(alignment: .leading, spacing: 3) {
                         Text("No recent work")
                             .font(.subheadline.weight(.semibold))
-                        Text("Create a note or import a PDF; both are encrypted before sync.")
+                        Text("Create a note or add a Source to get started.")
                             .font(.caption)
                             .foregroundStyle(EpistoriaDesign.mutedInk)
                     }
@@ -548,14 +565,18 @@ struct TodayView: View {
             recommendations = learning.recommendations.items
             dueCardCountsByTopic = result.3
             dailyReviewDueCount = result.4.totalDueCount
+            loadState = .ready
             errorMessage = nil
+        } catch is CancellationError {
+            return
         } catch {
+            if loadState != .ready { loadState = .failed }
             errorMessage = error.localizedDescription
         }
     }
 
     private func createQuickNote() async {
-        guard let store = model.store else { return }
+        guard let store = model.store, !isWorking else { return }
         isWorking = true
         defer { isWorking = false }
         do {

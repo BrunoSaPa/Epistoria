@@ -145,12 +145,39 @@ final class ProcessingTests: XCTestCase {
         )
         _ = try await database.saveProcessingJob(waiting)
 
-        let interruptedCount = try await database.failInterruptedProcessingJobs()
+        let cutoff = Date()
+        let remote = ProcessingJob(kind: "REMOTE", state: .running,
+            inputFingerprint: "remote", requiredCapabilities: [], selectedRoute: .computeNode)
+        let current = ProcessingJob(kind: "CURRENT", state: .running,
+            inputFingerprint: "current", requiredCapabilities: [], selectedRoute: .onDevice)
+        _ = try await database.saveProcessingJob(remote)
+        _ = try await database.saveProcessingJob(current)
+        let interruptedCount = try await database.failInterruptedProcessingJobs(before: cutoff)
         XCTAssertEqual(interruptedCount, 1)
         let recovered = try await database.processingJob(id: running.id)
         XCTAssertEqual(recovered?.state, .failed)
         XCTAssertEqual(recovered?.errorCode, "INTERRUPTED_BY_RELAUNCH")
         let preservedWaiting = try await database.processingJob(id: waiting.id)
         XCTAssertEqual(preservedWaiting?.state, .waitingForCapability)
+        let remoteAfter = try await database.processingJob(id: remote.id)
+        let currentAfter = try await database.processingJob(id: current.id)
+        XCTAssertEqual(remoteAfter?.state, .running)
+        XCTAssertEqual(currentAfter?.state, .running)
+        let repeated = try await database.failInterruptedProcessingJobs(before: cutoff)
+        XCTAssertEqual(repeated, 0)
+
+        for index in 0..<100 {
+            _ = try await database.saveProcessingJob(ProcessingJob(
+                kind: "HISTORY", state: .completed, inputFingerprint: "history-\(index)",
+                requiredCapabilities: [], selectedRoute: .onDevice))
+            _ = try await database.saveProcessingJob(ProcessingJob(
+                kind: "ACTIVE", inputFingerprint: "active-\(index)", requiredCapabilities: []))
+        }
+        let first = try await database.processingActivitySnapshot()
+        let second = try await database.processingActivitySnapshot(activeOffset: 30)
+        XCTAssertEqual(first.active.count, 30)
+        XCTAssertEqual(first.recent.count, 30)
+        XCTAssertTrue(first.hasMoreActive)
+        XCTAssertTrue(Set(first.active.map(\.id)).isDisjoint(with: Set(second.active.map(\.id))))
     }
 }

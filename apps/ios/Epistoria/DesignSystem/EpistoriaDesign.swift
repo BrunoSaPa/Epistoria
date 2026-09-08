@@ -188,7 +188,7 @@ struct EpistoriaQuickAction: View {
                         .foregroundStyle(
                             prominent ? EpistoriaDesign.inverseInk.opacity(0.78) : EpistoriaDesign.mutedInk
                         )
-                        .lineLimit(1)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer(minLength: 4)
                 Image(systemName: "chevron.right")
@@ -337,4 +337,34 @@ extension EnvironmentValues {
         get { self[EpistoriaWorkspacePresentationKey.self] }
         set { self[EpistoriaWorkspacePresentationKey.self] = newValue }
     }
+}
+
+enum WorkspaceLoadState {
+    case loading, ready, failed
+}
+
+/// Stable, noninteractive rows while local content is being read.
+struct EpistoriaLoadingRows: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            ForEach(0..<3) { _ in
+                HStack(spacing: 16) {
+                    RoundedRectangle(cornerRadius: 6).fill(EpistoriaDesign.subtleFill)
+                        .frame(width: 48, height: 60)
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Notebook content").font(.headline)
+                        Text("Loading your saved work").font(.subheadline)
+                    }.redacted(reason: .placeholder)
+                    Spacer()
+                }
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Loading saved content")
+        .allowsHitTesting(false)
+    }
+}
+
+#Preview("Loading • large text") {
+    EpistoriaLoadingRows().padding().dynamicTypeSize(.accessibility2)
 }

@@ -35,7 +35,6 @@ if [[ "$(uname -s)" == "Darwin" ]] && command -v xcodebuild >/dev/null 2>&1; the
     -destination 'generic/platform=iOS Simulator' \
     -derivedDataPath "$temporary_root/DerivedData" \
     CODE_SIGNING_ALLOWED=NO \
-    EXCLUDED_SOURCE_FILE_NAMES='Assets.xcassets PrivacyInfo.xcprivacy' \
     build
 fi
 
@@ -44,4 +43,4 @@ if [[ "${EPISTORIA_VERIFY_E2E:-0}" == "1" ]]; then
 fi
 
 scripts/plaintext-canary.sh
-printf 'Epistoria verification passed.\n'
+printf 'Core, API, Compute Node, security and full app bundle verification passed. Application/UI tests are a separate gate.\n'

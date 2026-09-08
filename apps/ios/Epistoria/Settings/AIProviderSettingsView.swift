@@ -352,11 +352,7 @@ private struct AIProviderEditorView: View {
             } header: {
                 Text("Connection test")
             } footer: {
-                if profile.adapter == .openAICompatible {
-                    Text("Epistoria first checks /v1/models for the exact model name, then requests a short response. The model response has a three-minute timeout and is not saved.")
-                } else {
-                    Text("Epistoria requests a short response and discards it. The model response has a three-minute timeout and does not change notebook data.")
-                }
+                Text("Sends a short sample request, not notebook content, with a 256-token output limit and a three-minute timeout. The response is discarded. Hosted providers may charge for this test.")
             }
 
             Section {
@@ -411,8 +407,8 @@ private struct AIProviderEditorView: View {
         }
         .interactiveDismissDisabled(isSaving)
         .onDisappear { connectionTestTask?.cancel() }
-        .onChange(of: profile) { _, _ in connectionResult = nil }
-        .onChange(of: apiKey) { _, _ in connectionResult = nil }
+        .onChange(of: profile) { _, _ in connectionTestTask?.cancel(); connectionResult = nil }
+        .onChange(of: apiKey) { _, _ in connectionTestTask?.cancel(); connectionResult = nil }
         .alert("Could not save provider", isPresented: Binding(
             get: { errorMessage != nil },
             set: { if !$0 { errorMessage = nil } }
@@ -509,6 +505,8 @@ private struct AIProviderEditorView: View {
             isTesting = false
             connectionTestTask = nil
         }
+        let originalProfile = profile
+        let originalKey = apiKey
         var tested = profile
         tested.baseURL = normalized
         tested.displayName = tested.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -518,6 +516,8 @@ private struct AIProviderEditorView: View {
                 tested,
                 replacementSecret: apiKey
             )
+            try Task.checkCancellation()
+            guard profile == originalProfile, apiKey == originalKey else { return }
             connectionResult = "Connected to \(result.verifiedModel) in \(formattedDuration(result.elapsedMilliseconds))."
         } catch is CancellationError {
             connectionResult = nil

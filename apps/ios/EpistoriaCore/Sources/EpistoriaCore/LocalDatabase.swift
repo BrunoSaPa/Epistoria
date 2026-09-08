@@ -1194,6 +1194,22 @@ public actor SQLCipherDatabase {
         return try query(sql, values).map(processingJobFromRow)
     }
 
+    /// Both bounded reads share one SQL snapshot.
+    public func processingActivitySnapshot(activeOffset: Int = 0) throws -> ProcessingActivitySnapshot {
+        var active: [ProcessingJob] = []
+        var recent: [ProcessingJob] = []
+        try transaction {
+            active = try query(
+                "SELECT * FROM processing_jobs WHERE state NOT IN ('COMPLETED','FAILED','CANCELLED') ORDER BY updated_at DESC, id ASC LIMIT 31 OFFSET ?",
+                [.integer(Int64(max(0, activeOffset)))]
+            ).map(processingJobFromRow)
+            recent = try query(
+                "SELECT * FROM processing_jobs WHERE state IN ('COMPLETED','FAILED','CANCELLED') ORDER BY updated_at DESC, id ASC LIMIT 30"
+            ).map(processingJobFromRow)
+        }
+        return ProcessingActivitySnapshot(active: Array(active.prefix(30)), recent: recent, hasMoreActive: active.count > 30)
+    }
+
     public func transitionProcessingJob(
         id: UUID,
         to state: ProcessingJobState,
@@ -1233,9 +1249,12 @@ public actor SQLCipherDatabase {
     }
 
     /// A running task cannot survive process termination. Mark only those orphaned rows as failed
-    /// when a newly unlocked app session begins; queued and waiting work remains untouched.
-    public func failInterruptedProcessingJobs(at date: Date = .now) throws -> Int {
-        let interrupted = try processingJobs(states: [.running])
+    /// from before this process started. Remote work and current-process tasks remain untouched.
+    public func failInterruptedProcessingJobs(before processStartedAt: Date = .now, at date: Date = .now) throws -> Int {
+        let interrupted = try processingJobs(states: [.running]).filter {
+            ($0.selectedRoute == .onDevice || $0.selectedRoute == .directProvider)
+                && $0.updatedAt < processStartedAt
+        }
         for var job in interrupted {
             job.state = .failed
             job.progress = nil

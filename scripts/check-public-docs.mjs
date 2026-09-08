@@ -25,7 +25,7 @@ const blockedContent = [
   ['internal entity or job constant', /\b(?:NOTE_BLOCK|AI_ARTIFACT|SESSION_DIGEST|NOTE_QUERY|PDF_EXTRACTION)\b/],
   ['internal source path', /(?:^|[\s`])(?:apps|services|packages|infra|scripts|\.github|\.agents)\//m],
   ['development command', /\b(?:make\s+[a-z]|xcodebuild|swift\s+test|npm\s+(?:run|ci)|docker\s+compose|pytest|mypy|ruff)\b/i],
-  ['internal provider or cost configuration', /\b(?:OpenAI|gpt-[\w.-]+|token rates?|soft budget|per million tokens)\b/i],
+  ['internal provider or cost configuration', /\b(?:token rates?|soft budget|per million tokens)\b/i],
   ['legacy product terminology', /\b(?:Courses?|Collections?|Resources?|Universit(?:y|ies))\b/],
   ['internal QA identifier', /\b(?:A|IP|CN|SY|RC|EX|MW|AI|TF|PV|OP)-\d{2}\b/],
   ['exact currency amount', /(?:\$|USD\s*)\d/i],

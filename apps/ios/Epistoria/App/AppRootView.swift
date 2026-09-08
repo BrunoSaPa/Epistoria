@@ -38,7 +38,7 @@ struct AppRootView: View {
     #endif
 
     var body: some View {
-        Group {
+        ZStack {
             switch model.phase {
             case .loading:
                 ProgressView("Unlocking Epistoria…")
@@ -101,7 +101,7 @@ struct AppRootView: View {
                             VStack(alignment: .leading, spacing: 1) {
                                 Text("Epistoria")
                                     .font(.headline)
-                                Text("The history of what you know")
+                                Text("Personal notebook")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
@@ -120,7 +120,8 @@ struct AppRootView: View {
                     }
                 }
                 .listStyle(.sidebar)
-                .navigationTitle("Knowledge")
+                .navigationTitle("")
+                .navigationBarTitleDisplayMode(.inline)
                 .navigationSplitViewColumnWidth(min: 230, ideal: 270, max: 320)
                 .safeAreaInset(edge: .bottom) {
                     VStack(spacing: 0) {
@@ -232,7 +233,7 @@ private struct SidebarSyncStatus: View {
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .accessibilityIdentifier("sidebar.exportProgress")
-            } else if model.configuration?.serverConnected == true {
+            } else if model.configuration?.serverConnected == true && needsAttention {
                 Button {
                     Task { await model.synchronize() }
                 } label: {
@@ -243,19 +244,16 @@ private struct SidebarSyncStatus: View {
                 .controlSize(.small)
                 .disabled(model.isSyncing)
                 .accessibilityIdentifier("sidebar.sync")
-            } else {
-                Button("Set up private sync") {
-                    model.selectedSection = .settings
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .frame(maxWidth: .infinity)
             }
         }
         .padding(12)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: EpistoriaDesign.compactRadius))
         .padding(10)
         .accessibilityElement(children: .contain)
+    }
+
+    private var needsAttention: Bool {
+        model.syncError != nil || model.unresolvedConflictCount > 0
+            || model.pendingRecordCount + model.pendingFileCount > 0
     }
 
     private var title: String {

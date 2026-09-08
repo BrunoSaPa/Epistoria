@@ -186,12 +186,16 @@ Do not use the current build as the only convenient copy of important data. See 
 - Docker with Compose v2
 - XcodeGen 2.46.0 when regenerating the Xcode project
 
-### Start the local services
+For notebook-only development, open the Xcode project. Node.js, Python and Docker are required
+only for the optional API/Compute Node and whole-repository verification.
+
+### Start the optional local services
 
 ```sh
 cp .env.example .env
 chmod 600 .env
-make bootstrap
+make bootstrap-api
+make bootstrap-node
 make infra-up
 npm run prisma:deploy --workspace @epistoria/api
 make api-dev

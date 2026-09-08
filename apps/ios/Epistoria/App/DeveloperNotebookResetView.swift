@@ -21,6 +21,19 @@ struct DeveloperNotebookResetView: View {
     var body: some View {
         NavigationStack {
             Form {
+                if let errorMessage {
+                    Section("Reset error") {
+                        Text(errorMessage)
+                            .foregroundStyle(.red)
+                    }
+                }
+
+                if isWorking {
+                    Section {
+                        ProgressView("Working…")
+                            .accessibilityIdentifier("development.reset.progress")
+                    }
+                }
                 Section("Local development reset") {
                     Text("This permanently deletes the local encrypted database, local files, account key, device token, and setup information for this development build.")
                     Text("The replacement notebook uses a new generation ID. Records from the previous synchronized generation cannot reappear in it.")
@@ -123,21 +136,10 @@ struct DeveloperNotebookResetView: View {
                     Text("This control exists only in Debug builds.")
                 }
 
-                if let errorMessage {
-                    Section("Reset error") {
-                        Text(errorMessage)
-                            .foregroundStyle(.red)
-                    }
-                }
 
-                if isWorking {
-                    Section {
-                        ProgressView("Working…")
-                            .accessibilityIdentifier("development.reset.progress")
-                    }
-                }
             }
             .navigationTitle("Delete development data")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
@@ -146,7 +148,7 @@ struct DeveloperNotebookResetView: View {
             }
             .interactiveDismissDisabled(isWorking)
         }
-        .presentationDetents([.medium, .large])
+        .presentationDetents([.large])
         .fileImporter(
             isPresented: $isChoosingReadableArchive,
             allowedContentTypes: [.zip],

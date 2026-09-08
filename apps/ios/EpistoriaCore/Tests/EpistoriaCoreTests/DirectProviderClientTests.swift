@@ -32,7 +32,7 @@ final class DirectProviderClientTests: XCTestCase {
         super.tearDown()
     }
 
-    func testOllamaConnectionChecksExactModelThenRunsBoundedJSONRequest() async throws {
+    func testConnectionRunsBoundedGenerationWithoutModelDiscovery() async throws {
         var requestedPaths: [String] = []
         DirectProviderURLProtocol.handler = { request in
             requestedPaths.append(request.url?.path ?? "")
@@ -47,7 +47,7 @@ final class DirectProviderClientTests: XCTestCase {
                 )
                 XCTAssertEqual(json["model"] as? String, "qwen3-vl:8b")
                 XCTAssertEqual(json["stream"] as? Bool, false)
-                XCTAssertEqual(json["max_tokens"] as? Int, 24)
+                XCTAssertEqual(json["max_tokens"] as? Int, 256)
                 XCTAssertEqual(
                     (json["response_format"] as? [String: String])?["type"],
                     "json_object"
@@ -71,10 +71,10 @@ final class DirectProviderClientTests: XCTestCase {
         let result = try await client().testConnection(route: route(), apiKey: nil)
 
         XCTAssertEqual(result.verifiedModel, "qwen3-vl:8b")
-        XCTAssertEqual(requestedPaths, ["/v1/models", "/v1/chat/completions"])
+        XCTAssertEqual(requestedPaths, ["/v1/chat/completions"])
     }
 
-    func testOllamaConnectionFailsBeforeGenerationWhenModelNameIsWrong() async throws {
+    func testEmptyModelAnswerIsNotTransportFailure() async throws {
         DirectProviderURLProtocol.handler = { request in
             let response = HTTPURLResponse(
                 url: try XCTUnwrap(request.url),
@@ -83,7 +83,7 @@ final class DirectProviderClientTests: XCTestCase {
                 headerFields: ["content-type": "application/json"]
             )!
             let data = try JSONSerialization.data(withJSONObject: [
-                "data": [["id": "another-model"]],
+                "choices": [["message": ["content": ""]]],
             ])
             return (response, data)
         }
@@ -92,7 +92,7 @@ final class DirectProviderClientTests: XCTestCase {
             _ = try await client().testConnection(route: route(), apiKey: nil)
             XCTFail("Expected the unavailable model to fail closed")
         } catch let error as DirectProviderError {
-            XCTAssertEqual(error, .modelUnavailable)
+            XCTAssertEqual(error, .emptyOutput)
         }
     }
 
@@ -109,6 +109,76 @@ final class DirectProviderClientTests: XCTestCase {
         } catch let error as DirectProviderError {
             XCTAssertEqual(error, .timedOut)
         }
+    }
+
+    func testPrivateAddressPolicyRejectsLookalikeDomains() {
+        for value in ["http://10.evil.example/v1", "http://192.168.evil.example", "http://172.16.999.1", "http://example.com", "https://user:secret@example.com", "https://example.com?key=secret"] {
+            XCTAssertNil(AIProviderURLPolicy.normalized(value, adapter: .openAICompatible), value)
+        }
+        for value in ["http://10.0.0.1:11434/v1", "http://192.168.1.2", "http://172.31.0.1", "http://[::1]:11434", "http://[fd00::1]:11434", "http://host.local", "https://example.com/v1"] {
+            XCTAssertNotNil(AIProviderURLPolicy.normalized(value, adapter: .openAICompatible), value)
+        }
+    }
+
+    func testURLCancellationStaysCancellation() async throws {
+        DirectProviderURLProtocol.handler = { _ in throw URLError(.cancelled) }
+        do {
+            _ = try await client().testConnection(route: route(), apiKey: nil)
+            XCTFail("Expected cancellation")
+        } catch is CancellationError {} catch { XCTFail("Unexpected error: \(error)") }
+    }
+
+    func testTruncatedOutputIsNotAccepted() async throws {
+        DirectProviderURLProtocol.handler = { request in
+            let data = try JSONSerialization.data(withJSONObject: [
+                "choices": [["finish_reason": "length", "message": ["content": "partial"]]],
+            ])
+            return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, data)
+        }
+        do {
+            _ = try await client().testConnection(route: route(), apiKey: nil)
+            XCTFail("Expected output limit")
+        } catch let error as DirectProviderError { XCTAssertEqual(error, .outputLimitReached) }
+    }
+
+    func testOversizedResponseIsRejected() async throws {
+        DirectProviderURLProtocol.handler = { request in
+            (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil,
+                headerFields: ["Content-Length": "8000001"])!, Data())
+        }
+        do {
+            _ = try await client().testConnection(route: route(), apiKey: nil)
+            XCTFail("Expected size limit")
+        } catch let error as DirectProviderError { XCTAssertEqual(error, .invalidResponse) }
+    }
+
+    func testRedirectDelegateRejectsDestinationChange() async {
+        let session = URLSession(configuration: .ephemeral)
+        defer { session.invalidateAndCancel() }
+        let original = URLRequest(url: URL(string: "https://example.com/v1")!)
+        let redirected = URLRequest(url: URL(string: "https://other.example/v1")!)
+        let completion = expectation(description: "Redirect rejected")
+        RejectProviderRedirects().urlSession(
+            session, task: session.dataTask(with: original),
+            willPerformHTTPRedirection: HTTPURLResponse(
+                url: original.url!, statusCode: 307, httpVersion: nil, headerFields: nil)!,
+            newRequest: redirected
+        ) { request in
+            XCTAssertNil(request)
+            completion.fulfill()
+        }
+        await fulfillment(of: [completion], timeout: 1)
+    }
+
+    func testUnannouncedOversizedResponseIsRejected() async throws {
+        DirectProviderURLProtocol.handler = { request in
+            (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil,
+                headerFields: nil)!, Data(repeating: 32, count: 8_000_001))
+        }
+        do {
+            _ = try await client().testConnection(route: route(), apiKey: nil)
+            XCTFail("Expected size limit")
+        } catch let error as DirectProviderError { XCTAssertEqual(error, .invalidResponse) }
     }
 
     private func client() -> DirectProviderClient {

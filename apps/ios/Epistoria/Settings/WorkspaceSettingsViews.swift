@@ -131,6 +131,8 @@ struct NotebookDefaultsView: View {
 struct ProcessingActivityView: View {
     @Bindable var model: AppModel
     @State private var jobs: [ProcessingJob] = []
+    @State private var activeOffset = 0
+    @State private var hasMoreActive = false
     @State private var errorMessage: String?
 
     var body: some View {
@@ -149,6 +151,15 @@ struct ProcessingActivityView: View {
                 Text("Active")
             }
 
+            if activeOffset > 0 || hasMoreActive {
+                HStack {
+                    Button("Previous") { activeOffset = max(0, activeOffset - 30); Task { await load() } }
+                        .disabled(activeOffset == 0)
+                    Spacer()
+                    Button("Next") { activeOffset += 30; Task { await load() } }
+                        .disabled(!hasMoreActive)
+                }
+            }
             Section("Recent") {
                 if recentJobs.isEmpty { Text("No completed work yet.").foregroundStyle(.secondary) }
                 ForEach(recentJobs.prefix(30)) { job in jobRow(job) }
@@ -186,29 +197,25 @@ struct ProcessingActivityView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            if job.state == .failed {
-                Button("Retry on iPad") { Task { await retryOnIPad(job) } }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-            } else if !job.state.isTerminal {
-                HStack {
-                    if job.state == .running || job.state == .queued {
-                        Button("Pause") { Task { await transition(job, to: .paused) } }
-                    } else if job.state == .paused || job.state == .waitingForCapability
-                                || job.state == .waitingForNetwork {
-                        Button("Retry on iPad") { Task { await retryOnIPad(job) } }
-                    }
-                    Button("Cancel", role: .destructive) { Task { await transition(job, to: .cancelled) } }
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
+            if job.state == .failed || job.state == .paused || job.state == .waitingForCapability || job.state == .waitingForNetwork {
+                Text("Open the original feature to review and submit this work again. This screen shows activity only.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
         }
         .padding(.vertical, 5)
     }
 
     @MainActor private func load() async {
-        do { jobs = try await model.database?.processingJobs() ?? [] }
+        do {
+            guard let snapshot = try await model.database?.processingActivitySnapshot(activeOffset: activeOffset) else { return }
+            if snapshot.active.isEmpty && activeOffset > 0 {
+                activeOffset = 0
+                await load()
+                return
+            }
+            jobs = snapshot.active + snapshot.recent
+            hasMoreActive = snapshot.hasMoreActive
+        }
         catch { errorMessage = error.localizedDescription }
     }
 
@@ -221,34 +228,6 @@ struct ProcessingActivityView: View {
                 return
             }
         }
-    }
-
-    @MainActor private func transition(_ job: ProcessingJob, to state: ProcessingJobState) async {
-        do {
-            _ = try await model.database?.transitionProcessingJob(id: job.id, to: state)
-            await load()
-        } catch { errorMessage = error.localizedDescription }
-    }
-
-    @MainActor private func retryOnIPad(_ job: ProcessingJob) async {
-        do {
-            guard job.requiredCapabilities.allSatisfy({ onDeviceCapabilities.contains($0) }) else {
-                errorMessage = "This job needs a capability that is not available on this iPad. It will remain safely queued."
-                return
-            }
-            guard var changed = try await model.database?.processingJob(id: job.id) else { return }
-            changed.state = .queued
-            changed.selectedRoute = .onDevice
-            changed.computeNodeId = nil
-            changed.errorCode = nil
-            changed.updatedAt = .now
-            _ = try await model.database?.saveProcessingJob(changed)
-            await load()
-        } catch { errorMessage = error.localizedDescription }
-    }
-
-    private var onDeviceCapabilities: Set<ProcessingCapability> {
-        [.textRecognition, .formulaRecognition, .sourceExtraction, .hostedProvider]
     }
 
     private func jobTitle(_ job: ProcessingJob) -> String {
@@ -270,7 +249,7 @@ struct ProcessingActivityView: View {
 
     private func routeDetail(_ job: ProcessingJob) -> String {
         switch job.selectedRoute {
-        case .onDevice: "Running privately on this iPad"
+        case .onDevice: "Local processing on this iPad"
         case .directProvider: "Direct provider request from this iPad"
         case .computeNode: "Using an approved optional Compute Node"
         case nil: "Waiting for a compatible approved route"

@@ -158,15 +158,7 @@ public struct ProcessingRouteAvailability: Equatable, Sendable {
     }
 }
 
-public protocol ProcessingRouting: Sendable {
-    func route(
-        requiredCapabilities: Set<ProcessingCapability>,
-        approval: ProcessingApproval?,
-        availability: [ProcessingRouteAvailability]
-    ) -> ProcessingRoute?
-}
-
-public struct ProcessingRouter: ProcessingRouting, Sendable {
+public struct ProcessingRouter: Sendable {
     public init() {}
 
     public func route(
@@ -209,14 +201,6 @@ public protocol RecognitionEngine: Sendable {
 }
 
 public protocol FormulaRecognitionEngine: RecognitionEngine {}
-
-public protocol TranscriptionEngine: Sendable {
-    func transcribe(audio: Data, languages: [String]) async throws -> Data
-}
-
-public protocol SourceExtractionEngine: Sendable {
-    func extract(source: Data, mimeType: String) async throws -> Data
-}
 
 public struct ProviderImageInput: Codable, Equatable, Sendable {
     public var mimeType: String
@@ -299,7 +283,7 @@ public extension ProviderClient {
             ? #"Return exactly this JSON object and nothing else: {"status":"ok"}"#
             : "Reply with OK and nothing else."
         _ = try await performText(
-            ProviderTextRequest(prompt: prompt, maximumOutputTokens: 24),
+            ProviderTextRequest(prompt: prompt, maximumOutputTokens: 256),
             route: route,
             apiKey: apiKey
         )
@@ -376,8 +360,10 @@ public struct ComputeNodeDescriptor: Codable, Equatable, Identifiable, Sendable 
     }
 }
 
-public protocol ComputeNodeClient: Sendable {
-    func availableNodes() async throws -> [ComputeNodeDescriptor]
-    func submit(jobId: UUID, encryptedEnvelope: Data, to nodeId: UUID) async throws
-    func revoke(nodeId: UUID) async throws
+
+
+public struct ProcessingActivitySnapshot: Sendable {
+    public var active: [ProcessingJob]
+    public var recent: [ProcessingJob]
+    public var hasMoreActive: Bool
 }

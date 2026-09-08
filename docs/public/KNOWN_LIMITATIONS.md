@@ -105,7 +105,8 @@ Epistoria remains in personal beta. The following limits apply to the current pr
   review, written-response feedback, and supported media transcription send reviewed requests
   directly from the iPad. The Compute Node is used only when explicitly selected for a capability
   that is not available on the iPad.
-- AI features require a separately configured provider account and can incur provider charges.
+- Generated assistance requires a configured provider connection. Hosted services may require
+  an account and charge for requests.
 - One provider is active for newly approved work. Each new request keeps the provider and model
   reviewed at approval. Editing or removing that connection before processing stops the request;
   it must be reviewed and submitted again.
@@ -178,3 +179,9 @@ Epistoria remains in personal beta. The following limits apply to the current pr
 - The current project supports one owner.
 - Collaboration, public sharing, subscriptions, billing, and organization administration are not
   available.
+
+## Processing controls
+
+Processing Activity shows status and recent history. It does not pause, restart, or reroute work.
+Use the original feature to review and submit a failed request again. Stopping a request on the
+iPad does not guarantee that a provider stops its computation or billing.

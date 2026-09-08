@@ -810,3 +810,14 @@ The recovery words reconstruct access to encrypted data. They do not contain a c
 or files.
 
 If the iPad already has a different configured account, recovery stops without replacing it.
+
+## Processing activity
+
+Open **Settings → Processing Activity** to see active work and the latest 30 finished requests.
+Use Previous and Next to browse active work. This is a status view, not a job controller.
+For interrupted or failed work, reopen the original feature, review the request, and submit it
+again. Cancellation is available only in features that can stop their own operation.
+
+**Test server and model** sends a short sample request, not notebook content. Hosted providers
+may charge for this test. Changing the connection settings stops the previous test. An empty or
+unfinished answer is reported separately from a connection failure.

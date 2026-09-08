@@ -1,7 +1,14 @@
-.PHONY: bootstrap infra-up infra-down api-dev api-test api-test-e2e worker-install worker-test worker-doctor worker-service-install worker-service-uninstall worker-service-status ios-project ios-test verify security-scan public-docs-check backup backup-scheduled backup-prune backup-mirror-verify restore-check operations-test
+.PHONY: bootstrap bootstrap-ios bootstrap-api bootstrap-node infra-up infra-down api-dev api-test api-test-e2e worker-install worker-test worker-doctor worker-service-install worker-service-uninstall worker-service-status ios-project ios-test verify security-scan public-docs-check backup backup-scheduled backup-prune backup-mirror-verify restore-check operations-test
 
-bootstrap:
+bootstrap: bootstrap-ios
+
+bootstrap-ios:
+	@echo "Open apps/ios/Epistoria.xcodeproj in Xcode. Package dependencies resolve automatically."
+
+bootstrap-api:
 	npm ci --strict-allow-scripts
+
+bootstrap-node:
 	./scripts/install-worker.sh
 
 infra-up:

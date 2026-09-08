@@ -1,5 +1,17 @@
 # Release notes
 
+## 2026-09-07 — 0.1.0 development cleanup
+
+- Made writing and adding Sources the primary Today actions; Learn and Sessions remain available.
+- Added loading and retry states to Today and Notebook, and clearer note-creation feedback.
+- Expanded the development notebook-reset form so archive controls are easier to reach, with
+  progress and errors shown first. Export and deletion confirmation requirements are unchanged.
+- Removed processing controls that could not stop or restart work.
+- Added bounded activity history and clearer interrupted-work guidance.
+- Simplified provider connection testing and tightened address and response handling.
+- Kept notebook and learning features unchanged. Validation status is listed in
+  [Known limitations](KNOWN_LIMITATIONS.md).
+
 ## 2026-08-30 — Development stabilization
 
 - Started a new development notebook generation with Topic, List, Source, and stable-page records.

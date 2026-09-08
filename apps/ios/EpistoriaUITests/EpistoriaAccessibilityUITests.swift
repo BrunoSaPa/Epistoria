@@ -58,9 +58,12 @@ final class EpistoriaAccessibilityUITests: XCTestCase {
         let createArchive = app.buttons["development.reset.create-readable"]
         XCTAssertTrue(createArchive.waitForExistence(timeout: 5))
         createArchive.tap()
-        XCTAssertTrue(
-            app.buttons["development.reset.share-readable"].waitForExistence(timeout: 20)
-        )
+        let archiveReady = app.buttons["development.reset.share-readable"].waitForExistence(timeout: 20)
+        let archiveScreen = XCTAttachment(screenshot: app.screenshot())
+        archiveScreen.name = "Initialization archive result (isolated notebook)"
+        archiveScreen.lifetime = .keepAlways
+        add(archiveScreen)
+        XCTAssertTrue(archiveReady)
 
         let saved = app.switches["development.reset.confirm-saved"]
         XCTAssertTrue(saved.exists)
@@ -95,6 +98,23 @@ final class EpistoriaAccessibilityUITests: XCTestCase {
 
         XCTAssertTrue(app.buttons["onboarding.create"].waitForExistence(timeout: 10))
         XCTAssertFalse(app.buttons["onboarding.open"].exists)
+    }
+
+    @MainActor
+    func testTodayPrioritizesWritingAndExposesLearning() throws {
+        let app = ephemeralApplication()
+        app.launch()
+        let quickNote = app.buttons["today.quick-note"]
+        XCTAssertTrue(quickNote.waitForExistence(timeout: 12))
+        XCTAssertTrue(app.buttons["today.import-pdf"].exists)
+        XCTAssertTrue(app.buttons["today.learn"].exists)
+        XCTAssertFalse(app.buttons["Set up"].exists)
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "Today — notebook-first"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+        quickNote.tap()
+        XCTAssertTrue(app.textFields["note.title"].waitForExistence(timeout: 10))
     }
 
     @MainActor

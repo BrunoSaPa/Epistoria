@@ -18,6 +18,7 @@ struct NotebookView: View {
     @State private var lists: [IdentifiedPayload<ListPayload>] = []
     @State private var sessions: [IdentifiedPayload<StudySessionPayload>] = []
     @State private var organizationByNoteId: [UUID: NoteOrganizationSummary] = [:]
+    @State private var loadState: WorkspaceLoadState = .loading
     @State private var mode = Mode.notes
     @State private var showArchived = false
     @State private var showNewNote = false
@@ -35,9 +36,16 @@ struct NotebookView: View {
     var body: some View {
         NavigationStack {
             Group {
-                if mode == .notes && displayedNotes.isEmpty {
+                if loadState == .loading {
+                    EpistoriaLoadingRows().padding(24)
+                } else if loadState == .failed {
                     ContentUnavailableView {
-                        Label(showArchived ? "Nothing archived" : "A quiet notebook", systemImage: showArchived ? "archivebox" : "book.pages")
+                        Label("Couldn’t load notebook", systemImage: "exclamationmark.triangle")
+                    } description: { Text("Your saved content has not been changed.") }
+                    actions: { Button("Try again") { Task { await load() } } }
+                } else if mode == .notes && displayedNotes.isEmpty {
+                    ContentUnavailableView {
+                        Label(showArchived ? "Nothing archived" : "No notes yet", systemImage: showArchived ? "archivebox" : "book.pages")
                     } description: {
                         Text(showArchived
                              ? "Archived notes stay encrypted and searchable."
@@ -140,6 +148,7 @@ struct NotebookView: View {
                 }
             }
             .navigationTitle("Notebook")
+            .navigationBarTitleDisplayMode(.inline)
             .epistoriaPageBackground()
             .toolbar {
                 ToolbarItem(placement: .principal) {
@@ -244,8 +253,7 @@ struct NotebookView: View {
     private func load() async {
         guard let store = model.store else { return }
         do {
-            async let loadedWorkspace = store.workspaceSnapshot()
-            let workspace = try await loadedWorkspace
+            let workspace = try await store.workspaceSnapshot()
             noteCursor = workspace.notes.nextCursor
             listCursor = workspace.lists.nextCursor
             notes = workspace.notes.items
@@ -263,8 +271,14 @@ struct NotebookView: View {
                 collections: workspace.lists.items,
                 sessions: workspace.sessions.items
             )
+            loadState = .ready
+            errorMessage = nil
+        } catch is CancellationError {
+            return
+        } catch {
+            if loadState != .ready { loadState = .failed }
+            errorMessage = error.localizedDescription
         }
-        catch { errorMessage = error.localizedDescription }
     }
 
     private func noteSort(
@@ -432,6 +446,8 @@ struct NewNoteView: View {
     @Bindable var model: AppModel
     @Environment(\.dismiss) private var dismiss
     @State private var title = ""
+    @State private var isCreating = false
+    @FocusState private var titleFocused: Bool
     @State private var errorMessage: String?
     let topicId: UUID?
     let onCreated: (UUID) -> Void
@@ -453,17 +469,25 @@ struct NewNoteView: View {
                     TextField("Note title", text: $title)
                         .font(.title3)
                         .accessibilityIdentifier("notebook.new-note.title")
+                        .focused($titleFocused)
+                        .submitLabel(.done)
                 } footer: {
                     Text("This note starts unassigned. Add it to a Topic, List, or study session later.")
                 }
                 if let errorMessage { Text(errorMessage).foregroundStyle(.red) }
             }
             .navigationTitle("New note")
+            .navigationBarTitleDisplayMode(.inline)
+            .interactiveDismissDisabled(isCreating)
+            .task { titleFocused = true }
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.disabled(isCreating) }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Create") {
+                    Button(isCreating ? "Creating…" : "Create") {
+                        guard !isCreating else { return }
+                        isCreating = true
                         Task {
+                            defer { isCreating = false }
                             do {
                                 guard let store = model.store else { return }
                                 let id = try await store.createNote(
@@ -482,7 +506,7 @@ struct NewNoteView: View {
                             } catch { errorMessage = error.localizedDescription }
                         }
                     }
-                    .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .disabled(isCreating || title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     .accessibilityIdentifier("notebook.new-note.create")
                 }
             }

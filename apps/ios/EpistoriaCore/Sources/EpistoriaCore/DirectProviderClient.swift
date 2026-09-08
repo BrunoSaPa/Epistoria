@@ -6,7 +6,8 @@ public enum DirectProviderError: Error, Equatable, LocalizedError {
     case requestTooLarge
     case transport
     case timedOut
-    case modelUnavailable
+    case emptyOutput
+    case outputLimitReached
     case rejected(statusCode: Int)
     case invalidResponse
 
@@ -17,7 +18,8 @@ public enum DirectProviderError: Error, Equatable, LocalizedError {
         case .requestTooLarge: "The approved provider request is too large."
         case .transport: "The provider could not be reached. The request remains available to retry."
         case .timedOut: "The provider did not finish within three minutes. The request was stopped and can be retried."
-        case .modelUnavailable: "The configured model is not available from this provider. For Ollama, copy the exact name shown by ollama list."
+        case .emptyOutput: "The provider responded without answer text. Check the model and its output settings."
+        case .outputLimitReached: "The provider reached the output limit before finishing. Use a shorter request or review the model settings."
         case let .rejected(statusCode): "The provider rejected the request (HTTP \(statusCode))."
         case .invalidResponse: "The provider returned an unsupported response."
         }
@@ -66,7 +68,11 @@ public final class DirectProviderClient: ProviderClient, ProviderTranscriptionCl
         let data: Data
         let response: URLResponse
         do {
-            (data, response) = try await session.data(for: urlRequest)
+            (data, response) = try await boundedResponse(for: urlRequest)
+        } catch let error as DirectProviderError {
+            throw error
+        } catch let error as URLError where error.code == .cancelled {
+            throw CancellationError()
         } catch is CancellationError {
             throw CancellationError()
         } catch let error as URLError where error.code == .timedOut {
@@ -82,28 +88,6 @@ public final class DirectProviderClient: ProviderClient, ProviderTranscriptionCl
         }
         guard data.count <= 8_000_000 else { throw DirectProviderError.invalidResponse }
         return try parse(data, route: route, requestId: http.value(forHTTPHeaderField: "x-request-id"))
-    }
-
-    public func testConnection(
-        route: AIProviderRouteSnapshot,
-        apiKey: String?
-    ) async throws -> ProviderConnectionResult {
-        if route.adapter == .openAICompatible {
-            try await verifyCompatibleModel(route: route, apiKey: apiKey)
-        }
-        let startedAt = Date()
-        let prompt = route.structuredOutput
-            ? #"Return exactly this JSON object and nothing else: {"status":"ok"}"#
-            : "Reply with OK and nothing else."
-        _ = try await performText(
-            ProviderTextRequest(prompt: prompt, maximumOutputTokens: 24),
-            route: route,
-            apiKey: apiKey
-        )
-        return ProviderConnectionResult(
-            elapsedMilliseconds: Int(Date().timeIntervalSince(startedAt) * 1_000),
-            verifiedModel: route.textModel
-        )
     }
 
     public func performTranscription(
@@ -137,7 +121,11 @@ public final class DirectProviderClient: ProviderClient, ProviderTranscriptionCl
         let data: Data
         let response: URLResponse
         do {
-            (data, response) = try await session.data(for: urlRequest)
+            (data, response) = try await boundedResponse(for: urlRequest)
+        } catch let error as DirectProviderError {
+            throw error
+        } catch let error as URLError where error.code == .cancelled {
+            throw CancellationError()
         } catch is CancellationError {
             throw CancellationError()
         } catch let error as URLError where error.code == .timedOut {
@@ -394,6 +382,11 @@ public final class DirectProviderClient: ProviderClient, ProviderTranscriptionCl
         guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             throw DirectProviderError.invalidResponse
         }
+        let incomplete = root["status"] as? String == "incomplete"
+            || (root["choices"] as? [[String: Any]])?.first?["finish_reason"] as? String == "length"
+            || root["stop_reason"] as? String == "max_tokens"
+            || (root["candidates"] as? [[String: Any]])?.first?["finishReason"] as? String == "MAX_TOKENS"
+        if incomplete { throw DirectProviderError.outputLimitReached }
         let text: String?
         switch route.adapter {
         case .openAIResponses:
@@ -413,7 +406,7 @@ public final class DirectProviderClient: ProviderClient, ProviderTranscriptionCl
                 .joined(separator: "\n")
         }
         guard let text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            throw DirectProviderError.invalidResponse
+            throw DirectProviderError.emptyOutput
         }
         let usage = root["usage"] as? [String: Any] ?? root["usageMetadata"] as? [String: Any]
         return ProviderTextResponse(
@@ -436,65 +429,35 @@ public final class DirectProviderClient: ProviderClient, ProviderTranscriptionCl
             .joined(separator: "\n")
     }
 
-    private func verifyCompatibleModel(
-        route: AIProviderRouteSnapshot,
-        apiKey: String?
-    ) async throws {
-        guard let baseURL = Self.validatedBaseURL(route.baseURL) else {
-            throw DirectProviderError.invalidRoute
-        }
-        var request = URLRequest(url: baseURL.appending(path: "models"))
-        request.httpMethod = "GET"
-        request.timeoutInterval = 15
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
-        if let apiKey, !apiKey.isEmpty {
-            request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        }
-        let data: Data
-        let response: URLResponse
-        do {
-            (data, response) = try await session.data(for: request)
-        } catch is CancellationError {
-            throw CancellationError()
-        } catch let error as URLError where error.code == .timedOut {
-            throw DirectProviderError.timedOut
-        } catch {
-            throw DirectProviderError.transport
-        }
-        guard let http = response as? HTTPURLResponse else {
-            throw DirectProviderError.invalidResponse
-        }
-        guard (200 ..< 300).contains(http.statusCode) else {
+    private static func validatedBaseURL(_ value: String) -> URL? {
+        AIProviderURLPolicy.normalized(value, adapter: .openAICompatible)
+    }
+
+    private func boundedResponse(for request: URLRequest) async throws -> (Data, URLResponse) {
+        let (bytes, response) = try await session.bytes(for: request, delegate: RejectProviderRedirects())
+        defer { bytes.task.cancel() }
+        guard let http = response as? HTTPURLResponse else { throw DirectProviderError.invalidResponse }
+        guard (200..<300).contains(http.statusCode) else {
             throw DirectProviderError.rejected(statusCode: http.statusCode)
         }
-        guard data.count <= 2_000_000,
-              let root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let models = root["data"] as? [[String: Any]]
-        else { throw DirectProviderError.invalidResponse }
-        let configured = route.textModel.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard models.contains(where: { ($0["id"] as? String) == configured }) else {
-            throw DirectProviderError.modelUnavailable
+        guard response.expectedContentLength <= 8_000_000 else { throw DirectProviderError.invalidResponse }
+        var data = Data()
+        for try await byte in bytes {
+            try Task.checkCancellation()
+            guard data.count < 8_000_000 else { throw DirectProviderError.invalidResponse }
+            data.append(byte)
         }
+        return (data, response)
     }
+}
 
-    private static func validatedBaseURL(_ value: String) -> URL? {
-        guard let components = URLComponents(string: value),
-              components.user == nil, components.password == nil,
-              components.query == nil, components.fragment == nil,
-              let scheme = components.scheme?.lowercased(),
-              let host = components.host?.lowercased(), !host.isEmpty,
-              scheme == "https" || (scheme == "http" && isPrivateHost(host)),
-              let url = components.url
-        else { return nil }
-        return url
-    }
-
-    private static func isPrivateHost(_ host: String) -> Bool {
-        host == "localhost" || host == "::1" || host.hasSuffix(".local")
-            || host.hasPrefix("127.") || host.hasPrefix("10.") || host.hasPrefix("192.168.")
-            || (host.split(separator: ".").count == 4 && {
-                let values = host.split(separator: ".").compactMap { Int($0) }
-                return values.count == 4 && values[0] == 172 && (16 ... 31).contains(values[1])
-            }())
+final class RejectProviderRedirects: NSObject, URLSessionTaskDelegate, Sendable {
+    func urlSession(
+        _ session: URLSession, task: URLSessionTask,
+        willPerformHTTPRedirection response: HTTPURLResponse,
+        newRequest request: URLRequest,
+        completionHandler: @escaping @Sendable (URLRequest?) -> Void
+    ) {
+        completionHandler(nil)
     }
 }
