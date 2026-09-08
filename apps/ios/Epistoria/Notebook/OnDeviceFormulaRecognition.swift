@@ -183,8 +183,12 @@ actor CoreMLFormulaRecognitionEngine: FormulaRecognitionEngine {
         let provider = try MLDictionaryFeatureProvider(dictionary: [
             manifest.inputFeatureName: imageValue,
         ])
-        // The engine actor serializes access to this model instance.
-        let output = try await model.prediction(from: provider)
+        // Synchronous prediction on this non-main actor cannot interleave with another
+        // recognition at a suspension point. Actor isolation alone is not sufficient for
+        // an awaited prediction, because other requests can enter while it is suspended.
+        try Task.checkCancellation()
+        let output = try predictSynchronously(model, provider: provider)
+        try Task.checkCancellation()
         guard let latex = output.featureValue(for: manifest.outputFeatureName)?.stringValue,
               !latex.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw OnDeviceFormulaModelError.unsupportedModelContract
@@ -202,5 +206,9 @@ actor CoreMLFormulaRecognitionEngine: FormulaRecognitionEngine {
                 ),
             ]
         )
+    }
+
+    private func predictSynchronously(_ model: MLModel, provider: MLFeatureProvider) throws -> MLFeatureProvider {
+        try model.prediction(from: provider)
     }
 }

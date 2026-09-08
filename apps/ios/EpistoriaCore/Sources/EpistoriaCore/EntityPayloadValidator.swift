@@ -24,7 +24,9 @@ public enum EntityPayloadValidator {
         case .asset: _ = try CanonicalJSON.decode(AssetPayload.self, from: content)
         case .annotation: _ = try CanonicalJSON.decode(AnnotationPayload.self, from: content)
         case .aiArtifact:
-            break
+            if schemaVersion == "studio-recipe/v1" {
+                try CanonicalJSON.decode(StudioRecipePayload.self, from: content).validate()
+            }
         case .recognitionArtifact:
             _ = try CanonicalJSON.decode(OCRArtifactPayload.self, from: content)
         case .recognitionDecision:
@@ -98,6 +100,7 @@ public enum EntityPayloadValidator {
         case .asset: ["asset/v1"]
         case .annotation: ["annotation/v1"]
         case .aiArtifact: [
+            "studio-recipe/v1",
             "ai-artifact/session-digest/v1",
             "ai-artifact/note-query/v1",
             "ai-artifact/learning-generation/v1",

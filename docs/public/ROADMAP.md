@@ -23,6 +23,10 @@ change after personal use and beta testing.
 
 ## Notebook tools
 
+- Add draw-and-hold shape recognition: draw a rough line, circle, ellipse or rectangle, then
+  hold the Pencil still to preview a clean shape. Keep this optional, preserve original ink
+  until confirmation, and support cancellation and undo. Validate against accidental holds
+  during writing before enabling it by default. This gesture is not implemented yet.
 - Validate selected-shape editing and individual-object alignment on physical iPads, including
   Pencil, pointer, zoom, rotation and PDF output. Connectors and group alignment remain planned.
 - Evaluate square, angled, and custom eraser footprints after physical Apple Pencil testing.
@@ -154,9 +158,8 @@ the app.
 
 ### Next
 
-- Add reusable Studio recipes defined by the notebook owner. A recipe must keep an explicit scope,
-  provider disclosure, output schema, and review requirement. This direction is informed by
-  Readwise.
+- Validate saved Studio recipes across devices, recovery and accessible daily use. Recipes save
+  request settings only; multi-step workflows remain deferred.
 
 ### Later
 

@@ -7,6 +7,8 @@
 
 # Dependencies and build output (matched at any depth)
 **/node_modules/
+/tools/formula-conversion/__pycache__/
+/tools/formula-conversion/README.md
 **/dist/
 coverage/
 *.log

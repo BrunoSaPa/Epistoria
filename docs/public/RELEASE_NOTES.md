@@ -1,5 +1,12 @@
 # Release notes
 
+## 2026-09-08 — 0.1.0 saved Studio settings
+
+- Added named Studio recipes for reusable request settings, with archive and restore.
+- Every use still requires reviewing the current scope, provider and cost.
+- Added draw-and-hold shape recognition to the roadmap. It is not available yet.
+- On-device formula recognition still has no production model available.
+
 ## 2026-09-07 — 0.1.0 canvas refinement
 
 - Added a selected-shape editor for outline, fill, thickness, shape type and line style, with

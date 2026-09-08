@@ -334,6 +334,8 @@ require representative device validation.
   exact Source Version and location.
 - Open a due Daily Evidence Review directly from Today. Nothing appears on Today when no item is
   due.
+- Save named request settings in Topic Studio, apply them to another request, and archive or
+  restore recipes. Each run requires a fresh review of Topic scope, provider and cost.
 - Use Topic Studio to review the exact Topic scope before requesting cited synthesis, flashcard
   drafts, test work, Concept suggestions, or a weekly review.
 - Run those manual Topic Studio requests directly from the iPad without a Compute Node. Invalid

@@ -140,6 +140,7 @@ Epistoria remains in personal beta. The following limits apply to the current pr
 - On-device formula recognition remains a development feature until a permissively licensed Core
   ML model passes accuracy, two-second p95 latency, memory, thermal, and Pencil-latency tests.
   No production model is available yet; model conversion and decoder integration remain unfinished.
+  Exporting the model to an intermediate format has not resolved its on-device decoder support.
   Epistoria does not silently upload formulas or require a Mac when that model is unavailable.
   OCR results must be reviewed before learning features use them.
 - Large PDFs use a bounded analysis pass. A result can cover selected passages instead of every

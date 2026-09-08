@@ -230,6 +230,12 @@ estimate before approving a paid request. The final review also shows the active
 destination, and maximum estimate when price metadata is configured. The request goes directly
 from the iPad to that provider. A Compute Node is not required for Topic Studio.
 
+In Topic Studio, expand **Saved recipes**, enter a name and select **Save current settings**.
+A recipe saves the output type, instructions and test options. Select its name to fill a new
+request. Source selections, Topic objectives, connected knowledge, providers and approval are
+not saved. Review the new request before generating anything. Use **Archive** to hide a recipe;
+turn on **Show archived recipes** to restore it. Saving again creates a separate recipe.
+
 For a generated test:
 
 1. Choose **Practice test** or **Test blueprint**.

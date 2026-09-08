@@ -31,6 +31,7 @@ struct TopicStudioView: View {
     @State private var isWorking = false
     @State private var acceptanceMessage: String?
     @State private var errorMessage: String?
+    @State private var applyingRecipeMode = false
 
     private let availableJobs: [LearningAIJobType] = [
         .topicSynthesis, .flashcardDrafts, .testBlueprint, .testGeneration,
@@ -40,6 +41,9 @@ struct TopicStudioView: View {
     var body: some View {
         NavigationStack {
             Form {
+                StudioRecipesSection(store: model.store, current: recipeSettings,
+                    onApply: applyRecipe, onMutation: { model.noteLocalMutation() })
+                    .disabled(isWorking)
                 Section("Create") {
                     Picker("Output", selection: $jobType) {
                         ForEach(availableJobs, id: \.self) { type in
@@ -281,6 +285,8 @@ struct TopicStudioView: View {
                 }
             }
             .task { await loadArtifact() }
+            .onChange(of: instructions) { prepared = nil; directDisclosure = nil }
+            .onChange(of: objectives) { prepared = nil; directDisclosure = nil }
             .sheet(item: $editingItem) { item in
                 LearningDraftItemEditor(
                     item: item,
@@ -314,9 +320,30 @@ struct TopicStudioView: View {
             .onChange(of: testMode) {
                 prepared = nil
                 directDisclosure = nil
-                applyTestModeDefaults()
+                if applyingRecipeMode { applyingRecipeMode = false }
+                else { applyTestModeDefaults() }
             }
         }
+    }
+
+    private var recipeSettings: StudioRecipePayload {
+        StudioRecipePayload(name: "Draft", jobType: jobType, instructions: instructions,
+            testMode: testMode, questionCount: questionCount,
+            timeLimitMinutes: usesTimeLimit ? timeLimitMinutes : nil,
+            coverage: effectiveCoverage)
+    }
+
+    private func applyRecipe(_ recipe: StudioRecipePayload) {
+        prepared = nil; directDisclosure = nil
+        applyingRecipeMode = testMode != recipe.testMode
+        jobType = recipe.jobType; instructions = recipe.instructions
+        testMode = recipe.testMode; questionCount = recipe.questionCount
+        usesTimeLimit = recipe.timeLimitMinutes != nil
+        timeLimitMinutes = recipe.timeLimitMinutes ?? 30
+        customCoverage = Set(recipe.coverage)
+        // Topic-specific objectives and source expansion are never restored from a template.
+        includeConnectedKnowledge = false
+        objectives = ""; detectedObjectives = []; selectedObjectiveTitles = []
     }
 
     @ViewBuilder
@@ -401,6 +428,9 @@ struct TopicStudioView: View {
             return
         }
         isWorking = true
+        let settings = recipeSettings
+        let scope = includeConnectedKnowledge
+        let objectiveSnapshot = requestedObjectiveTitles
         defer { isWorking = false }
         do {
             let objectiveTitles = requestedObjectiveTitles
@@ -419,6 +449,11 @@ struct TopicStudioView: View {
                 userInstructions: instructions.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty,
                 includeConnectedKnowledge: includeConnectedKnowledge
             )
+            guard settings.instructions == instructions, settings.jobType == jobType,
+                  settings.testMode == testMode, settings.questionCount == questionCount,
+                  settings.timeLimitMinutes == (usesTimeLimit ? timeLimitMinutes : nil),
+                  settings.coverage == effectiveCoverage, scope == includeConnectedKnowledge,
+                  objectiveSnapshot == requestedObjectiveTitles else { return }
             directDisclosure = try model.directTopicStudioDisclosure(
                 approximateInputTokens: candidate.approximateTokens,
                 jobType: candidate.request.jobType
