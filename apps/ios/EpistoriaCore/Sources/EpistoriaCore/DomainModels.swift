@@ -107,22 +107,37 @@ public enum NoteCanvasShapeKind: String, Codable, CaseIterable, Sendable {
     case arrow = "ARROW"
 }
 
+public enum NoteCanvasLineStyle: String, Codable, CaseIterable, Sendable {
+    case solid, dashed, dotted
+}
+
 public struct NoteCanvasShape: Codable, Equatable, Sendable {
     public var kind: NoteCanvasShapeKind
     public var strokeColor: NoteCanvasColor
     public var fillColor: NoteCanvasColor?
     public var lineWidth: Double
+    public var lineStyle: NoteCanvasLineStyle?
+
+    public var dashPattern: [Double] {
+        switch lineStyle ?? .solid {
+        case .solid: []
+        case .dashed: [lineWidth * 3, lineWidth * 2]
+        case .dotted: [0, lineWidth * 2]
+        }
+    }
 
     public init(
         kind: NoteCanvasShapeKind,
         strokeColor: NoteCanvasColor = .black,
         fillColor: NoteCanvasColor? = nil,
-        lineWidth: Double = 3
+        lineWidth: Double = 3,
+        lineStyle: NoteCanvasLineStyle? = nil
     ) {
         self.kind = kind
         self.strokeColor = strokeColor
         self.fillColor = fillColor
         self.lineWidth = min(max(lineWidth, 1), 24)
+        self.lineStyle = lineStyle
     }
 }
 

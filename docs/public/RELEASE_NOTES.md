@@ -1,5 +1,12 @@
 # Release notes
 
+## 2026-09-07 — 0.1.0 canvas refinement
+
+- Added a selected-shape editor for outline, fill, thickness, shape type and line style, with
+  a preview before saving. PDF output preserves the line style.
+- Added optional alignment guides when moving individual canvas objects.
+- Physical Pencil and alignment validation remain open in [Known limitations](KNOWN_LIMITATIONS.md).
+
 ## 2026-09-07 — 0.1.0 safety and daily-use update
 
 - Added Offline Files in Library and Settings with selection, space estimates, progress and

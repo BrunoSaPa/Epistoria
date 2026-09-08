@@ -1742,6 +1742,22 @@ public actor EpistoriaStore {
         )
     }
 
+    public func updateCanvasShape(id: UUID, shape: NoteCanvasShape) async throws {
+        guard let entity = try await database.entity(id: id), !entity.tombstone else {
+            throw StoreError.entityNotFound
+        }
+        var block = try await payload(NoteBlockPayload.self, id: id).payload
+        guard block.blockType == .shape, !block.tombstone,
+              shape.lineWidth.isFinite, (1...24).contains(shape.lineWidth) else {
+            throw StoreError.entityTypeMismatch
+        }
+        block.canvasShape = shape
+        block.plainText = "\(shape.kind.rawValue.lowercased()) shape"
+        block.updatedAt = .now
+        _ = try await save(id: id, payload: block, parentId: block.noteId,
+            relationIds: noteBlockRelationIds(block, pageId: block.pageId))
+    }
+
     @discardableResult
     public func appendCanvasEquation(
         noteId: UUID,

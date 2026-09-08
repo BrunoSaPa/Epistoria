@@ -611,6 +611,17 @@ coverage limits.
 If a restored PDF is not yet on the iPad, the app needs a connection the first time you open it.
 After a successful download, the encrypted local copy opens offline.
 
+## Edit shapes and align objects
+
+For shape changes, select the shape and open **Notebook actions → Edit shape**. Adjust the
+outline, fill, thickness, line style or shape type. The preview does not change the saved item
+until you select **Save**. **Cancel** discards the draft; **Reset changes** restores the starting
+appearance inside the editor.
+
+While moving a single object, nearby edges and centers show alignment guides. Move farther away
+to release the snap. The page-size menu contains **Align objects while moving**; turn it off
+for free positioning. The preference stays on this device. Ink strokes are not snapped.
+
 ## Prepare files for offline use
 
 1. Open **Library → Offline Files**, or **Settings → Data → Offline Files**.

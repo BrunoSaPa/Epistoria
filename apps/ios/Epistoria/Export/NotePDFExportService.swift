@@ -544,6 +544,7 @@ final class NotePDFExportService {
                 context.addPath(path)
                 context.setStrokeColor(shape.strokeColor.uiColor.cgColor)
                 context.setLineWidth(CGFloat(shape.lineWidth))
+                context.setLineDash(phase: 0, lengths: shape.dashPattern.map { CGFloat($0) })
                 context.setLineCap(.round)
                 context.setLineJoin(.round)
                 if let fill = shape.fillColor {

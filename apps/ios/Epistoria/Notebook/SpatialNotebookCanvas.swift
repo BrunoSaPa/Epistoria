@@ -114,6 +114,7 @@ struct SpatialNotebookCanvas: UIViewRepresentable {
     let onLassoSelection: (LassoSelection) -> Void
     let onCanvasTap: (CGPoint) -> Void
     let isReadOnly: Bool
+    var snappingEnabled = true
 
     func makeUIView(context: Context) -> SpatialNotebookHostView {
         let view = SpatialNotebookHostView()
@@ -126,6 +127,7 @@ struct SpatialNotebookCanvas: UIViewRepresentable {
     }
 
     private func update(_ view: SpatialNotebookHostView) {
+        view.snappingEnabled = snappingEnabled
         view.onSelect = onSelect
         view.onViewportChanged = onViewportChanged
         view.onPlacementChanged = onPlacementChanged
@@ -160,6 +162,8 @@ struct SpatialNotebookCanvas: UIViewRepresentable {
 
 @MainActor
 final class SpatialNotebookHostView: UIView, UIScrollViewDelegate, PKCanvasViewDelegate {
+    var snappingEnabled = true
+    private let alignmentLayer = CAShapeLayer()
     var onSelect: ((UUID?) -> Void)?
     var onViewportChanged: ((CGPoint) -> Void)?
     var onPlacementChanged: ((UUID, NoteCanvasPlacement) -> Void)?
@@ -508,6 +512,10 @@ final class SpatialNotebookHostView: UIView, UIScrollViewDelegate, PKCanvasViewD
             } else {
                 view = CanvasItemView(id: item.id)
                 view.onSelect = { [weak self] id in self?.select(id) }
+                view.alignPlacement = { [weak self] id, placement in
+                    self?.alignPlacement(id: id, placement: placement) ?? placement
+                }
+                view.onDragFinished = { [weak self] in self?.alignmentLayer.path = nil }
                 view.onPlacementChanged = { [weak self] id, placement in
                     self?.itemsByID[id]?.placement = placement
                     self?.onPlacementChanged?(id, placement)
@@ -548,6 +556,36 @@ final class SpatialNotebookHostView: UIView, UIScrollViewDelegate, PKCanvasViewD
             return lhs.placement.zIndex < rhs.placement.zIndex
         }
         return lhs.id.uuidString < rhs.id.uuidString
+    }
+
+    private func alignPlacement(id: UUID, placement: NoteCanvasPlacement) -> NoteCanvasPlacement {
+        alignmentLayer.path = nil
+        guard snappingEnabled, !isReadOnly else { return placement }
+        let result = CanvasAlignment.align(placement,
+            to: itemsByID.values.filter { $0.id != id }.map(\.placement),
+            pageWidth: configuration.pageWidth, pageHeight: configuration.pageHeight,
+            tolerance: 6 / Double(max(scrollView.zoomScale, 0.25)))
+        if alignmentLayer.superlayer == nil { contentView.layer.addSublayer(alignmentLayer) }
+        alignmentLayer.frame = contentView.bounds
+        alignmentLayer.zPosition = 100_000
+        alignmentLayer.strokeColor = UIColor.label.withAlphaComponent(0.55).cgColor
+        alignmentLayer.fillColor = nil
+        alignmentLayer.lineWidth = 1 / max(scrollView.zoomScale, 0.25)
+        alignmentLayer.lineDashPattern = [4, 4]
+        let path = UIBezierPath()
+        if let x = result.verticalGuide {
+            path.move(to: CGPoint(x: x + documentOrigin.x, y: 0))
+            path.addLine(to: CGPoint(x: x + documentOrigin.x, y: contentView.bounds.height))
+        }
+        if let y = result.horizontalGuide {
+            path.move(to: CGPoint(x: 0, y: y + documentOrigin.y))
+            path.addLine(to: CGPoint(x: contentView.bounds.width, y: y + documentOrigin.y))
+        }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        alignmentLayer.path = path.cgPath
+        CATransaction.commit()
+        return result.placement
     }
 
     private func fixedWorldBounds(pageSize: CGSize) -> CGRect {
@@ -1135,6 +1173,9 @@ private enum CanvasTextCommand {
 
 @MainActor
 private final class CanvasItemView: UIView, UITextViewDelegate, UIGestureRecognizerDelegate {
+    var alignPlacement: ((UUID, NoteCanvasPlacement) -> NoteCanvasPlacement)?
+    var onDragFinished: (() -> Void)?
+    private var dragStart: NoteCanvasPlacement?
     let id: UUID
     var onSelect: ((UUID) -> Void)?
     var onPlacementChanged: ((UUID, NoteCanvasPlacement) -> Void)?
@@ -1279,6 +1320,7 @@ private final class CanvasItemView: UIView, UITextViewDelegate, UIGestureRecogni
         shapeLayer.frame = bounds
         shapeLayer.path = NotebookShapePath.make(kind: shape.kind, in: bounds, lineWidth: width)
         shapeLayer.lineWidth = width
+        shapeLayer.lineDashPattern = shape.dashPattern.map { NSNumber(value: $0) }
         shapeLayer.strokeColor = shape.strokeColor.uiColor.cgColor
         shapeLayer.fillColor = shape.fillColor?.uiColor.withAlphaComponent(0.18).cgColor
             ?? UIColor.clear.cgColor
@@ -1337,13 +1379,19 @@ private final class CanvasItemView: UIView, UITextViewDelegate, UIGestureRecogni
 
     @objc private func handlePan(_ recognizer: UIPanGestureRecognizer) {
         guard interactionEnabled, let superview else { return }
+        if recognizer.state == .began { dragStart = modelPlacement; onSelect?(id) }
+        guard let dragStart else { return }
         let translation = recognizer.translation(in: superview)
-        center = CGPoint(x: center.x + translation.x, y: center.y + translation.y)
-        recognizer.setTranslation(.zero, in: superview)
-        modelPlacement.x = Double(center.x - documentOrigin.x - bounds.width / 2)
-        modelPlacement.y = Double(center.y - documentOrigin.y - bounds.height / 2)
-        if recognizer.state == .began { onSelect?(id) }
+        var proposed = dragStart
+        proposed.x += translation.x
+        proposed.y += translation.y
+        modelPlacement = alignPlacement?(id, proposed) ?? proposed
+        if recognizer.state == .cancelled { modelPlacement = dragStart }
+        center = CGPoint(x: modelPlacement.x + documentOrigin.x + bounds.width / 2,
+            y: modelPlacement.y + documentOrigin.y + bounds.height / 2)
         if recognizer.state == .ended || recognizer.state == .cancelled {
+            self.dragStart = nil
+            onDragFinished?()
             onPlacementChanged?(id, modelPlacement)
         }
     }

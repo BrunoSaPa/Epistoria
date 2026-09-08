@@ -42,8 +42,9 @@ Epistoria remains in personal beta. The following limits apply to the current pr
 - Text and handwriting recognition are available for local search and review. Formula recognition
   remains development-gated until a permissively licensed on-device model passes physical-iPad
   accuracy, latency, memory, and thermal checks.
-- Shapes support placement, movement, resizing, rotation, outline, optional fill, and PDF output.
-  Existing shape style cannot yet be changed after placement.
+- Existing shapes support appearance editing and PDF output. Alignment applies to individual
+  object movement, not resizing, spacing distribution or lasso-group movement. Connectors remain
+  planned. Physical Pencil, pointer and zoom testing of alignment remains open.
 - Math symbols and accepted recognized expressions are editable text items. The app does not yet
   provide a full equation-layout editor or direct LaTeX input.
 - Handwritten mathematics recognition, worked steps, graphing, and error diagnosis are in personal
@@ -138,6 +139,7 @@ Epistoria remains in personal beta. The following limits apply to the current pr
   coverage limits.
 - On-device formula recognition remains a development feature until a permissively licensed Core
   ML model passes accuracy, two-second p95 latency, memory, thermal, and Pencil-latency tests.
+  No production model is available yet; model conversion and decoder integration remain unfinished.
   Epistoria does not silently upload formulas or require a Mac when that model is unavailable.
   OCR results must be reviewed before learning features use them.
 - Large PDFs use a bounded analysis pass. A result can cover selected passages instead of every

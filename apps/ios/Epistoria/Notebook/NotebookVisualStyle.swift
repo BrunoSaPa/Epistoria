@@ -284,7 +284,8 @@ struct NotebookShapePreview: View {
                 style: StrokeStyle(
                     lineWidth: lineWidth,
                     lineCap: .round,
-                    lineJoin: .round
+                    lineJoin: .round,
+                    dash: shape.dashPattern.map { CGFloat($0) }
                 )
             )
         }

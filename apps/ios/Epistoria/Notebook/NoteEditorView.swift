@@ -152,6 +152,8 @@ struct NoteEditorView: View {
     @State private var showTutor = false
     @State private var showPageManager = false
     @State private var editingImageBlockId: UUID?
+    @State private var editingShape: ShapeEditingSelection?
+    @AppStorage("notebook.alignObjects") private var snappingEnabled = true
     @State private var showMoreTools = false
     @State private var showFindInNote = false
     @State private var selectedPhotoItem: PhotosPickerItem?
@@ -308,6 +310,17 @@ struct NoteEditorView: View {
             .sheet(isPresented: $showOrganization) {
                 NoteOrganizationView(model: model, noteId: noteId) {
                     onLifecycleChanged?()
+                }
+            }
+            .sheet(item: $editingShape) { selection in
+                NoteShapeEditorView(selection: selection) { shape in
+                    guard !isArchived, let store = model.store else {
+                        throw NoteEditorSaveError.encryptedStoreUnavailable
+                    }
+                    try await model.pendingSaves.flush(id: selection.id)
+                    try await store.updateCanvasShape(id: selection.id, shape: shape)
+                    model.noteLocalMutation()
+                    try await refreshBlock(selection.id)
                 }
             }
             .sheet(isPresented: $showPageManager, onDismiss: {
@@ -594,7 +607,8 @@ struct NoteEditorView: View {
             onCanvasTap: { point in
                 Task { await placeActiveTool(at: point, pageIndex: pageIndex) }
             },
-            isReadOnly: isArchived
+            isReadOnly: isArchived,
+            snappingEnabled: snappingEnabled
         )
         .accessibilityIdentifier("note.spatial-canvas.\(pageIndex + 1)")
         .accessibilityValue("\(canvasItems(on: pageIndex).count) canvas items")
@@ -664,6 +678,12 @@ struct NoteEditorView: View {
             canvasMenu
             Menu {
                 if let selectedBlock, !isArchived {
+                    if let shape = selectedBlock.payload.canvasShape {
+                        Button("Edit shape…", systemImage: "slider.horizontal.3") {
+                            editingShape = ShapeEditingSelection(id: selectedBlock.id, shape: shape)
+                        }
+                        .accessibilityIdentifier("note.shape.edit")
+                    }
                     if let evidenceId = selectedBlock.payload.evidenceId,
                         let item = evidence.first(where: { $0.id == evidenceId })
                     {
@@ -737,6 +757,7 @@ struct NoteEditorView: View {
 
     private var canvasMenu: some View {
         Menu {
+            Toggle("Align objects while moving", isOn: $snappingEnabled)
             Section("Page") {
                 pageButton("A4 portrait", format: .a4, orientation: .portrait)
                 pageButton("A4 landscape", format: .a4, orientation: .landscape)

@@ -30,6 +30,10 @@ the current personal beta.
 - Replace an image without rewriting its first encrypted file. Restore the first image from the
   same editor when needed.
 - Move, resize, rotate, and reorder text, images, shapes, and symbols.
+- Edit a selected shape's outline, fill, thickness, shape type and solid, dashed or dotted line
+  style. Preview changes before saving. The style is preserved in PDF export.
+- Align moved objects to nearby edges, centers and fixed-page boundaries with temporary guides.
+  Disable alignment from the page menu for free positioning.
 - Write over text and images without flattening the underlying material.
 - Open a note in an immersive workspace that uses the full iPad detail area.
 - Keep Pencil data separate by page so editing one page does not rewrite the complete note.

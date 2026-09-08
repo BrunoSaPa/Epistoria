@@ -23,7 +23,8 @@ change after personal use and beta testing.
 
 ## Notebook tools
 
-- Add editing for an existing shape's style, connectors, snapping, and alignment guides.
+- Validate selected-shape editing and individual-object alignment on physical iPads, including
+  Pencil, pointer, zoom, rotation and PDF output. Connectors and group alignment remain planned.
 - Evaluate square, angled, and custom eraser footprints after physical Apple Pencil testing.
 - Validate handwritten-math recognition, result review, graph interaction, and original-stroke
   preservation on physical Pencil-capable iPads. Validate local handwriting and formula OCR for
@@ -186,6 +187,9 @@ base daily queue will run on the iPad without paid processing.
 
 - Add an iPhone quick-capture option.
 - Add a simple Mac status view for processing and synchronization health.
+
+Both companion experiences are deferred. Current refinement work remains inside the iPad app;
+Compute Node status stays in Settings.
 
 ## Outside the current scope
 
