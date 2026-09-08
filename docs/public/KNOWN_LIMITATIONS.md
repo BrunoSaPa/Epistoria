@@ -17,7 +17,12 @@ Epistoria remains in personal beta. The following limits apply to the current pr
 - A note can be exported as a readable PDF. The PDF cannot be imported as an editable note.
 - An infinite note exports its used area as one custom-size PDF page. Very large infinite notes
   are scaled to the PDF page-dimension limit.
-- Restored files download when first opened. There is no bulk offline-download action.
+- Offline Files downloads selected or all missing originals while its screen remains open and
+  the app is active. Closing the screen or leaving the app stops unfinished work. Completed files
+  remain saved; incomplete files restart from the beginning on retry.
+- Offline Files includes retained originals and older Source versions, but not online-only links
+  or AI models. Required space is an estimate. Large-file memory use, low-storage behavior and
+  interrupted downloads still require physical-iPad validation.
 - Full fresh-device and independent-backup recovery tests remain in progress.
 - Epistoria supports one private notebook account per installation. Different subjects belong in
   that connected notebook.

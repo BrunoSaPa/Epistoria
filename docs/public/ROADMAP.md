@@ -15,8 +15,9 @@ change after personal use and beta testing.
 ## Portability and file access
 
 - Define safe merge behavior before allowing import into a notebook that already contains data.
-- Download selected or all restored files for offline use.
-- Improve archive and restore support for Sources and Lists.
+- Validate Offline Files on physical iPads with large originals, limited storage, cancellation,
+  background interruption and offline reopening.
+- Validate Source and List archive/restore and membership changes across two installations.
 - Validate permanent Trash deletion, protected dependencies, encrypted asset reclamation, and
   two-device restoration on physical devices.
 

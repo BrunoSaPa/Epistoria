@@ -10,14 +10,15 @@ struct ListDetailView: View {
     @State private var resources: [IdentifiedPayload<SourcePayload>] = []
     @State private var showAddItem = false
     @State private var showEditList = false
+    @State private var showArchivedItems = false
     @State private var pendingUnlinkNote: IdentifiedPayload<NotePayload>?
     @State private var errorMessage: String?
 
     var body: some View {
         List {
             Section {
-                if notes.isEmpty { Text("No notes linked").foregroundStyle(.secondary) }
-                ForEach(notes, id: \.id) { note in
+                if visibleNotes.isEmpty { Text("No notes in this view").foregroundStyle(.secondary) }
+                ForEach(visibleNotes, id: \.id) { note in
                     NavigationLink {
                         NoteEditorView(
                             model: model,
@@ -45,12 +46,12 @@ struct ListDetailView: View {
             } header: {
                 Text("Notes")
             } footer: {
-                Text("A List groups reusable material. Linking a note does not move or duplicate it.")
+                Text("Linking does not move or duplicate material. Archived items are hidden unless Show archived items is enabled in List options.")
             }
 
             Section("Sources") {
-                if resources.isEmpty { Text("No Sources linked").foregroundStyle(.secondary) }
-                ForEach(resources, id: \.id) { resource in
+                if visibleSources.isEmpty { Text("No Sources in this view").foregroundStyle(.secondary) }
+                ForEach(visibleSources, id: \.id) { resource in
                     NavigationLink(resource.payload.title) {
                         SourceDetailView(model: model, sourceId: resource.id)
                     }
@@ -60,10 +61,11 @@ struct ListDetailView: View {
         .navigationTitle(collection?.payload.name ?? "List")
         .toolbar {
             Menu {
+                Toggle("Show archived items", isOn: $showArchivedItems)
                 Button("Edit List", systemImage: "slider.horizontal.3") { showEditList = true }
                 Button("Link existing item", systemImage: "link.badge.plus") { showAddItem = true }
                     .disabled(collection?.payload.archivedAt != nil)
-            } label: { Label("Add", systemImage: "plus") }
+            } label: { Label("List options", systemImage: "ellipsis.circle") }
         }
         .sheet(isPresented: $showAddItem) {
             AddListItemView(model: model, listId: listId) { Task { await load() } }
@@ -114,12 +116,16 @@ struct ListDetailView: View {
                 entityTypeOverride: .listItem
             )
             var loadedNotes: [IdentifiedPayload<NotePayload>] = []
-            var loadedResources: [IdentifiedPayload<SourcePayload>] = []
-            for link in links where link.payload.leftId == listId {
-                if let note = try? await store.payload(NotePayload.self, id: link.payload.rightId) {
+            var loadedResources = try await store.sourcesInList(id: listId)
+            let linkedIds = Set(links.filter { $0.payload.leftId == listId }.map(\.payload.rightId))
+            for id in linkedIds where !trashedIds.contains(id) {
+                guard let entity = try await store.database.entity(id: id), !entity.tombstone else { continue }
+                if entity.entityType == .note,
+                   let note = try? await store.payload(NotePayload.self, id: id) {
                     loadedNotes.append(note)
-                } else if let resource = try? await store.payload(SourcePayload.self, id: link.payload.rightId) {
-                    loadedResources.append(resource)
+                } else if entity.entityType == .source,
+                          let resource = try? await store.payload(SourcePayload.self, id: id) {
+                    if !loadedResources.contains(where: { $0.id == resource.id }) { loadedResources.append(resource) }
                 }
             }
             notes = loadedNotes
@@ -127,6 +133,14 @@ struct ListDetailView: View {
                 .sorted { $0.payload.updatedAt > $1.payload.updatedAt }
             resources = loadedResources.filter { !trashedIds.contains($0.id) }
         } catch { errorMessage = error.localizedDescription }
+    }
+
+    private var visibleNotes: [IdentifiedPayload<NotePayload>] {
+        notes.filter { showArchivedItems || $0.payload.archivedAt == nil }
+    }
+
+    private var visibleSources: [IdentifiedPayload<SourcePayload>] {
+        resources.filter { showArchivedItems || $0.payload.archivedAt == nil }
     }
 
     private func unlinkNote(_ noteId: UUID) async {
@@ -256,8 +270,14 @@ private struct AddListItemView: View {
                 loadedLinks
             )
             let linked = Set(links.map(\.payload.rightId))
-            notes = allNotes.filter { !linked.contains($0.id) }
-            resources = allResources.filter { !linked.contains($0.id) }
+            let trashed = try await store.trashedTargetIds()
+            notes = allNotes.filter {
+                !linked.contains($0.id) && !trashed.contains($0.id) && $0.payload.archivedAt == nil
+            }
+            resources = allResources.filter {
+                !linked.contains($0.id) && !$0.payload.listIds.contains(listId)
+                    && !trashed.contains($0.id) && $0.payload.archivedAt == nil
+            }
         } catch { errorMessage = error.localizedDescription }
     }
 
@@ -267,16 +287,13 @@ private struct AddListItemView: View {
             if kind == .note {
                 _ = try await store.linkNote(selection, toList: listId)
             } else {
-                let relation = RelationPayload(
-                    kind: .listItem,
-                    leftId: listId,
-                    rightId: selection
-                )
-                _ = try await store.save(
-                    payload: relation,
-                    parentId: listId,
-                    relationIds: [listId, selection],
-                    entityTypeOverride: .listItem
+                let source = try await store.payload(SourcePayload.self, id: selection).payload
+                var memberships = try await store.sourceListIds(id: selection)
+                memberships.insert(listId)
+                try await store.updateSource(
+                    id: selection, title: source.title, primaryTopicId: source.primaryTopicId,
+                    relatedTopicIds: source.relatedTopicIds, listIds: Array(memberships),
+                    archived: source.archivedAt != nil
                 )
             }
             model.noteLocalMutation()

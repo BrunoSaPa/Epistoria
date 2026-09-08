@@ -69,7 +69,7 @@ struct ComputeNodeSettingsView: View {
 
             Section {
                 if nodeJobs.isEmpty {
-                    Text("No work currently depends on a Compute Node.")
+                    Text("No node work in the current activity summary.")
                         .foregroundStyle(.secondary)
                 } else {
                     ForEach(nodeJobs) { job in
@@ -82,12 +82,14 @@ struct ComputeNodeSettingsView: View {
                     }
                 }
             } header: {
-                Text("Node work")
+                Text("Recent node work")
             } footer: {
-                Text("Removing a node preserves notebook data. Unfinished node work waits for another valid route or can be cancelled.")
+                Text("This is a bounded activity summary, not a live Mac health check. Open Processing Activity for more records. Removing a node preserves notebook data; resubmit unfinished work from its original feature when another route is ready.")
             }
 
-            Section("Capabilities") {
+            NavigationLink("Processing Activity") { ProcessingActivityView(model: model) }
+
+            Section("Supported acceleration categories") {
                 capability("Larger local models", symbol: "cpu")
                 capability("Long transcription", symbol: "waveform")
                 capability("Office document conversion", symbol: "doc.badge.gearshape")
@@ -173,7 +175,9 @@ struct ComputeNodeSettingsView: View {
         defer { isLoading = false }
         do {
             nodes = try await model.trustedDevices().filter { $0.kind == "MAC" && $0.revokedAt == nil }
-            jobs = try await model.database?.processingJobs() ?? []
+            if let snapshot = try await model.database?.processingActivitySnapshot() {
+                jobs = snapshot.active + snapshot.recent
+            } else { jobs = [] }
         } catch is CancellationError {
             return
         } catch {
@@ -217,7 +221,7 @@ private struct ComputeNodeRow: View {
     }
 
     private var status: String {
-        node.revokedAt == nil ? "Available" : "Removed"
+        node.revokedAt == nil ? "Paired" : "Removed"
     }
 
     private var detail: String {

@@ -46,6 +46,7 @@
 		791C0EE9B2E6C9BEC5AD000F /* WorkspacePreferences.swift in Sources */ = {isa = PBXBuildFile; fileRef = D94F268BAEFEF2AF2402D634 /* WorkspacePreferences.swift */; };
 		7B47D68D383BA5605CF24828 /* TopicDashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE33F134D1461DBC505B80B8 /* TopicDashboardView.swift */; };
 		7F821565D9E9FF7895AAC960 /* NoteCanvasImageRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = F71473C0BC549E14DF27F39F /* NoteCanvasImageRenderer.swift */; };
+		83ED3793BEBB8CF2AB2F8C7C /* OfflineFilesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 565671B882EFB07F44A5A25C /* OfflineFilesView.swift */; };
 		95F88D19371F947D93F4BC43 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21D6211A0941084661F0FDEA /* SettingsView.swift */; };
 		9608B8B5525AE37248D76356 /* EpistoriaCore in Frameworks */ = {isa = PBXBuildFile; productRef = DBFCA34805D80887859E9A10 /* EpistoriaCore */; };
 		99CD9B1D16B8674E84C0C4A7 /* AccountStorageLocatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D596908EB59446C1A5DE9C2 /* AccountStorageLocatorTests.swift */; };
@@ -144,6 +145,7 @@
 		506A112DB7A5A7FDA172198B /* SessionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionsView.swift; sourceTree = "<group>"; };
 		507800F15F03EF683EB6D003 /* TodayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodayView.swift; sourceTree = "<group>"; };
 		50B24792B8487B5D8E5833CD /* MathAssistanceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MathAssistanceView.swift; sourceTree = "<group>"; };
+		565671B882EFB07F44A5A25C /* OfflineFilesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OfflineFilesView.swift; sourceTree = "<group>"; };
 		58702253F48A1989D3C7C7E4 /* EpistoriaPortableImportService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EpistoriaPortableImportService.swift; sourceTree = "<group>"; };
 		5AB1C23E0019EE50083F7840 /* PendingSaveRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PendingSaveRegistry.swift; sourceTree = "<group>"; };
 		639D64932A90F21295231AD9 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
@@ -287,6 +289,7 @@
 				F88A79D39FA49D05AF885DA9 /* ComputeNodeSettingsView.swift */,
 				CCA1D91BCF0E8F22E9012606 /* LocalProcessingSettings.swift */,
 				411AD8353E00924FDD329665 /* LocalProcessingSettingsView.swift */,
+				565671B882EFB07F44A5A25C /* OfflineFilesView.swift */,
 				21D6211A0941084661F0FDEA /* SettingsView.swift */,
 				4D79F9CAAF084868F1AF3A9C /* WorkspaceSettingsViews.swift */,
 			);
@@ -668,6 +671,7 @@
 				D256CAAC165CDDF18A7D8A68 /* NotebookView.swift in Sources */,
 				F24D041C272858D40ABDA08A /* NotebookVisualStyle.swift in Sources */,
 				F5B47A66F44C672C034CA1E8 /* OCRReviewView.swift in Sources */,
+				83ED3793BEBB8CF2AB2F8C7C /* OfflineFilesView.swift in Sources */,
 				5C8B62FD6B846169EF018314 /* OnDeviceFormulaRecognition.swift in Sources */,
 				4D7AA72507C0FEEFD041A3F5 /* OnboardingView.swift in Sources */,
 				4C3C9122AB20F2632A91F255 /* PendingSaveRegistry.swift in Sources */,

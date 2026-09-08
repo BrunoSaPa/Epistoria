@@ -356,6 +356,11 @@ require representative device validation.
 - Optional: synchronize encrypted content through a private server.
 - Review concurrent versions instead of allowing the app to discard one automatically.
 - Review and revoke paired devices.
+- Open Offline Files from Library or Settings to select missing originals and download them to
+  this iPad. See download size, estimated required space and transfer progress. Cancel unfinished
+  downloads without removing completed files.
+- Include archived notes and Sources through List options. Archived and trashed items are excluded
+  from the link picker.
 
 ## Recovery and portability
 

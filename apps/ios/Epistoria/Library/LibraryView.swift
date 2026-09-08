@@ -115,6 +115,11 @@ struct LibraryView: View {
                     .frame(width: 390)
                 }
                 ToolbarItemGroup(placement: .primaryAction) {
+                    NavigationLink {
+                        OfflineFilesView(model: model)
+                    } label: {
+                        Label("Offline Files", systemImage: "arrow.down.circle")
+                    }
                     Menu {
                         Button("Any type") { selectedType = nil }
                         ForEach(SourceKind.allCases, id: \.self) { kind in
@@ -448,7 +453,7 @@ struct LibraryView: View {
                 title: source.payload.title,
                 primaryTopicId: source.payload.primaryTopicId,
                 relatedTopicIds: source.payload.relatedTopicIds,
-                listIds: source.payload.listIds,
+                listIds: Array(try await store.sourceListIds(id: source.id)),
                 archived: archived
             )
             model.noteLocalMutation()
@@ -3637,6 +3642,7 @@ private struct SourceOrganizationView: View {
     @State private var relatedTopicIds: Set<UUID>
     @State private var listIds: Set<UUID>
     @State private var archived: Bool
+    @State private var membershipLoaded = false
     @State private var errorMessage: String?
 
     init(
@@ -3690,11 +3696,20 @@ private struct SourceOrganizationView: View {
                 if let errorMessage { Text(errorMessage).foregroundStyle(.red) }
             }
             .navigationTitle("Edit Source")
+            .disabled(!membershipLoaded)
+            .task {
+                guard let store = model.store, let source else { return }
+                do {
+                    listIds.formUnion(try await store.sourceListIds(id: source.id))
+                    membershipLoaded = true
+                }
+                catch { errorMessage = error.localizedDescription }
+            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { onSaved() } }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") { Task { await save() } }
-                        .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        .disabled(!membershipLoaded || title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
         }

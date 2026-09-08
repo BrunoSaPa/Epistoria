@@ -1,5 +1,16 @@
 # Release notes
 
+## 2026-09-07 — 0.1.0 safety and daily-use update
+
+- Added Offline Files in Library and Settings with selection, space estimates, progress and
+  cancellation. Completed downloads remain saved after an interruption.
+- Hid archived material in Lists by default and added an option to include it.
+- Kept Source assignments consistent when linking or editing Lists.
+- Clarified that a paired Compute Node is not necessarily online. Kept status and activity access
+  on the iPad without adding a Mac app.
+- Retained existing learning tools. Physical-device validation remains open in
+  [Known limitations](KNOWN_LIMITATIONS.md).
+
 ## 2026-09-07 — 0.1.0 development cleanup
 
 - Made writing and adding Sources the primary Today actions; Learn and Sessions remain available.

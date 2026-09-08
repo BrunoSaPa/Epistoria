@@ -29,6 +29,14 @@ struct SettingsView: View {
 
                 Section("Data") {
                     NavigationLink {
+                        OfflineFilesView(model: model)
+                    } label: {
+                        SettingsRow(title: "Offline Files",
+                            detail: "Download selected originals and check local storage",
+                            symbol: "arrow.down.circle")
+                    }
+                    .accessibilityIdentifier("settings.offlineFiles")
+                    NavigationLink {
                         DataHealthView(model: model)
                     } label: {
                         SettingsRow(

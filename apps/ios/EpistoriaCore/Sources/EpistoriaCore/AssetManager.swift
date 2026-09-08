@@ -73,6 +73,7 @@ public enum AssetManagerError: Error, Equatable, LocalizedError {
     case assetMetadataUnavailable
     case encryptedAssetSizeMismatch
     case assetIntegrityMismatch
+    case insufficientStorage
 
     public var errorDescription: String? {
         switch self {
@@ -84,6 +85,7 @@ public enum AssetManagerError: Error, Equatable, LocalizedError {
         case .assetMetadataUnavailable: "The encrypted asset metadata is unavailable."
         case .encryptedAssetSizeMismatch: "The downloaded encrypted asset has the wrong size."
         case .assetIntegrityMismatch: "The encrypted asset did not pass its integrity check."
+        case .insufficientStorage: "There is not enough free space. Free some storage, then try again."
         }
     }
 }
@@ -663,25 +665,72 @@ public actor AssetManager {
     }
 
     @discardableResult
-    public func cacheAsset(assetId: UUID) async throws -> LocalAsset {
+    public func cacheAsset(
+        assetId: UUID,
+        progress: (@Sendable (Int64, Int64) async -> Void)? = nil
+    ) async throws -> LocalAsset {
+        try Task.checkCancellation()
         let metadata = try await assetMetadata(id: assetId)
         if let cached = try await usableLocalAsset(id: assetId, metadata: metadata.payload) {
             return cached
         }
-        return try await cacheAsset(assetId: assetId, metadata: metadata.payload)
+        return try await cacheAsset(assetId: assetId, metadata: metadata.payload, progress: progress)
     }
 
-    private func cacheAsset(assetId: UUID, metadata: AssetPayload) async throws -> LocalAsset {
+    /// Explicit inventory only. Reads encrypted metadata in bounded pages, never file contents.
+    public func offlineAssetInventory() async throws -> [OfflineAssetItem] {
+        var items: [OfflineAssetItem] = []
+        var cursor: EntityPageCursor?
+        repeat {
+            try Task.checkCancellation()
+            let page = try await store.listPage(AssetPayload.self, limit: 100, after: cursor)
+            for item in page.items {
+                try Task.checkCancellation()
+                let available = try await usableLocalAsset(id: item.id, metadata: item.payload) != nil
+                items.append(OfflineAssetItem(
+                    id: item.id, filename: item.payload.originalFilename,
+                    encryptedByteSize: item.payload.encryptedByteSize, isAvailable: available
+                ))
+            }
+            cursor = page.nextCursor
+        } while cursor != nil
+        return items.sorted { $0.filename.localizedStandardCompare($1.filename) == .orderedAscending }
+    }
+
+    public func availableStorageBytes() throws -> Int64? {
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        return try directory.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
+            .volumeAvailableCapacityForImportantUsage
+    }
+
+    private func cacheAsset(
+        assetId: UUID, metadata: AssetPayload,
+        progress: (@Sendable (Int64, Int64) async -> Void)? = nil
+    ) async throws -> LocalAsset {
         guard let api else { throw AssetManagerError.encryptedAssetUnavailable }
         guard metadata.encryptedByteSize > 0,
               metadata.encryptedByteSize <= 536_870_912,
               let maximumBytes = Int(exactly: metadata.encryptedByteSize)
         else { throw AssetManagerError.fileTooLarge }
-        let encrypted = try await api.downloadAsset(id: assetId, maximumBytes: maximumBytes)
+        if let available = try availableStorageBytes(),
+           available < metadata.encryptedByteSize * 2 + 16 * 1_024 * 1_024 {
+            throw AssetManagerError.insufficientStorage
+        }
+        let encrypted = try await api.downloadAsset(
+            id: assetId, maximumBytes: maximumBytes, progress: progress
+        )
+        try Task.checkCancellation()
         guard Int64(encrypted.count) == metadata.encryptedByteSize else {
             throw AssetManagerError.encryptedAssetSizeMismatch
         }
         _ = try verifiedPlaintext(encrypted: encrypted, metadata: metadata)
+
+        // Recheck after suspension: deletion or another download must not resurrect or replace
+        // an asset using metadata that is no longer authoritative.
+        let current = try await assetMetadata(id: assetId)
+        guard current.payload == metadata else { throw AssetManagerError.assetIntegrityMismatch }
+        if let cached = try await usableLocalAsset(id: assetId, metadata: metadata) { return cached }
+        try Task.checkCancellation()
 
         try FileManager.default.createDirectory(
             at: directory,
@@ -704,7 +753,7 @@ public actor AssetManager {
             lastErrorCode: nil
         )
         do {
-            try await database.registerLocalAsset(local)
+            try await database.registerLocalAsset(local, requiring: metadata)
         } catch {
             if !destinationExisted {
                 try? FileManager.default.removeItem(at: destination)
@@ -716,7 +765,13 @@ public actor AssetManager {
 
     private func assetMetadata(id: UUID) async throws -> IdentifiedPayload<AssetPayload> {
         do {
-            return try await store.payload(AssetPayload.self, id: id)
+            guard let entity = try await database.entity(id: id),
+                  !entity.tombstone, entity.entityType == .asset else {
+                throw AssetManagerError.assetMetadataUnavailable
+            }
+            return IdentifiedPayload(id: id,
+                payload: try CanonicalJSON.decode(AssetPayload.self, from: entity.content),
+                revision: entity.revision, syncState: entity.syncState)
         } catch {
             throw AssetManagerError.assetMetadataUnavailable
         }

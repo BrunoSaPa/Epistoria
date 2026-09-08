@@ -192,6 +192,149 @@ final class APIClientTests: XCTestCase {
         return URLSession(configuration: configuration)
     }
 
+    func testAssetDownloadUsesAuthenticatedDescriptorAndReportsReceivedBytes() async throws {
+        let id = UUID()
+        let content = Data(repeating: 7, count: 70_000)
+        let progress = DownloadProgressRecorder()
+        MockURLProtocol.handler = { request in
+            if request.url?.path.hasSuffix("/download") == true {
+                XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer synthetic-token")
+                return try Self.jsonResponse(request, status: 200, object: [
+                    "assetId": id.uuidString, "encryptedByteSize": String(content.count),
+                    "url": "https://objects.example.test/original", "expiresInSeconds": 60,
+                ])
+            }
+            XCTAssertNil(request.value(forHTTPHeaderField: "Authorization"))
+            return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, content)
+        }
+        let api = EpistoriaAPIClient(baseURL: URL(string: "https://sync.example.test/v1")!,
+            credentials: DeviceCredentials(ownerId: UUID(), deviceId: UUID(), token: "synthetic-token"), session: session())
+        let downloaded = try await api.downloadAsset(id: id, maximumBytes: content.count) { received, total in
+            await progress.record(received, total)
+        }
+        XCTAssertEqual(downloaded, content)
+        let updates = await progress.values
+        XCTAssertEqual(updates.first?.0, 0)
+        XCTAssertEqual(updates.last?.0, Int64(content.count))
+        XCTAssertTrue(updates.allSatisfy { $0.0 <= $0.1 })
+    }
+
+    func testAssetDownloadRejectsOversizedAndTruncatedBodies() async throws {
+        for count in [3, 5] {
+            let id = UUID()
+            MockURLProtocol.handler = { request in
+                if request.url?.path.hasSuffix("/download") == true {
+                    return try Self.jsonResponse(request, status: 200, object: [
+                        "assetId": id.uuidString, "encryptedByteSize": "4",
+                        "url": "https://objects.example.test/original", "expiresInSeconds": 60,
+                    ])
+                }
+                return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, Data(repeating: 0, count: count))
+            }
+            let api = authenticatedAssetClient()
+            do {
+                _ = try await api.downloadAsset(id: id, maximumBytes: 4)
+                XCTFail("Invalid size was accepted")
+            } catch let error as APIClientError {
+                XCTAssertEqual(error, count > 4 ? .assetTooLarge : .invalidResponse)
+            }
+        }
+    }
+
+    func testAssetDownloadCancellationDoesNotBecomeTransportFailure() async throws {
+        let id = UUID()
+        MockURLProtocol.handler = { request in
+            if request.url?.path.hasSuffix("/download") == true {
+                return try Self.jsonResponse(request, status: 200, object: [
+                    "assetId": id.uuidString, "encryptedByteSize": "4",
+                    "url": "https://objects.example.test/original", "expiresInSeconds": 60,
+                ])
+            }
+            throw URLError(.cancelled)
+        }
+        let api = authenticatedAssetClient()
+        do {
+            _ = try await api.downloadAsset(id: id)
+            XCTFail("Cancelled download returned")
+        } catch is CancellationError {
+            // Expected: the foreground UI can report that remaining work was stopped.
+        }
+    }
+
+    func testAssetCacheVerifiesBytesAndSurvivesManagerRecreation() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("OfflineCache-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let account = UUID()
+        let accountKey = Data(repeating: 3, count: 32)
+        let assetKey = Data(repeating: 8, count: 32)
+        let plaintext = Data("synthetic offline original".utf8)
+        let encrypted = try AssetCrypto().encrypt(plaintext, key: assetKey)
+        let database = try SQLCipherDatabase(url: directory.appendingPathComponent("test.sqlite"), key: accountKey)
+        let store = EpistoriaStore(database: database)
+        let id = try await store.save(payload: AssetPayload(mimeType: "text/plain",
+            plaintextByteSize: Int64(plaintext.count), encryptedByteSize: Int64(encrypted.count),
+            dedupeTag: EntityCrypto().dedupeTag(plaintext: plaintext, accountKey: accountKey, accountId: account),
+            assetKey: Base64URL.encode(assetKey), originalFilename: "synthetic.txt"))
+        MockURLProtocol.handler = { request in
+            if request.url?.path.hasSuffix("/download") == true {
+                return try Self.jsonResponse(request, status: 200, object: [
+                    "assetId": id.uuidString, "encryptedByteSize": String(encrypted.count),
+                    "url": "https://objects.example.test/original", "expiresInSeconds": 60,
+                ])
+            }
+            return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, encrypted)
+        }
+        let api = authenticatedAssetClient()
+        let assetDirectory = directory.appendingPathComponent("assets")
+        let manager = AssetManager(accountId: account, accountKey: accountKey, store: store, directory: assetDirectory, api: api)
+        let cancelled = Task {
+            try await manager.cacheAsset(assetId: id) { received, total in
+                if received == total { withUnsafeCurrentTask { $0?.cancel() } }
+            }
+        }
+        do {
+            _ = try await cancelled.value
+            XCTFail("Cancelled bytes were installed")
+        } catch is CancellationError {}
+        let afterCancellation = try await database.localAsset(id: id)
+        XCTAssertNil(afterCancellation)
+        let local = try await manager.cacheAsset(assetId: id)
+        XCTAssertEqual(try Data(contentsOf: local.encryptedFileURL), encrypted)
+        MockURLProtocol.handler = { _ in throw URLError(.notConnectedToInternet) }
+        let reopened = AssetManager(accountId: account, accountKey: accountKey, store: store, directory: assetDirectory)
+        let restored = try await reopened.decryptedLocalData(assetId: id)
+        XCTAssertEqual(restored, plaintext)
+        let reused = try await reopened.cacheAsset(assetId: id)
+        XCTAssertEqual(reused.id, id)
+    }
+
+    func testCorruptAssetIsNotInstalled() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("OfflineCorrupt-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let key = Data(repeating: 9, count: 32)
+        let database = try SQLCipherDatabase(url: directory.appendingPathComponent("test.sqlite"), key: key)
+        let store = EpistoriaStore(database: database)
+        let id = try await store.save(payload: AssetPayload(mimeType: "text/plain", plaintextByteSize: 4,
+            encryptedByteSize: 4, dedupeTag: "synthetic", assetKey: Base64URL.encode(key), originalFilename: "synthetic.txt"))
+        MockURLProtocol.handler = { request in
+            if request.url?.path.hasSuffix("/download") == true {
+                return try Self.jsonResponse(request, status: 200, object: [
+                    "assetId": id.uuidString, "encryptedByteSize": "4",
+                    "url": "https://objects.example.test/original", "expiresInSeconds": 60,
+                ])
+            }
+            return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, Data(repeating: 0, count: 4))
+        }
+        let manager = AssetManager(accountId: UUID(), accountKey: key, store: store,
+            directory: directory.appendingPathComponent("assets"), api: authenticatedAssetClient())
+        do {
+            _ = try await manager.cacheAsset(assetId: id)
+            XCTFail("Unauthenticated bytes were installed")
+        } catch let error as AssetManagerError { XCTAssertEqual(error, .assetIntegrityMismatch) }
+        let local = try await database.localAsset(id: id)
+        XCTAssertNil(local)
+    }
+
     private static func jsonResponse(
         _ request: URLRequest,
         status: Int,
@@ -204,6 +347,12 @@ final class APIClientTests: XCTestCase {
             headerFields: ["content-type": "application/json"]
         )!
         return (response, try JSONSerialization.data(withJSONObject: object))
+    }
+
+    private func authenticatedAssetClient() -> EpistoriaAPIClient {
+        EpistoriaAPIClient(baseURL: URL(string: "https://sync.example.test")!,
+            credentials: DeviceCredentials(ownerId: UUID(), deviceId: UUID(), token: "synthetic-token"),
+            session: session())
     }
 
     private static func requestBody(_ request: URLRequest) -> Data? {
@@ -221,4 +370,9 @@ final class APIClientTests: XCTestCase {
         }
         return output
     }
+}
+
+private actor DownloadProgressRecorder {
+    var values: [(Int64, Int64)] = []
+    func record(_ received: Int64, _ total: Int64) { values.append((received, total)) }
 }

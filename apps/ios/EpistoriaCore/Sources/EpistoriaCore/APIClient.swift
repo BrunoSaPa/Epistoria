@@ -354,7 +354,11 @@ public actor EpistoriaAPIClient {
         )
     }
 
-    public func downloadAsset(id: UUID, maximumBytes: Int = 536_870_912) async throws -> Data {
+    public func downloadAsset(
+        id: UUID, maximumBytes: Int = 536_870_912,
+        progress: (@Sendable (Int64, Int64) async -> Void)? = nil
+    ) async throws -> Data {
+        try Task.checkCancellation()
         guard maximumBytes > 0 else { throw APIClientError.assetTooLarge }
         let descriptor: AssetDownloadResponse = try await send(
             method: "GET",
@@ -368,11 +372,41 @@ public actor EpistoriaAPIClient {
 
         var request = URLRequest(url: descriptor.url)
         request.httpMethod = "GET"
-        let (data, response) = try await performData(request)
-        guard (200 ... 299).contains(response.statusCode), data.count == declaredBytes else {
-            throw APIClientError.invalidResponse
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        do {
+            let (bytes, response) = try await session.bytes(for: request)
+            defer { bytes.task.cancel() }
+            guard let http = response as? HTTPURLResponse,
+                  (200 ... 299).contains(http.statusCode) else {
+                throw APIClientError.invalidResponse
+            }
+            guard response.expectedContentLength <= Int64(declaredBytes) else {
+                throw APIClientError.assetTooLarge
+            }
+            var data = Data()
+            await progress?(0, Int64(declaredBytes))
+            for try await byte in bytes {
+                guard data.count < declaredBytes else { throw APIClientError.assetTooLarge }
+                data.append(byte)
+                if data.count.isMultiple(of: 65_536) {
+                    try Task.checkCancellation()
+                    await progress?(Int64(data.count), Int64(declaredBytes))
+                }
+            }
+            try Task.checkCancellation()
+            guard data.count == declaredBytes else { throw APIClientError.invalidResponse }
+            await progress?(Int64(data.count), Int64(declaredBytes))
+            return data
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch let error as URLError where error.code == .cancelled {
+            throw CancellationError()
+        } catch let error as APIClientError {
+            throw error
+        } catch {
+            if Task.isCancelled { throw CancellationError() }
+            throw APIClientError.transport
         }
-        return data
     }
 
     public func createAIJob(

@@ -869,6 +869,16 @@ public actor SQLCipherDatabase {
         return ids.compactMap { byId[$0] }
     }
 
+    /// Reads only records linked to one known owner, not the complete entity collection.
+    public func entities(type: EntityType, relatedTo id: UUID) throws -> [StoredEntity] {
+        try query("""
+            SELECT * FROM entities
+            WHERE entity_type=? AND tombstone=0
+              AND EXISTS (SELECT 1 FROM json_each(entities.relation_ids) WHERE value=?)
+            ORDER BY client_modified_at DESC, id ASC
+            """, [.text(type.rawValue), .text(canonical(id))]).map(entityFromRow)
+    }
+
     /// Reads children of several known parents without scanning the complete entity type.
     public func entities(
         type: EntityType,
@@ -1685,7 +1695,16 @@ public actor SQLCipherDatabase {
         try run("UPDATE sync_cursor SET sequence=? WHERE singleton=1", [.text(sequence)])
     }
 
-    public func registerLocalAsset(_ asset: LocalAsset) throws {
+    public func registerLocalAsset(_ asset: LocalAsset, requiring metadata: AssetPayload? = nil) throws {
+        // No suspension between validating downloaded metadata and registering its cache.
+        // Imports omit this check because their metadata is created after the encrypted file.
+        if let metadata {
+            guard let current = try entity(id: asset.id), !current.tombstone,
+                  current.entityType == .asset,
+                  try CanonicalJSON.decode(AssetPayload.self, from: current.content) == metadata else {
+                throw AssetManagerError.assetMetadataUnavailable
+            }
+        }
         try run(
             """
             INSERT INTO local_assets

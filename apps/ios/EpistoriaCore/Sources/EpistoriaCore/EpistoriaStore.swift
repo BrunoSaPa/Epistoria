@@ -3001,7 +3001,7 @@ public actor EpistoriaStore {
         source.payload.listIds = Array(Set(listIds))
         source.payload.archivedAt = archived ? (source.payload.archivedAt ?? date) : nil
         source.payload.updatedAt = date
-        _ = try await save(
+        var writes = [try localWrite(
             id: id,
             payload: source.payload,
             parentId: primaryTopicId,
@@ -3010,7 +3010,32 @@ public actor EpistoriaStore {
                 source.payload.originalAssetId,
                 source.payload.currentVersionId,
             ].compactMap(\ .self) + topicIds + source.payload.listIds
+        )]
+        let links = try decode(
+            await database.entities(type: .listItem, relatedTo: id), as: RelationPayload.self
+        ).filter { $0.payload.rightId == id }
+        let memberships = Set(source.payload.listIds)
+        for listId in memberships where !links.contains(where: { $0.payload.leftId == listId }) {
+            writes.append(try localWrite(id: UUID(),
+                payload: RelationPayload(kind: .listItem, leftId: listId, rightId: id, now: date),
+                parentId: listId, relationIds: [listId, id]).overridingEntityType(.listItem))
+        }
+        try await database.saveLocalBatch(writes,
+            deleting: links.filter { !memberships.contains($0.payload.leftId) }.map(\.id),
+            deletedAt: date)
+    }
+
+    public func sourceListIds(id: UUID) async throws -> Set<UUID> {
+        let source = try await payload(SourcePayload.self, id: id)
+        let links = try decode(
+            await database.entities(type: .listItem, relatedTo: id), as: RelationPayload.self
         )
+        return Set(source.payload.listIds).union(links.filter { $0.payload.rightId == id }.map(\.payload.leftId))
+    }
+
+    public func sourcesInList(id: UUID) async throws -> [IdentifiedPayload<SourcePayload>] {
+        try decode(await database.entities(type: .source, relatedTo: id), as: SourcePayload.self)
+            .filter { $0.payload.listIds.contains(id) }
     }
 
     @discardableResult

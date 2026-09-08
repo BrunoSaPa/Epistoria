@@ -118,6 +118,24 @@ final class EpistoriaAccessibilityUITests: XCTestCase {
     }
 
     @MainActor
+    func testOfflineFilesIsUsableWithoutAIOrComputeNode() throws {
+        let app = ephemeralApplication()
+        app.launch()
+        XCTAssertTrue(app.buttons["navigation.settings"].waitForExistence(timeout: 12))
+        app.buttons["navigation.settings"].tap()
+        let offline = app.descendants(matching: .any)["settings.offlineFiles"].firstMatch
+        XCTAssertTrue(offline.waitForExistence(timeout: 5))
+        offline.tap()
+        XCTAssertTrue(app.staticTexts["No original files in this notebook."].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.buttons["offline.download"].isEnabled)
+        XCTAssertFalse(app.buttons["offline.cancel"].exists)
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "Offline Files — no configuration required"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+    }
+
+    @MainActor
     func testEphemeralNotebookSmokeJourney() throws {
         let title = "UI smoke \(UUID().uuidString.prefix(8))"
         let app = ephemeralApplication()

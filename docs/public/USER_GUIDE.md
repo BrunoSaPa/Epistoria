@@ -611,6 +611,35 @@ coverage limits.
 If a restored PDF is not yet on the iPad, the app needs a connection the first time you open it.
 After a successful download, the encrypted local copy opens offline.
 
+## Prepare files for offline use
+
+1. Open **Library → Offline Files**, or **Settings → Data → Offline Files**.
+2. Select individual missing files or **Select all missing files**. Originals already on this
+   iPad are not selected again. The inventory includes note images and older Source versions.
+3. Review **Download size**, **Free space needed**, and available storage. The space requirement
+   includes a safety allowance; it is not a storage reservation.
+4. Select **Download selected files**. A configured sync connection is required for restored
+   originals. No AI provider or Compute Node is involved.
+5. Keep this screen open with the app active. Progress shows received bytes, followed by
+   verification and saving. A file is marked on-device after its encrypted download is verified
+   and installed.
+
+Select **Cancel downloads** to stop unfinished work. Leaving the screen or app also stops it.
+Completed files remain saved. If a download fails, check storage and the sync connection, then
+download the remaining selection. An incomplete file restarts from the beginning. After relaunch,
+open Offline Files and select missing files again.
+
+This action does not capture online-only webpages, YouTube media, or AI models. To save a webpage,
+use its separate **Capture offline copy** action. Large-file and interruption validation status
+is listed in [Known limitations](KNOWN_LIMITATIONS.md).
+
+## Archived items in Lists
+
+Lists show active notes and Sources by default. Open **List options → Show archived items** to
+include archived material. Trash is never included. Archiving a List does not archive its contents.
+The link picker offers active, non-trashed items only. Use **Edit Source** to change a Source's
+List assignments; the assignment also appears in the List.
+
 ## Manage learning records
 
 Open **Learning → Knowledge**, then select **Manage learning records**.
