@@ -154,6 +154,7 @@ struct NoteEditorView: View {
     @State private var editingImageBlockId: UUID?
     @State private var editingShape: ShapeEditingSelection?
     @AppStorage("notebook.alignObjects") private var snappingEnabled = true
+    @AppStorage("notebook.holdShapes") private var holdShapesEnabled = false
     @State private var showMoreTools = false
     @State private var showFindInNote = false
     @State private var selectedPhotoItem: PhotosPickerItem?
@@ -608,7 +609,8 @@ struct NoteEditorView: View {
                 Task { await placeActiveTool(at: point, pageIndex: pageIndex) }
             },
             isReadOnly: isArchived,
-            snappingEnabled: snappingEnabled
+            snappingEnabled: snappingEnabled,
+            holdShapesEnabled: holdShapesEnabled
         )
         .accessibilityIdentifier("note.spatial-canvas.\(pageIndex + 1)")
         .accessibilityValue("\(canvasItems(on: pageIndex).count) canvas items")
@@ -758,6 +760,7 @@ struct NoteEditorView: View {
     private var canvasMenu: some View {
         Menu {
             Toggle("Align objects while moving", isOn: $snappingEnabled)
+            Toggle("Draw and hold shapes (Beta)", isOn: $holdShapesEnabled)
             Section("Page") {
                 pageButton("A4 portrait", format: .a4, orientation: .portrait)
                 pageButton("A4 landscape", format: .a4, orientation: .landscape)

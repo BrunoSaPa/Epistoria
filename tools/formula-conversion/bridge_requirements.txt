@@ -4,3 +4,4 @@ torchvision==0.22.0
 onnx2torch==1.5.15
 coremltools==9.0
 numpy==2.2.6
+onnxruntime==1.29.0

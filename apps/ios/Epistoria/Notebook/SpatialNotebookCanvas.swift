@@ -115,6 +115,7 @@ struct SpatialNotebookCanvas: UIViewRepresentable {
     let onCanvasTap: (CGPoint) -> Void
     let isReadOnly: Bool
     var snappingEnabled = true
+    var holdShapesEnabled = false
 
     func makeUIView(context: Context) -> SpatialNotebookHostView {
         let view = SpatialNotebookHostView()
@@ -128,6 +129,7 @@ struct SpatialNotebookCanvas: UIViewRepresentable {
 
     private func update(_ view: SpatialNotebookHostView) {
         view.snappingEnabled = snappingEnabled
+        view.holdShapesEnabled = holdShapesEnabled
         view.onSelect = onSelect
         view.onViewportChanged = onViewportChanged
         view.onPlacementChanged = onPlacementChanged
@@ -163,6 +165,8 @@ struct SpatialNotebookCanvas: UIViewRepresentable {
 @MainActor
 final class SpatialNotebookHostView: UIView, UIScrollViewDelegate, PKCanvasViewDelegate {
     var snappingEnabled = true
+    var holdShapesEnabled = false
+    private var heldShapes: HeldShapeController?
     private let alignmentLayer = CAShapeLayer()
     var onSelect: ((UUID?) -> Void)?
     var onViewportChanged: ((CGPoint) -> Void)?
@@ -281,6 +285,16 @@ final class SpatialNotebookHostView: UIView, UIScrollViewDelegate, PKCanvasViewD
             self?.finishLasso(in: rect)
         }
         addSubview(lassoView)
+        heldShapes = HeldShapeController(canvas: pencilCanvas, container: self)
+        NotificationCenter.default.addObserver(self, selector: #selector(interruptHeldShape),
+            name: UIApplication.willResignActiveNotification, object: nil)
+    }
+
+    @objc private func interruptHeldShape() { heldShapes?.interrupt() }
+
+    override func willMove(toWindow newWindow: UIWindow?) {
+        if newWindow == nil { heldShapes?.interrupt() }
+        super.willMove(toWindow: newWindow)
     }
 
     override func layoutSubviews() {
@@ -289,6 +303,7 @@ final class SpatialNotebookHostView: UIView, UIScrollViewDelegate, PKCanvasViewD
         lassoView.frame = bounds
         guard bounds.width > 0, bounds.height > 0 else { return }
         let sizeChanged = bounds.size != lastLayoutSize
+        if sizeChanged { heldShapes?.interrupt() }
         lastLayoutSize = bounds.size
         if geometryNeedsInitialPosition {
             // `setZoomScale` can synchronously trigger another layout pass. Mark the one-time
@@ -331,6 +346,10 @@ final class SpatialNotebookHostView: UIView, UIScrollViewDelegate, PKCanvasViewD
             || configuration.paperColor != self.configuration.paperColor
             || configuration.paperSpacing != self.configuration.paperSpacing
         let pageChanged = pageIndex != self.pageIndex
+        if pageChanged || surfaceChanged || mode != self.mode || inkTool != .pen || isReadOnly {
+            heldShapes?.interrupt()
+        }
+        heldShapes?.setEnabled(holdShapesEnabled && mode == .ink && inkTool == .pen && !isReadOnly)
         let preservedCenter = surfaceChanged && !geometryNeedsInitialPosition
             ? currentWorldCenter()
             : nil
@@ -622,6 +641,7 @@ final class SpatialNotebookHostView: UIView, UIScrollViewDelegate, PKCanvasViewD
         lastExternalInkData = data
         let decoded = data.isEmpty ? PKDrawing() : (try? PKDrawing(data: data)) ?? PKDrawing()
         guard decoded != worldDrawing else { return }
+        heldShapes?.interrupt()
         worldDrawing = decoded
         applyWorldDrawing()
     }
@@ -657,6 +677,7 @@ final class SpatialNotebookHostView: UIView, UIScrollViewDelegate, PKCanvasViewD
     private func applyCommand(_ command: SpatialNotebookCommand?) {
         guard let command, command.id != lastCommandID else { return }
         lastCommandID = command.id
+        heldShapes?.interrupt()
         switch command.action {
         case .undo:
             pencilCanvas.undoManager?.undo()
@@ -794,6 +815,10 @@ final class SpatialNotebookHostView: UIView, UIScrollViewDelegate, PKCanvasViewD
 
     func viewForZooming(in scrollView: UIScrollView) -> UIView? { contentView }
 
+    func scrollViewWillBeginDragging(_ scrollView: UIScrollView) { heldShapes?.interrupt() }
+
+    func scrollViewWillBeginZooming(_ scrollView: UIScrollView, with view: UIView?) { heldShapes?.interrupt() }
+
     func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
         if !decelerate { settleViewport() }
     }
@@ -816,6 +841,7 @@ final class SpatialNotebookHostView: UIView, UIScrollViewDelegate, PKCanvasViewD
         )
         worldDrawing = canvasView.drawing.transformed(using: inverse)
         onInkChanged?(worldDrawing.dataRepresentation())
+        heldShapes?.drawingChanged()
     }
 
     func canvasViewDidBeginUsingTool(_ canvasView: PKCanvasView) {
@@ -840,6 +866,7 @@ final class SpatialNotebookHostView: UIView, UIScrollViewDelegate, PKCanvasViewD
     }
 
     private func settleViewport() {
+        heldShapes?.interrupt()
         guard configuration.pageFormat == .infinite else {
             reportViewport()
             return

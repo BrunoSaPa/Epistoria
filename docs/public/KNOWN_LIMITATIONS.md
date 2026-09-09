@@ -45,6 +45,11 @@ Epistoria remains in personal beta. The following limits apply to the current pr
 - Existing shapes support appearance editing and PDF output. Alignment applies to individual
   object movement, not resizing, spacing distribution or lasso-group movement. Connectors remain
   planned. Physical Pencil, pointer and zoom testing of alignment remains open.
+- Draw-and-hold shapes are an opt-in Pen-only prototype. Accepted shapes remain ink, not separate
+  objects for the shape editor. Only single-stroke lines, circles, axis-aligned ellipses and
+  rectangles are supported. Very small, long, complex or ambiguous strokes are left unchanged.
+  Physical hold timing, false positives, palm rejection, accessibility and gesture latency are
+  not yet validated. Marker and eraser input do not trigger it.
 - Math symbols and accepted recognized expressions are editable text items. The app does not yet
   provide a full equation-layout editor or direct LaTeX input.
 - Handwritten mathematics recognition, worked steps, graphing, and error diagnosis are in personal

@@ -1,5 +1,12 @@
 # Release notes
 
+## 2026-09-08 — 0.1.0 draw-and-hold prototype
+
+- Added optional draw-and-hold ink cleanup for lines, circles, ellipses and rectangles.
+- Preview before accepting; keep the original ink or restore it with undo.
+- The prototype is Pen-only and disabled by default pending physical-iPad validation.
+- Formula model work progressed, but complete on-device formula recognition remains unavailable.
+
 ## 2026-09-08 — 0.1.0 saved Studio settings
 
 - Added named Studio recipes for reusable request settings, with archive and restore.

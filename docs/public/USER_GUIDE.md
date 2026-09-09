@@ -619,6 +619,14 @@ After a successful download, the encrypted local copy opens offline.
 
 ## Edit shapes and align objects
 
+To try draw-and-hold, enable **Draw and hold shapes (Beta)** in the page-size menu, then use
+**Pen**. Draw a line, circle, ellipse or rectangle in one stroke and hold the Pencil still for
+about two-thirds of a second. A dashed preview appears when the stroke is recognized. Move
+again to dismiss that preview. Lift the Pencil, then choose **Use shape** or **Keep ink**.
+Nothing replaces the ink before confirmation. Undo restores the rough stroke; redo reapplies
+the clean stroke. Starting another stroke or leaving the page discards an unaccepted proposal.
+The result is ink and can be erased normally; use the separate Shape tool for editable objects.
+
 For shape changes, select the shape and open **Notebook actions → Edit shape**. Adjust the
 outline, fill, thickness, line style or shape type. The preview does not change the saved item
 until you select **Save**. **Cancel** discards the draft; **Reset changes** restores the starting

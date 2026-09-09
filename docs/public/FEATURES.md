@@ -30,6 +30,9 @@ the current personal beta.
 - Replace an image without rewriting its first encrypted file. Restore the first image from the
   same editor when needed.
 - Move, resize, rotate, and reorder text, images, shapes, and symbols.
+- Try opt-in **Draw and hold shapes (Beta)** with the Pen. Hold a rough line, circle, ellipse or
+  rectangle to preview clean ink, then choose **Use shape** or **Keep ink**. Undo restores the
+  original stroke. This prototype remains disabled by default pending physical-iPad validation.
 - Edit a selected shape's outline, fill, thickness, shape type and solid, dashed or dotted line
   style. Preview changes before saving. The style is preserved in PDF export.
 - Align moved objects to nearby edges, centers and fixed-page boundaries with temporary guides.

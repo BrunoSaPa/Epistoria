@@ -231,6 +231,38 @@ final class EpistoriaAccessibilityUITests: XCTestCase {
     }
 
     @MainActor
+    func testDrawAndHoldLineOffersReviewWithoutBlockingInk() throws {
+        let app = ephemeralApplication(additionalArguments: ["-notebook.holdShapes", "YES"])
+        app.launch()
+        let notebook = app.staticTexts["navigation.notebook"]
+        XCTAssertTrue(notebook.waitForExistence(timeout: 12))
+        notebook.tap()
+        app.buttons["notebook.new"].tap()
+        app.buttons["Note"].tap()
+        let title = app.textFields["notebook.new-note.title"]
+        XCTAssertTrue(title.waitForExistence(timeout: 3))
+        title.tap(); title.typeText("Synthetic held line")
+        app.buttons["notebook.new-note.create"].tap()
+        XCTAssertTrue(app.textFields["note.title"].waitForExistence(timeout: 8))
+        let pen = app.buttons["note.tool.pen"]
+        XCTAssertTrue(pen.waitForExistence(timeout: 3))
+        pen.tap()
+        let canvas = app.otherElements["note.page.1"].firstMatch
+        XCTAssertTrue(canvas.waitForExistence(timeout: 3))
+        let start = canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: 0.45))
+        let end = canvas.coordinate(withNormalizedOffset: CGVector(dx: 0.65, dy: 0.45))
+        start.press(forDuration: 0.05, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 1)
+        let keep = app.buttons["Keep ink"]
+        XCTAssertTrue(keep.waitForExistence(timeout: 5))
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = "Held line review"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        keep.tap()
+        XCTAssertFalse(keep.exists)
+    }
+
+    @MainActor
     private func ephemeralApplication(
         additionalArguments: [String] = []
     ) -> XCUIApplication {

@@ -23,10 +23,9 @@ change after personal use and beta testing.
 
 ## Notebook tools
 
-- Add draw-and-hold shape recognition: draw a rough line, circle, ellipse or rectangle, then
-  hold the Pencil still to preview a clean shape. Keep this optional, preserve original ink
-  until confirmation, and support cancellation and undo. Validate against accidental holds
-  during writing before enabling it by default. This gesture is not implemented yet.
+- Validate the opt-in draw-and-hold ink prototype on physical iPads, including accidental holds,
+  cancellation, erasing, undo, zoom and page changes. Separately editable shape objects and
+  rotated rectangle fitting remain future work. Keep the gesture disabled by default meanwhile.
 - Validate selected-shape editing and individual-object alignment on physical iPads, including
   Pencil, pointer, zoom, rotation and PDF output. Connectors and group alignment remain planned.
 - Evaluate square, angled, and custom eraser footprints after physical Apple Pencil testing.
