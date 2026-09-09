@@ -339,7 +339,8 @@ struct NoteEditorView: View {
                 NoteFindInNoteView(
                     pages: pages,
                     blocks: blocks,
-                    artifacts: ocrArtifacts
+                    artifacts: ocrArtifacts,
+                    store: model.store
                 ) { match in
                     activeFocusedBlockId = match.blockId
                     activeHighlightText = match.text

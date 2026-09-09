@@ -23,6 +23,10 @@ change after personal use and beta testing.
 
 ## Notebook tools
 
+Formula conversion and physical handwriting validation are deferred while everyday notebook
+use is refined. Existing experimental controls remain opt-in; production formula recognition
+stays unavailable until its quality and device gates pass.
+
 - Validate the opt-in draw-and-hold ink prototype on physical iPads, including accidental holds,
   cancellation, erasing, undo, zoom and page changes. Separately editable shape objects and
   rotated rectangle fitting remain future work. Keep the gesture disabled by default meanwhile.

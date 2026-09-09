@@ -177,6 +177,23 @@ final class EpistoriaAccessibilityUITests: XCTestCase {
 
         let more = app.buttons["note.tool.more"]
         more.tap()
+        let find = app.buttons["note.more.find"]
+        XCTAssertTrue(find.waitForExistence(timeout: 3))
+        find.tap()
+        let findField = app.searchFields.firstMatch
+        XCTAssertTrue(findField.waitForExistence(timeout: 5))
+        findField.tap()
+        findField.typeText("missing phrase")
+        XCTAssertTrue(app.descendants(matching: .any)["note.find.empty"].firstMatch.waitForExistence(timeout: 5))
+        let findScreen = XCTAttachment(screenshot: app.screenshot())
+        findScreen.name = "Find in Note empty result"
+        findScreen.lifetime = .keepAlways
+        add(findScreen)
+        app.buttons["Cancel"].tap()
+        app.buttons["Done"].tap()
+        XCTAssertTrue(pages.waitForExistence(timeout: 3))
+
+        more.tap()
         let exportPDF = app.descendants(matching: .any)["note.more.export-pdf"].firstMatch
         XCTAssertTrue(exportPDF.waitForExistence(timeout: 3))
         exportPDF.tap()

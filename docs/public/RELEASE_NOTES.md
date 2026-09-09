@@ -1,5 +1,13 @@
 # Release notes
 
+## 2026-09-09 — 0.1.0 Find in Note refinement
+
+- Match text regardless of capitalization, accents, or spaces surrounding the search phrase.
+- Emphasize matches in previews and distinguish accepted, unreviewed, and corrected recognition.
+- Search corrected OCR text and open only the matching recognition region.
+- Exclude missing or trashed pages and recognition from changed ink.
+- Defer formula conversion and handwriting validation while notebook refinements continue.
+
 ## 2026-09-08 — 0.1.0 draw-and-hold prototype
 
 - Added optional draw-and-hold ink cleanup for lines, circles, ellipses and rectangles.

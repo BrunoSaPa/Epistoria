@@ -122,7 +122,11 @@ important material.
 
 Select **More → Find in Note** to search typed text, equations, accepted recognition, and labeled
 unreviewed recognition in the open note. Results are grouped by page. Selecting a result opens
-and highlights its saved region.
+and highlights its saved region. Search ignores capitalization, accents, and surrounding spaces.
+Matching text is emphasized in the result preview. Recognition results identify accepted,
+unreviewed, and owner-corrected text. Corrections are searched instead of the original OCR text.
+Rejected recognition, changed ink, and removed pages are excluded. If corrections cannot load,
+Find shows a message instead of presenting the original text as corrected.
 
 A note PDF is readable and contains decrypted personal information. Save it only to a trusted
 location.

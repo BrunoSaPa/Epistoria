@@ -40,7 +40,8 @@ the current personal beta.
 - Write over text and images without flattening the underlying material.
 - Open a note in an immersive workspace that uses the full iPad detail area.
 - Keep Pencil data separate by page so editing one page does not rewrite the complete note.
-- Find typed text, equations, and labeled recognition inside the current note. Open a match on its
+- Find typed text, equations, and labeled recognition inside the current note, with accent-insensitive
+  matching and emphasized snippets. Owner corrections replace original OCR in search. Open a match on its
   exact page and region.
 - Export selected pages or the complete note as a readable PDF. Keep original page sizes or lay
   pages out on A4 or US Letter in portrait or landscape. Print the prepared PDF from the iPad.
