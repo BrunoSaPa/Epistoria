@@ -10,6 +10,26 @@ private struct NotebookPageFramePreferenceKey: PreferenceKey {
 }
 
 enum ContinuousNotebookPageSelection {
+    static func readingPosition(pageIds: [UUID], heights: [CGFloat], offset: CGFloat) -> NoteReadingPosition? {
+        guard offset.isFinite, pageIds.count == heights.count else { return nil }
+        var top: CGFloat = 28
+        for (index, height) in heights.enumerated() {
+            guard height.isFinite, height > 0 else { return nil }
+            if offset < top + height + 24 || index == heights.count - 1 {
+                return NoteReadingPosition(pageId: pageIds[index], fraction: Double((offset - top) / height))
+            }
+            top += height + 24
+        }
+        return nil
+    }
+
+    static func offset(for position: NoteReadingPosition, pageIds: [UUID], heights: [CGFloat]) -> CGFloat? {
+        guard pageIds.count == heights.count, let index = pageIds.firstIndex(of: position.pageId),
+              position.fraction.isFinite, heights.allSatisfy({ $0.isFinite && $0 > 0 }) else { return nil }
+        return max(0, 28 + heights.prefix(index).reduce(0) { $0 + $1 + 24 }
+            + heights[index] * CGFloat(min(max(position.fraction, 0), 1)))
+    }
+
     static func nearestPage(
         in frames: [Int: CGRect],
         viewportHeight: CGFloat
@@ -25,15 +45,25 @@ enum ContinuousNotebookPageSelection {
 /// units, while one outer scroll view owns finger, pointer, and momentum navigation.
 struct ContinuousNotebookPages<PageContent: View>: View {
     let pageConfigurations: [NoteCanvasConfiguration]
+    let pageIds: [UUID]
+    let initialReadingPosition: NoteReadingPosition?
+    let onReadingPositionChanged: (NoteReadingPosition) -> Void
+    let onReadingPaused: () -> Void
     @Binding var currentPageIndex: Int
     @Binding var requestedPageIndex: Int?
     let onPageVisible: (Int) -> Void
     @ViewBuilder let pageContent: (Int, NoteCanvasConfiguration) -> PageContent
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var scrollPosition = ScrollPosition()
+    @State private var restoredInitialPosition = false
 
     var body: some View {
         GeometryReader { viewport in
+            let heights = pageConfigurations.map {
+                min(max(viewport.size.width - 56, 320), 920)
+                    * CGFloat($0.pageHeight ?? 842) / CGFloat($0.pageWidth ?? 595)
+            }
             ScrollViewReader { reader in
                 ScrollView(.vertical) {
                     LazyVStack(spacing: 24) {
@@ -81,6 +111,28 @@ struct ContinuousNotebookPages<PageContent: View>: View {
                 }
                 .coordinateSpace(name: "epistoria-continuous-pages")
                 .scrollDismissesKeyboard(.interactively)
+                .scrollPosition($scrollPosition)
+                .onScrollGeometryChange(for: CGFloat.self) { geometry in
+                    geometry.contentOffset.y + geometry.contentInsets.top
+                } action: { _, offset in
+                    guard restoredInitialPosition,
+                          let position = ContinuousNotebookPageSelection.readingPosition(pageIds: pageIds, heights: heights, offset: offset) else { return }
+                    onReadingPositionChanged(position)
+                }
+                .onScrollPhaseChange { _, phase in
+                    if phase == .idle { onReadingPaused() }
+                }
+                .task {
+                    guard !restoredInitialPosition else { return }
+                    if let initialReadingPosition,
+                       let offset = ContinuousNotebookPageSelection.offset(for: initialReadingPosition, pageIds: pageIds, heights: heights) {
+                        scrollPosition.scrollTo(y: offset)
+                    } else if let target = requestedPageIndex {
+                        reader.scrollTo(target, anchor: .center)
+                        requestedPageIndex = nil
+                    }
+                    restoredInitialPosition = true
+                }
                 .onPreferenceChange(NotebookPageFramePreferenceKey.self) { frames in
                     guard let nearest = ContinuousNotebookPageSelection.nearestPage(
                         in: frames,

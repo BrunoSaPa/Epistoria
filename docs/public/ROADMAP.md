@@ -29,8 +29,8 @@ This sequence adopts the competitor research without adding another workspace, t
 required AI service. The items below remain planned unless explicitly marked implemented.
 
 1. **Page navigation — in progress.** Content previews, optional page titles, bookmarks, and a
-   bookmarked-pages filter in the page manager are implemented. Next: restoration of
-   the last page and position, and return to the previous location after a search or citation
+   bookmarked-pages filter in the page manager are implemented. Fixed-page notes restore their
+   device-local reading position. Next: infinite-canvas pan/zoom restoration and return to the previous location after a search or citation
    jump. Extend real content previews to notebook-list rows separately. Validate large-page
    collections on a physical iPad before considering the navigation milestone complete.
 2. **Selection and editing.** Freehand and rectangular editing selections; separate filters for

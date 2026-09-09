@@ -30,8 +30,10 @@ Epistoria remains in personal beta. The following limits apply to the current pr
 ## Notebook
 
 - Content previews are available in the page manager. Notebook-list miniatures still use a text
-  excerpt and content indicator. Page titles and bookmarks are available in Pages. Saved reading
-  position, PDF outline bookmarks, and return-after-jump navigation remain planned. Preview memory, energy use, and scrolling with
+  excerpt and content indicator. Page titles and bookmarks are available in Pages. Fixed-page
+  reading position is device-local; infinite-canvas pan/zoom restoration, PDF outline bookmarks,
+  and return-after-jump navigation remain planned. Reading-position restoration across rotation
+  and multitasking still needs physical-iPad validation. Preview memory, energy use, and scrolling with
   large handwritten pages still need physical-iPad validation. Missing local images prevent a
   complete preview; this does not prevent opening the page or change its originals.
 

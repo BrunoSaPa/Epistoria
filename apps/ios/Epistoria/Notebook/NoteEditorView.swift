@@ -94,6 +94,8 @@ struct NoteEditorView: View {
     @State private var imagePreviews: [UUID: UIImage] = [:]
     @State private var configuration = NoteCanvasConfiguration()
     @State private var currentPageIndex = 0
+    @State private var initialReadingPosition: NoteReadingPosition?
+    @State private var latestReadingPosition: NoteReadingPosition?
     @State private var mode = SpatialNotebookMode.select
     @State private var inkTool = SpatialNotebookInkTool.pen
     @State private var inkWidth: CGFloat = 4
@@ -228,6 +230,7 @@ struct NoteEditorView: View {
             }
             .onChange(of: scenePhase) { _, phase in
                 guard phase != .active else { return }
+                persistReadingPosition()
                 Task {
                     await saveAll()
                     await recognizePageAfterExit(currentPageIndex)
@@ -238,6 +241,7 @@ struct NoteEditorView: View {
                 await load()
             }
             .onDisappear {
+                persistReadingPosition()
                 workspacePresentation?.endImmersiveEditing(id: immersiveEditorID)
                 pdfExportTask?.cancel()
                 pdfExportTask = nil
@@ -332,7 +336,8 @@ struct NoteEditorView: View {
                     noteId: noteId,
                     pages: $pages,
                     currentPageIndex: $currentPageIndex,
-                    blocks: blocks
+                    blocks: blocks,
+                    onOpenPage: { requestedPageIndex = $0 }
                 )
             }
             .sheet(isPresented: $showFindInNote) {
@@ -494,7 +499,7 @@ struct NoteEditorView: View {
 
     private var editorCanvasContent: some View {
         ZStack {
-            notebookSurface
+            if !isLoading { notebookSurface }
 
             if isLoading {
                 ProgressView("Opening encrypted notebook…")
@@ -533,6 +538,10 @@ struct NoteEditorView: View {
         } else {
             ContinuousNotebookPages(
                 pageConfigurations: pageConfigurations,
+                pageIds: pages.map(\.id),
+                initialReadingPosition: initialReadingPosition,
+                onReadingPositionChanged: { latestReadingPosition = $0 },
+                onReadingPaused: { persistReadingPosition() },
                 currentPageIndex: $currentPageIndex,
                 requestedPageIndex: $requestedPageIndex,
                 onPageVisible: { pageIndex in
@@ -2205,6 +2214,14 @@ struct NoteEditorView: View {
                 : initialOCR
             evidence = loadedEvidence.filter { sourcesById[$0.payload.sourceId] != nil }
                 .sorted { $0.payload.updatedAt > $1.payload.updatedAt }
+            if isInitialLoad, activeFocusedBlockId == nil, configuration.pageFormat != .infinite {
+                if let saved = try? await store.database.noteReadingPosition(noteId: noteId),
+                   let index = pages.firstIndex(where: { $0.id == saved.pageId }) {
+                    initialReadingPosition = saved
+                    latestReadingPosition = saved
+                    currentPageIndex = index
+                }
+            }
             if configuration.pageFormat == .infinite {
                 currentPageIndex = 0
             } else if isInitialLoad,
@@ -2229,12 +2246,22 @@ struct NoteEditorView: View {
             viewportCenter = pageCenter
             await loadImagePreviews(around: currentPageIndex)
             isLoading = false
-            if isInitialLoad, configuration.pageFormat != .infinite {
+            if isInitialLoad, configuration.pageFormat != .infinite, initialReadingPosition == nil {
                 requestedPageIndex = currentPageIndex
             }
         } catch {
             isLoading = false
             report(error)
+        }
+    }
+
+    private func persistReadingPosition() {
+        guard !isLoading, configuration.pageFormat != .infinite,
+              let position = latestReadingPosition,
+              pages.contains(where: { $0.id == position.pageId }), let store = model.store else { return }
+        Task {
+            do { try await store.database.saveNoteReadingPosition(noteId: noteId, position: position) }
+            catch { report(error) }
         }
     }
 

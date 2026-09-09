@@ -1,5 +1,13 @@
 # Release notes
 
+## 2026-09-09 — 0.1.0 fixed-page reading position
+
+- Restore the last saved page and relative vertical position when reopening a fixed-page note.
+- Keep reading position encrypted and device-local without changing note content or sync state.
+- Prefer explicit search and linked-object destinations over restoration.
+- Selecting a page in Pages now scrolls the continuous canvas to that page.
+- Keep infinite-canvas pan/zoom and return-after-jump navigation on the roadmap.
+
 ## 2026-09-09 — 0.1.0 page titles and bookmarks
 
 - Add and remove page bookmarks and optional titles in Pages.

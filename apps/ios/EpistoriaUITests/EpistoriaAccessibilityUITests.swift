@@ -238,6 +238,12 @@ final class EpistoriaAccessibilityUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["note.more.image.files"].firstMatch.exists)
         XCTAssertTrue(app.descendants(matching: .any)["note.more.image.paste"].firstMatch.exists)
 
+        app.buttons["Page and paper"].tap()
+        XCTAssertTrue(app.buttons["note.page-manager.page.2"].waitForExistence(timeout: 5))
+        app.buttons["note.page-manager.page.2"].tap()
+        app.navigationBars.buttons["Notebook"].tap()
+        XCTAssertTrue(app.staticTexts[title].waitForExistence(timeout: 5))
+
         app.terminate()
         app.launch()
         let searchNavigation = app.staticTexts["navigation.search"]
@@ -251,6 +257,15 @@ final class EpistoriaAccessibilityUITests: XCTestCase {
 
         app.staticTexts["navigation.notebook"].tap()
         let note = app.staticTexts[title]
+        XCTAssertTrue(note.waitForExistence(timeout: 5))
+        note.tap()
+        XCTAssertTrue(pages.waitForExistence(timeout: 5))
+        pages.tap()
+        let restoredPage = app.buttons["note.page-manager.page.2"]
+        XCTAssertTrue(restoredPage.waitForExistence(timeout: 5))
+        XCTAssertTrue(restoredPage.label.contains("Current page"))
+        app.buttons["Done"].tap()
+        app.navigationBars.buttons["Notebook"].tap()
         XCTAssertTrue(note.waitForExistence(timeout: 5))
         note.swipeLeft()
         XCTAssertTrue(app.buttons["Trash"].waitForExistence(timeout: 3))

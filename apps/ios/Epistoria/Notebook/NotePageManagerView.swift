@@ -7,6 +7,7 @@ struct NotePageManagerView: View {
     @Binding var pages: [IdentifiedPayload<NotePagePayload>]
     @Binding var currentPageIndex: Int
     let blocks: [IdentifiedPayload<NoteBlockPayload>]
+    var onOpenPage: ((Int) -> Void)?
 
     @Environment(\.dismiss) private var dismiss
     @State private var pagePendingDeletion: IdentifiedPayload<NotePagePayload>?
@@ -37,6 +38,7 @@ struct NotePageManagerView: View {
                     ForEach(Array(pages.enumerated()).filter { !bookmarksOnly || $0.element.payload.isBookmarked }, id: \.element.id) { index, page in
                         Button {
                             currentPageIndex = index
+                            onOpenPage?(index)
                             dismiss()
                         } label: {
                             HStack(spacing: 14) {

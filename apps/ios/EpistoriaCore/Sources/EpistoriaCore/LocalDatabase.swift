@@ -1184,6 +1184,24 @@ public actor SQLCipherDatabase {
         return job
     }
 
+    public func noteReadingPosition(noteId: UUID) throws -> NoteReadingPosition? {
+        guard let row = try query("SELECT content FROM note_reading_positions WHERE note_id=?", [.text(canonical(noteId))]).first,
+              case let .blob(data) = row["content"] else { return nil }
+        let value = try JSONDecoder().decode(NoteReadingPosition.self, from: data)
+        guard value.fraction.isFinite, (0...1).contains(value.fraction) else { return nil }
+        return value
+    }
+
+    public func saveNoteReadingPosition(noteId: UUID, position: NoteReadingPosition) throws {
+        guard position.fraction.isFinite, (0...1).contains(position.fraction),
+              position.recordedAt.timeIntervalSince1970.isFinite else { return }
+        try run("""
+            INSERT INTO note_reading_positions(note_id, content, recorded_at) VALUES (?, ?, ?)
+            ON CONFLICT(note_id) DO UPDATE SET content=excluded.content, recorded_at=excluded.recorded_at
+            WHERE excluded.recorded_at >= note_reading_positions.recorded_at
+            """, [.text(canonical(noteId)), .blob(try JSONEncoder().encode(position)), .real(position.recordedAt.timeIntervalSince1970)])
+    }
+
     public func processingJob(id: UUID) throws -> ProcessingJob? {
         try query(
             "SELECT * FROM processing_jobs WHERE id=? LIMIT 1",
@@ -1830,6 +1848,11 @@ public actor SQLCipherDatabase {
         CREATE INDEX IF NOT EXISTS workspace_summary_due
             ON workspace_summary(due_at ASC) WHERE due_at IS NOT NULL;
 
+        CREATE TABLE IF NOT EXISTS note_reading_positions (
+            note_id TEXT PRIMARY KEY,
+            content BLOB NOT NULL,
+            recorded_at REAL NOT NULL
+        );
         CREATE TABLE IF NOT EXISTS local_projection_state (
             name TEXT PRIMARY KEY,
             is_current INTEGER NOT NULL CHECK (is_current IN (0, 1))

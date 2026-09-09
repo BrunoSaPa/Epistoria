@@ -131,7 +131,11 @@ Titles are optional and limited to 120 characters. Save an empty title to remove
 Select **Bookmarked** to show bookmarked pages; page numbers still refer to the full note.
 Switch to **All pages** to reorder. Duplicating a page copies its title but not its bookmark.
 Titles and bookmarks are encrypted notebook data, retained through Trash restoration.
-Saved reading position and PDF outline bookmarks remain planned.
+Fixed-page notes remember your reading position on this iPad when scrolling stops, the app
+backgrounds, or you leave the note. Reordering retains the saved page; resizing uses its relative
+vertical position. If that page is no longer available, the note opens at the beginning.
+Search and linked-object destinations take precedence. This position does not synchronize or
+enter readable exports. Infinite-canvas pan/zoom restoration and PDF outline bookmarks remain planned.
 
 Select **More → Find in Note** to search typed text, equations, accepted recognition, and labeled
 unreviewed recognition in the open note. Results are grouped by page. Selecting a result opens
