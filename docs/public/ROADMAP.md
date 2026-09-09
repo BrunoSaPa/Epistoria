@@ -23,6 +23,44 @@ change after personal use and beta testing.
 
 ## Notebook tools
 
+### Notebook refinement sequence
+
+This sequence adopts the competitor research without adding another workspace, taxonomy, or
+required AI service. The items below remain planned unless explicitly marked implemented.
+
+1. **Page navigation — in progress.** Content previews in the page manager are implemented.
+   Next: page bookmarks, optional short page titles, a bookmarked-pages filter, restoration of
+   the last page and position, and return to the previous location after a search or citation
+   jump. Extend real content previews to notebook-list rows separately. Validate large-page
+   collections on a physical iPad before considering the navigation milestone complete.
+2. **Selection and editing.** Freehand and rectangular editing selections; separate filters for
+   ink, text, images, and shapes; move, duplicate, copy, and delete selected content; object
+   locking; and one undo action for a group operation. Select ink over an image without moving
+   or flattening the image. Preserve ink and exact source references when moving content.
+3. **Source access while writing.** Open a PDF beside the current note, keep independent reading
+   and writing positions, insert excerpts as reusable Evidence, and return to the same note
+   position and zoom. Start with PDFs and existing Evidence rather than replacing every reader.
+4. **Canvas navigation.** Fit page, fit all infinite-canvas content, fit selection, and return to
+   the previous view. Use the existing view menu and keyboard shortcuts rather than more rail
+   buttons. Group alignment and connectors follow reliable selection.
+5. **Portable output.** Preserve page titles and bookmarks as PDF navigation where supported;
+   include readable Evidence attribution; clarify visual PDF versus editable notebook archive;
+   and verify output in an independent PDF reader.
+
+Later contextual polish: improve **Used in** backlinks, precise internal item links, citation
+previews and visible AI source scope. Make **Create card** available from selected Evidence
+through the existing reviewed learning flow. Refine the existing Concept/Evidence map rather
+than creating a second whiteboard system. These actions must not expand the default writing rail.
+
+Research references: [Goodnotes navigation](https://support.goodnotes.com/hc/en-us/articles/9497798035983-Use-the-Sidebar-to-navigate-your-document),
+[Goodnotes selection](https://support.goodnotes.com/hc/en-us/articles/7353695644175-Select-move-and-edit-content-on-the-page),
+[MarginNote](https://www.marginnote.com/en/features/),
+[LiquidText](https://apps.apple.com/us/app/liquidtext/id922765270),
+[Zotero annotations](https://www.zotero.org/support/pdf_reader),
+[Obsidian Canvas](https://obsidian.md/help/Plugins/Canvas).
+
+### Deferred recognition work
+
 Formula conversion and physical handwriting validation are deferred while everyday notebook
 use is refined. Existing experimental controls remain opt-in; production formula recognition
 stays unavailable until its quality and device gates pass.

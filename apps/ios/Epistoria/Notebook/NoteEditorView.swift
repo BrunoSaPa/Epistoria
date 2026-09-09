@@ -952,7 +952,14 @@ struct NoteEditorView: View {
                     shapeOptions.presentationCompactAdaptation(.popover)
                 }
         case .pages:
-            compactRailToolButton(tool, selected: showPageManager) { showPageManager = true }
+            compactRailToolButton(tool, selected: showPageManager) {
+                Task {
+                    do {
+                        try await flushPendingChanges()
+                        showPageManager = true
+                    } catch { report(error) }
+                }
+            }
                 .disabled(configuration.pageFormat == .infinite)
         case .undo:
             compactRailToolButton(tool) { sendCanvasCommand(.undo) }

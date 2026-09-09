@@ -11,8 +11,14 @@ struct NotePageManagerView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var pagePendingDeletion: IdentifiedPayload<NotePagePayload>?
     @State private var errorMessage: String?
+    @State private var previewCache = NotePagePreviewCache()
+    @State private var refreshedBlocks: [IdentifiedPayload<NoteBlockPayload>]?
 
     var body: some View {
+        let blocksByPage = Dictionary(grouping: refreshedBlocks ?? blocks, by: \.payload.pageId)
+        let previewService = model.store.flatMap { store in
+            model.assetManager.map { NotePDFExportService(store: store, assetManager: $0) }
+        }
         NavigationStack {
             List {
                 Section {
@@ -22,9 +28,10 @@ struct NotePageManagerView: View {
                             dismiss()
                         } label: {
                             HStack(spacing: 14) {
-                                PageManagerThumbnail(
-                                    configuration: page.payload.configuration,
-                                    excerpt: excerpt(for: page.id)
+                                NotePagePreview(
+                                    input: NotePagePreviewInput(page: page, blocks: blocksByPage[page.id] ?? []),
+                                    service: previewService,
+                                    cache: previewCache
                                 )
                                 VStack(alignment: .leading, spacing: 4) {
                                     Text("Page \(index + 1)")
@@ -40,9 +47,6 @@ struct NotePageManagerView: View {
                                     }
                                 }
                                 Spacer()
-                                Image(systemName: "line.3.horizontal")
-                                    .foregroundStyle(EpistoriaDesign.mutedInk)
-                                    .accessibilityHidden(true)
                             }
                             .contentShape(Rectangle())
                         }
@@ -75,7 +79,7 @@ struct NotePageManagerView: View {
                         Task { await reorder(pageID, to: adjusted) }
                     }
                 } footer: {
-                    Text("Drag pages to reorder them. Page identity and recognition links stay intact.")
+                    Text("Drag the page handles to reorder. Tap a page to open it.")
                 }
             }
             .environment(\.editMode, .constant(.active))
@@ -129,16 +133,6 @@ struct NotePageManagerView: View {
         }
     }
 
-    private func excerpt(for pageId: UUID) -> String? {
-        blocks.lazy
-            .filter { !$0.payload.tombstone && $0.payload.pageId == pageId }
-            .compactMap { block -> String? in
-                let text = block.payload.plainText.trimmingCharacters(in: .whitespacesAndNewlines)
-                return text.isEmpty ? nil : text
-            }
-            .first
-            .map { String($0.prefix(140)) }
-    }
 
     private func pageDescription(_ configuration: NoteCanvasConfiguration) -> String {
         let format = configuration.pageFormat == .letter ? "US Letter" : "A4"
@@ -148,6 +142,7 @@ struct NotePageManagerView: View {
     private func reload(focus pageId: UUID? = nil) async throws {
         guard let store = model.store else { return }
         pages = try await store.notePages(noteId: noteId)
+        refreshedBlocks = try await store.list(NoteBlockPayload.self, parentId: noteId)
         if let pageId, let index = pages.firstIndex(where: { $0.id == pageId }) {
             currentPageIndex = index
         } else {
@@ -236,51 +231,6 @@ struct NotePageManagerView: View {
     }
 }
 
-private struct PageManagerThumbnail: View {
-    let configuration: NoteCanvasConfiguration
-    let excerpt: String?
-
-    var body: some View {
-        ZStack(alignment: .topLeading) {
-            RoundedRectangle(cornerRadius: 4)
-                .fill(configuration.paperColor.swiftUIColor)
-            if configuration.paperStyle != .plain {
-                Canvas { context, size in
-                    let color = Color.black.opacity(0.10)
-                    let spacing: CGFloat = 9
-                    if configuration.paperStyle == .ruled {
-                        for y in stride(from: spacing, through: size.height, by: spacing) {
-                            var path = Path()
-                            path.move(to: CGPoint(x: 0, y: y))
-                            path.addLine(to: CGPoint(x: size.width, y: y))
-                            context.stroke(path, with: .color(color), lineWidth: 0.5)
-                        }
-                    } else {
-                        for x in stride(from: spacing, through: size.width, by: spacing) {
-                            for y in stride(from: spacing, through: size.height, by: spacing) {
-                                context.fill(
-                                    Path(ellipseIn: CGRect(x: x - 0.6, y: y - 0.6, width: 1.2, height: 1.2)),
-                                    with: .color(color)
-                                )
-                            }
-                        }
-                    }
-                }
-                .clipShape(RoundedRectangle(cornerRadius: 4))
-            }
-            if let excerpt {
-                Text(excerpt)
-                    .font(.system(size: 5.5))
-                    .foregroundStyle(Color.black.opacity(0.72))
-                    .lineLimit(8)
-                    .padding(7)
-            }
-        }
-        .frame(width: 62, height: 82)
-        .overlay { RoundedRectangle(cornerRadius: 4).stroke(Color.black.opacity(0.16), lineWidth: 0.5) }
-        .accessibilityHidden(true)
-    }
-}
 
 private extension NotePaperStyle {
     var pageManagerTitle: String {

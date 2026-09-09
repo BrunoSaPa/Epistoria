@@ -29,6 +29,12 @@ Epistoria remains in personal beta. The following limits apply to the current pr
 
 ## Notebook
 
+- Content previews are available in the page manager. Notebook-list miniatures still use a text
+  excerpt and content indicator. Page bookmarks, optional titles, saved reading position, and
+  return-after-jump navigation remain planned. Preview memory, energy use, and scrolling with
+  large handwritten pages still need physical-iPad validation. Missing local images prevent a
+  complete preview; this does not prevent opening the page or change its originals.
+
 - Fixed notes scroll continuously and use stable pages with thumbnails, insertion, duplication,
   reordering, per-page templates, and recoverable deletion. Physical-device stress testing of
   very large page collections is still open.

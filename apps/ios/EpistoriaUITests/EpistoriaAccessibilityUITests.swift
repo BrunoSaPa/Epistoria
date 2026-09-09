@@ -175,6 +175,14 @@ final class EpistoriaAccessibilityUITests: XCTestCase {
             app.descendants(matching: .any)["note.page.2"].waitForExistence(timeout: 5)
         )
 
+        pages.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["note.page-manager.page.2"].waitForExistence(timeout: 5))
+        let pagesScreen = XCTAttachment(screenshot: app.screenshot())
+        pagesScreen.name = "Page manager content previews"
+        pagesScreen.lifetime = .keepAlways
+        add(pagesScreen)
+        app.buttons["Done"].tap()
+
         let more = app.buttons["note.tool.more"]
         more.tap()
         let find = app.buttons["note.more.find"]

@@ -204,6 +204,52 @@ final class NotePDFExportService {
         )
     }
 
+    /// A memory-only preview. Never creates a PDF, fetches remote assets, or writes notebook data.
+    func pagePreview(
+        page: IdentifiedPayload<NotePagePayload>,
+        blocks: [IdentifiedPayload<NoteBlockPayload>]
+    ) async throws -> UIImage {
+        try Task.checkCancellation()
+        guard page.payload.trashedAt == nil,
+              page.payload.configuration.pageFormat != .infinite else {
+            throw NotePDFExportError.invalidPageGeometry
+        }
+        let visible = blocks.filter {
+            !$0.payload.tombstone && $0.payload.pageId == page.id
+                && $0.payload.noteId == page.payload.noteId
+        }.sorted { $0.payload.orderKey < $1.payload.orderKey }
+        guard var plan = try pagePlans(pages: [page],
+            fallbackConfiguration: page.payload.configuration, blocks: visible).first else {
+            throw NotePDFExportError.invalidPageGeometry
+        }
+        let dimension: CGFloat = 384
+        plan.worldScale = dimension / max(plan.worldRect.width, plan.worldRect.height)
+        plan.outputSize = CGSize(width: plan.worldRect.width * plan.worldScale,
+            height: plan.worldRect.height * plan.worldScale)
+        let images = try await loadImages(for: visible, maximumDimension: dimension)
+        let evidence = try await store.payloads(EvidencePayload.self,
+            ids: Array(Set(visible.compactMap(\.payload.evidenceId))))
+        let sources = try await store.payloads(SourcePayload.self,
+            ids: Array(Set(evidence.map(\.payload.sourceId))))
+        let versions = try await store.payloads(SourceVersionPayload.self,
+            ids: Array(Set(evidence.map(\.payload.sourceVersionId))))
+        let cards = evidenceCards(for: visible, evidence: evidence, sources: sources, versions: versions)
+        try Task.checkCancellation()
+        // Decode invalid ink as an unavailable preview, never as a deceptively blank page.
+        for block in visible {
+            if let data = block.payload.drawingData, !data.isEmpty { _ = try PKDrawing(data: data) }
+        }
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = true
+        return UIGraphicsImageRenderer(size: plan.outputSize, format: format).image { renderer in
+            UITraitCollection(userInterfaceStyle: .light).performAsCurrent {
+                draw(plan: plan, blocks: visible, images: images, evidenceCards: cards,
+                    ocrTextLayers: [], maximumInkDimension: dimension, context: renderer.cgContext)
+            }
+        }
+    }
+
     nonisolated static func removeTemporaryPDF(_ url: URL) throws {
         let fileManager = FileManager.default
         guard url.isFileURL,
@@ -338,14 +384,15 @@ final class NotePDFExportService {
     }
 
     private func loadImages(
-        for blocks: [IdentifiedPayload<NoteBlockPayload>]
+        for blocks: [IdentifiedPayload<NoteBlockPayload>],
+        maximumDimension previewDimension: CGFloat? = nil
     ) async throws -> [UUID: UIImage] {
         var result: [UUID: UIImage] = [:]
         for block in blocks where block.payload.blockType == .image {
             try Task.checkCancellation()
             guard let assetId = block.payload.assetId else { continue }
             let data = try await assetManager.decryptedData(assetId: assetId)
-            let maximumDimension = max(
+            let maximumDimension = previewDimension ?? max(
                 512,
                 min(max(block.payload.canvasPlacement?.width ?? 1_200,
                         block.payload.canvasPlacement?.height ?? 1_200) * 2, 4_096)
@@ -364,6 +411,7 @@ final class NotePDFExportService {
         images: [UUID: UIImage],
         evidenceCards: [UUID: NSAttributedString],
         ocrTextLayers: [OCRTextLayer],
+        maximumInkDimension: CGFloat? = nil,
         context: CGContext
     ) {
         let configuration = plan.configuration
@@ -411,6 +459,7 @@ final class NotePDFExportService {
                 placement: placement,
                 image: images[block.id],
                 evidenceCard: evidenceCards[block.id],
+                maximumInkDimension: maximumInkDimension,
                 context: context
             )
         }
@@ -422,7 +471,8 @@ final class NotePDFExportService {
                   let drawing = try? PKDrawing(data: data),
                   !drawing.bounds.isNull
             else { continue }
-            let rasterScale = max(0.25, min(2, 4_096 / max(plan.worldRect.width, plan.worldRect.height)))
+            let rasterScale = maximumInkDimension.map { $0 / max(plan.worldRect.width, plan.worldRect.height) }
+                ?? max(0.25, min(2, 4_096 / max(plan.worldRect.width, plan.worldRect.height)))
             drawing.image(from: plan.worldRect, scale: rasterScale).draw(in: plan.worldRect)
         }
         context.restoreGState()
@@ -504,6 +554,7 @@ final class NotePDFExportService {
         placement: NoteCanvasPlacement,
         image: UIImage?,
         evidenceCard: NSAttributedString?,
+        maximumInkDimension: CGFloat? = nil,
         context: CGContext
     ) {
         let rect = placement.rect
@@ -532,7 +583,8 @@ final class NotePDFExportService {
                let drawing = try? PKDrawing(data: data),
                !drawing.bounds.isNull
             {
-                drawing.image(from: drawing.bounds, scale: 2).draw(in: localRect)
+                let scale = maximumInkDimension.map { min(2, $0 / max(drawing.bounds.width, drawing.bounds.height, 1)) } ?? 2
+                drawing.image(from: drawing.bounds, scale: scale).draw(in: localRect)
             }
         case .shape:
             if let shape = block.payload.canvasShape {

@@ -12,6 +12,8 @@ the current personal beta.
 - Scroll through fixed-paper pages as one continuous vertical document.
 - Open the page manager to review thumbnails, insert before or after, append, duplicate, reorder,
   change a page template, move a page to Trash, or restore it.
+- Page-manager previews show saved handwriting, text, images, shapes, and Evidence in the page's
+  orientation. They are generated locally without AI. Unavailable content shows a preview warning.
 - Switch between Select, Pen, Marker, Eraser, Text, Image, Shape, Pages, Undo, and Redo without
   opening the system Pencil palette.
 - Open **More** for optional Evidence, recognition review, Learn, Ask, Math, and Symbol tools. Pin

@@ -120,6 +120,13 @@ important material.
 
 ## Find, export, and print a note
 
+Open **Pages** to identify pages by their content previews. Pending edits save before the page
+manager opens. Previews include handwriting and placed content, and keep portrait or landscape
+orientation. They stay in memory while the page manager is open and do not create exported files.
+If a preview is unavailable, you can still open the page. Check missing originals in Offline
+Files, then close and reopen Pages to retry. Page bookmarks and saved reading position remain
+planned; they are not part of this preview update.
+
 Select **More → Find in Note** to search typed text, equations, accepted recognition, and labeled
 unreviewed recognition in the open note. Results are grouped by page. Selecting a result opens
 and highlights its saved region. Search ignores capitalization, accents, and surrounding spaces.

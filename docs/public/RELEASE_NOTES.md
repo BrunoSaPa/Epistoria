@@ -1,5 +1,12 @@
 # Release notes
 
+## 2026-09-09 — 0.1.0 page-content previews
+
+- Show handwriting, images, text, shapes, and Evidence in page-manager previews.
+- Preserve page orientation and save pending edits before opening Pages.
+- Keep previews local and memory-only; show unavailable previews explicitly.
+- Document the remaining navigation, selection, source-access, canvas, and export refinements.
+
 ## 2026-09-09 — 0.1.0 Find in Note refinement
 
 - Match text regardless of capitalization, accents, or spaces surrounding the search phrase.

@@ -111,6 +111,16 @@ final class NotePDFExportServiceTests: XCTestCase {
         XCTAssertTrue(secondPage.string?.contains("Difference of squares evidence") == true)
         XCTAssertTrue(secondPage.string?.contains("∫") == true)
         XCTAssertGreaterThan(result.byteCount, 0)
+        let previewBlocks = try await fixture.store.list(NoteBlockPayload.self, parentId: noteID)
+        let previewPages = try await fixture.store.notePages(noteId: noteID)
+        for (index, page) in previewPages.enumerated() {
+            let preview = try await fixture.service.pagePreview(page: page, blocks: previewBlocks)
+            XCTAssertEqual(preview.size.width, 384, accuracy: 0.01)
+            let attachment = XCTAttachment(image: preview)
+            attachment.name = "Content page preview \(index + 1)"
+            attachment.lifetime = .keepAlways
+            add(attachment)
+        }
     }
 
     func testInfiniteNotebookExportsUsedWorldBoundsToOneReadablePage() async throws {
