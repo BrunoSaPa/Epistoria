@@ -139,6 +139,8 @@ final class EpistoriaExportServiceTests: XCTestCase {
         let initialPages = try await fixture.store.ensureNotePages(noteId: noteId)
         let firstPageId = try XCTUnwrap(initialPages.first?.id)
         let secondPageId = try await fixture.store.insertNotePage(noteId: noteId, after: firstPageId)
+        try await fixture.store.setNotePageTitle(noteId: noteId, pageId: secondPageId, title: "Exported page title")
+        try await fixture.store.setNotePageBookmarked(noteId: noteId, pageId: secondPageId, bookmarked: true)
         let areaId = try await fixture.store.createArea(name: "Mathematics")
         let topicId = try await fixture.store.createTopic(name: "Algebra", primaryAreaId: areaId)
         _ = try await fixture.store.createFlashcard(
@@ -449,6 +451,8 @@ final class EpistoriaExportServiceTests: XCTestCase {
         XCTAssertFalse(noteRecord.contains("\"canvasPageIndex\""))
         XCTAssertTrue(noteRecord.contains("\"schemaVersion\" : \"note-block/v8\""))
         XCTAssertTrue(noteRecord.lowercased().contains(secondPageId.uuidString.lowercased()))
+        XCTAssertTrue(noteRecord.contains("Exported page title"))
+        XCTAssertTrue(noteRecord.contains("\"bookmarkedAt\""))
         XCTAssertTrue(noteRecord.contains("\"imageConfiguration\""))
         let metadata = try String(
             contentsOf: package.appendingPathComponent("metadata.json"), encoding: .utf8)

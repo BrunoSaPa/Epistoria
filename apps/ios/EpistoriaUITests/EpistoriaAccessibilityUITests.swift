@@ -177,6 +177,23 @@ final class EpistoriaAccessibilityUITests: XCTestCase {
 
         pages.tap()
         XCTAssertTrue(app.descendants(matching: .any)["note.page-manager.page.2"].waitForExistence(timeout: 5))
+        let secondPage = app.buttons["note.page-manager.page.2"]
+        secondPage.press(forDuration: 1)
+        app.buttons["Bookmark"].tap()
+        secondPage.press(forDuration: 1)
+        app.buttons["Edit page title"].tap()
+        let pageTitle = app.alerts["Page title"].textFields.firstMatch
+        XCTAssertTrue(pageTitle.waitForExistence(timeout: 3))
+        pageTitle.typeText("Worked examples")
+        app.alerts["Page title"].buttons["Save"].tap()
+        app.segmentedControls.buttons["Bookmarked"].tap()
+        XCTAssertTrue(secondPage.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["note.page-manager.page.1"].exists)
+        XCTAssertTrue(app.staticTexts["Worked examples"].exists)
+        secondPage.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["note.page.2"].waitForExistence(timeout: 5))
+        pages.tap()
+        XCTAssertTrue(app.staticTexts["Worked examples"].waitForExistence(timeout: 5))
         let pagesScreen = XCTAttachment(screenshot: app.screenshot())
         pagesScreen.name = "Page manager content previews"
         pagesScreen.lifetime = .keepAlways

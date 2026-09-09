@@ -13,6 +13,10 @@ struct NotePageManagerView: View {
     @State private var errorMessage: String?
     @State private var previewCache = NotePagePreviewCache()
     @State private var refreshedBlocks: [IdentifiedPayload<NoteBlockPayload>]?
+    @State private var bookmarksOnly = false
+    @State private var titlePageId: UUID?
+    @State private var titleDraft = ""
+    @State private var showingTitleEditor = false
 
     var body: some View {
         let blocksByPage = Dictionary(grouping: refreshedBlocks ?? blocks, by: \.payload.pageId)
@@ -21,8 +25,16 @@ struct NotePageManagerView: View {
         }
         NavigationStack {
             List {
+                Picker("Show pages", selection: $bookmarksOnly) {
+                    Text("All pages").tag(false)
+                    Text("Bookmarked").tag(true)
+                }
+                .pickerStyle(.segmented)
+                if bookmarksOnly && !pages.contains(where: { $0.payload.isBookmarked }) {
+                    ContentUnavailableView("No bookmarked pages", systemImage: "bookmark", description: Text("In All pages, touch and hold a page and choose Bookmark."))
+                }
                 Section {
-                    ForEach(Array(pages.enumerated()), id: \.element.id) { index, page in
+                    ForEach(Array(pages.enumerated()).filter { !bookmarksOnly || $0.element.payload.isBookmarked }, id: \.element.id) { index, page in
                         Button {
                             currentPageIndex = index
                             dismiss()
@@ -34,6 +46,9 @@ struct NotePageManagerView: View {
                                     cache: previewCache
                                 )
                                 VStack(alignment: .leading, spacing: 4) {
+                                    if let title = page.payload.title {
+                                        Text(title).font(.headline).foregroundStyle(EpistoriaDesign.ink)
+                                    }
                                     Text("Page \(index + 1)")
                                         .font(.headline)
                                         .foregroundStyle(EpistoriaDesign.ink)
@@ -47,11 +62,24 @@ struct NotePageManagerView: View {
                                     }
                                 }
                                 Spacer()
+                                if page.payload.isBookmarked {
+                                    Image(systemName: "bookmark.fill")
+                                        .accessibilityLabel("Bookmarked")
+                                }
                             }
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
                         .contextMenu {
+                            Button(page.payload.isBookmarked ? "Remove bookmark" : "Bookmark", systemImage: "bookmark") {
+                                Task { await setBookmark(page) }
+                            }
+                            Button("Edit page title", systemImage: "pencil") {
+                                titlePageId = page.id
+                                titleDraft = page.payload.title ?? ""
+                                showingTitleEditor = true
+                            }
+                            Divider()
                             Button("Insert before", systemImage: "plus.rectangle.on.rectangle") {
                                 Task { await insert(before: page.id) }
                             }
@@ -71,19 +99,32 @@ struct NotePageManagerView: View {
                             .disabled(pages.count <= 1)
                         }
                         .accessibilityIdentifier("note.page-manager.page.\(index + 1)")
+                        .moveDisabled(bookmarksOnly)
                     }
                     .onMove { source, destination in
-                        guard let sourceIndex = source.first, pages.indices.contains(sourceIndex) else { return }
+                        guard !bookmarksOnly, let sourceIndex = source.first, pages.indices.contains(sourceIndex) else { return }
                         let pageID = pages[sourceIndex].id
                         let adjusted = destination > sourceIndex ? destination - 1 : destination
                         Task { await reorder(pageID, to: adjusted) }
                     }
                 } footer: {
-                    Text("Drag the page handles to reorder. Tap a page to open it.")
+                    Text(bookmarksOnly ? "Tap a page to open it. Switch to All pages to reorder." : "Drag the page handles to reorder. Touch and hold for titles and bookmarks. Tap a page to open it.")
                 }
             }
             .environment(\.editMode, .constant(.active))
             .navigationTitle("Pages")
+            .alert("Page title", isPresented: $showingTitleEditor) {
+                TextField("Optional title", text: $titleDraft)
+                Button("Save") {
+                    guard let pageId = titlePageId else { return }
+                    let title = titleDraft
+                    Task { await setTitle(pageId, title: title) }
+                }
+                .disabled(titleDraft.trimmingCharacters(in: .whitespacesAndNewlines).count > 120)
+                Button("Cancel", role: .cancel) { }
+            } message: {
+                Text("Up to 120 characters. Leave empty to remove the title.")
+            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Done") { dismiss() }
@@ -155,6 +196,7 @@ struct NotePageManagerView: View {
         guard let store = model.store else { return }
         do {
             let created = try await store.insertNotePage(noteId: noteId, after: pageId)
+            bookmarksOnly = false
             try await reload(focus: created)
         } catch { errorMessage = error.localizedDescription }
     }
@@ -163,6 +205,7 @@ struct NotePageManagerView: View {
         guard let store = model.store else { return }
         do {
             let created = try await store.insertNotePage(noteId: noteId, before: pageId)
+            bookmarksOnly = false
             try await reload(focus: created)
         } catch { errorMessage = error.localizedDescription }
     }
@@ -171,7 +214,30 @@ struct NotePageManagerView: View {
         guard let store = model.store else { return }
         do {
             let created = try await store.duplicateNotePage(noteId: noteId, pageId: pageId)
+            bookmarksOnly = false
             try await reload(focus: created)
+        } catch { errorMessage = error.localizedDescription }
+    }
+
+    private var focusedPageId: UUID? {
+        pages.indices.contains(currentPageIndex) ? pages[currentPageIndex].id : nil
+    }
+
+    private func setBookmark(_ page: IdentifiedPayload<NotePagePayload>) async {
+        guard let store = model.store else { return }
+        let focus = focusedPageId
+        do {
+            try await store.setNotePageBookmarked(noteId: noteId, pageId: page.id, bookmarked: !page.payload.isBookmarked)
+            try await reload(focus: focus)
+        } catch { errorMessage = error.localizedDescription }
+    }
+
+    private func setTitle(_ pageId: UUID, title: String) async {
+        guard let store = model.store else { return }
+        let focus = focusedPageId
+        do {
+            try await store.setNotePageTitle(noteId: noteId, pageId: pageId, title: title)
+            try await reload(focus: focus)
         } catch { errorMessage = error.localizedDescription }
     }
 

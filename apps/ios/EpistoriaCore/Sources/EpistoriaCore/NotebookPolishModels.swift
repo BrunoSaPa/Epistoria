@@ -7,6 +7,10 @@ public struct NotePagePayload: EntityPayload, Equatable {
     public var noteId: UUID
     public var orderKey: String
     public var configuration: NoteCanvasConfiguration
+    public var title: String?
+    public var bookmarkedAt: Date?
+
+    public var isBookmarked: Bool { bookmarkedAt != nil }
     public var trashedAt: Date?
     /// Changes when the page content changes. Thumbnails remain derived local state.
     public var thumbnailRevision: Int

@@ -969,6 +969,7 @@ public actor EpistoriaStore {
         newPage.schemaVersion = "note-page/v1"
         newPage.orderKey = Self.notePageOrderKey(sourceIndex + 1)
         newPage.trashedAt = nil
+        newPage.bookmarkedAt = nil
         newPage.thumbnailRevision = 0
         newPage.createdAt = date
         newPage.updatedAt = date
@@ -1011,6 +1012,30 @@ public actor EpistoriaStore {
         let page = pages.remove(at: sourceIndex)
         pages.insert(page, at: min(max(destinationIndex, 0), pages.count))
         try await savePageOrder(pages: pages, at: date)
+    }
+
+    public func setNotePageTitle(noteId: UUID, pageId: UUID, title: String, at date: Date = .now) async throws {
+        var page = try await payload(NotePagePayload.self, id: pageId)
+        guard page.payload.noteId == noteId, page.payload.trashedAt == nil else {
+            throw StoreError.entityNotFound
+        }
+        let cleaned = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard cleaned.count <= 120 else {
+            throw LocalDatabaseError.queryFailed("Page titles must contain at most 120 characters.")
+        }
+        page.payload.title = cleaned.isEmpty ? nil : cleaned
+        page.payload.updatedAt = date
+        _ = try await save(id: pageId, payload: page.payload, parentId: noteId, relationIds: [noteId])
+    }
+
+    public func setNotePageBookmarked(noteId: UUID, pageId: UUID, bookmarked: Bool, at date: Date = .now) async throws {
+        var page = try await payload(NotePagePayload.self, id: pageId)
+        guard page.payload.noteId == noteId, page.payload.trashedAt == nil else {
+            throw StoreError.entityNotFound
+        }
+        page.payload.bookmarkedAt = bookmarked ? (page.payload.bookmarkedAt ?? date) : nil
+        page.payload.updatedAt = date
+        _ = try await save(id: pageId, payload: page.payload, parentId: noteId, relationIds: [noteId])
     }
 
     public func updateNotePageConfiguration(

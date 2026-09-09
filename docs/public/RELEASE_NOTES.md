@@ -1,5 +1,12 @@
 # Release notes
 
+## 2026-09-09 — 0.1.0 page titles and bookmarks
+
+- Add and remove page bookmarks and optional titles in Pages.
+- Filter bookmarked pages while retaining full-note page numbers.
+- Preserve metadata through reordering and Trash restoration; duplicates copy titles only.
+- Keep saved reading position and PDF outline navigation on the roadmap.
+
 ## 2026-09-09 — 0.1.0 page-content previews
 
 - Show handwriting, images, text, shapes, and Evidence in page-manager previews.

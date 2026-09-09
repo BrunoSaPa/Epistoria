@@ -14,6 +14,8 @@ the current personal beta.
   change a page template, move a page to Trash, or restore it.
 - Page-manager previews show saved handwriting, text, images, shapes, and Evidence in the page's
   orientation. They are generated locally without AI. Unavailable content shows a preview warning.
+- Add optional page titles and bookmarks from Pages. Filter to bookmarked pages without changing
+  page order. Titles and bookmarks stay with pages when reordered or restored from Trash.
 - Switch between Select, Pen, Marker, Eraser, Text, Image, Shape, Pages, Undo, and Redo without
   opening the system Pencil palette.
 - Open **More** for optional Evidence, recognition review, Learn, Ask, Math, and Symbol tools. Pin

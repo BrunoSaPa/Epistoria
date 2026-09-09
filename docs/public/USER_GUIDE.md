@@ -124,8 +124,14 @@ Open **Pages** to identify pages by their content previews. Pending edits save b
 manager opens. Previews include handwriting and placed content, and keep portrait or landscape
 orientation. They stay in memory while the page manager is open and do not create exported files.
 If a preview is unavailable, you can still open the page. Check missing originals in Offline
-Files, then close and reopen Pages to retry. Page bookmarks and saved reading position remain
-planned; they are not part of this preview update.
+Files, then close and reopen Pages to retry.
+
+Touch and hold a page to choose **Bookmark**, **Remove bookmark**, or **Edit page title**.
+Titles are optional and limited to 120 characters. Save an empty title to remove it.
+Select **Bookmarked** to show bookmarked pages; page numbers still refer to the full note.
+Switch to **All pages** to reorder. Duplicating a page copies its title but not its bookmark.
+Titles and bookmarks are encrypted notebook data, retained through Trash restoration.
+Saved reading position and PDF outline bookmarks remain planned.
 
 Select **More → Find in Note** to search typed text, equations, accepted recognition, and labeled
 unreviewed recognition in the open note. Results are grouped by page. Selecting a result opens

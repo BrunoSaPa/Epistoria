@@ -28,8 +28,8 @@ change after personal use and beta testing.
 This sequence adopts the competitor research without adding another workspace, taxonomy, or
 required AI service. The items below remain planned unless explicitly marked implemented.
 
-1. **Page navigation — in progress.** Content previews in the page manager are implemented.
-   Next: page bookmarks, optional short page titles, a bookmarked-pages filter, restoration of
+1. **Page navigation — in progress.** Content previews, optional page titles, bookmarks, and a
+   bookmarked-pages filter in the page manager are implemented. Next: restoration of
    the last page and position, and return to the previous location after a search or citation
    jump. Extend real content previews to notebook-list rows separately. Validate large-page
    collections on a physical iPad before considering the navigation milestone complete.
