@@ -83,10 +83,25 @@ struct NoteReviewPreview: View {
 
     @State private var blocks: [IdentifiedPayload<NoteBlockPayload>] = []
     @State private var fixedPageCount = 1
+    @State private var preview: UIImage?
+    @State private var previewUnavailable = false
 
     var body: some View {
         HStack(alignment: .top, spacing: 14) {
-            NotePageMiniature(configuration: configuration, excerpt: excerpt, contentSymbol: contentSymbol)
+            VStack(spacing: 4) {
+                Group {
+                    if let preview {
+                        Image(uiImage: preview).resizable().scaledToFit()
+                    } else if previewUnavailable {
+                        Image(systemName: "photo.badge.exclamationmark").foregroundStyle(.secondary)
+                    } else { ProgressView().controlSize(.small) }
+                }
+                .frame(width: 76, height: 100)
+                .accessibilityHidden(true)
+                if previewUnavailable {
+                    Text("Preview unavailable").font(.caption2).foregroundStyle(.secondary).frame(width: 90)
+                }
+            }
             VStack(alignment: .leading, spacing: 5) {
                 Text(note.payload.title)
                     .font(.headline)
@@ -118,7 +133,9 @@ struct NoteReviewPreview: View {
         .frame(maxWidth: .infinity, minHeight: 96, alignment: .leading)
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
+        .accessibilityValue(preview != nil ? "Content preview available" : previewUnavailable ? "Preview unavailable" : "Loading preview")
         .task(id: "\(note.id.uuidString)-\(note.revision)") { await loadPreview() }
+        .onDisappear { preview = nil; blocks = [] }
     }
 
     private var configuration: NoteCanvasConfiguration {
@@ -137,15 +154,12 @@ struct NoteReviewPreview: View {
         return value.map { String($0.prefix(180)) }
     }
 
-    private var contentSymbol: String {
-        if sortedBlocks.contains(where: { $0.payload.blockType == .handwriting }) { return "pencil.tip" }
-        if sortedBlocks.contains(where: { $0.payload.blockType == .image }) { return "photo" }
-        if sortedBlocks.contains(where: { $0.payload.blockType == .shape }) { return "square.on.circle" }
-        return "doc.text"
-    }
 
     private var emptyPreviewLabel: String {
-        if blocks.isEmpty { return "Blank note" }
+        if blocks.isEmpty {
+            if previewUnavailable { return "Open note to view content" }
+            return preview == nil ? "Loading preview…" : "Blank note"
+        }
         if sortedBlocks.contains(where: { $0.payload.blockType == .handwriting }) { return "Handwritten content" }
         if sortedBlocks.contains(where: { $0.payload.blockType == .image }) { return "Image content" }
         return "Notebook content"
@@ -158,115 +172,29 @@ struct NoteReviewPreview: View {
     }
 
     private func loadPreview() async {
-        guard let store = model.store else { return }
-        async let loadedBlocks = store.list(NoteBlockPayload.self, parentId: note.id)
-        async let loadedPages = store.notePages(noteId: note.id)
-        blocks = (try? await loadedBlocks) ?? []
-        let pages = (try? await loadedPages) ?? []
-        fixedPageCount = configuration.pageFormat == .infinite
-            ? 1
-            : max(pages.count, 1)
-    }
-}
-
-private struct NotePageMiniature: View {
-    let configuration: NoteCanvasConfiguration
-    let excerpt: String?
-    let contentSymbol: String
-
-    var body: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 4)
-                .fill(configuration.paperColor.swiftUIColor)
-            NoteMiniaturePattern(configuration: configuration)
-                .clipShape(RoundedRectangle(cornerRadius: 4))
-            if let excerpt {
-                Text(excerpt)
-                    .font(.system(size: 5.5, weight: .regular, design: .rounded))
-                    .foregroundStyle(Color.black.opacity(0.72))
-                    .lineSpacing(1.4)
-                    .lineLimit(8)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                    .padding(8)
-            } else {
-                Image(systemName: contentSymbol)
-                    .font(.system(size: 17, weight: .light))
-                    .foregroundStyle(Color.black.opacity(0.42))
-            }
-        }
-        .frame(width: 62, height: 82)
-        .overlay {
-            RoundedRectangle(cornerRadius: 4)
-                .stroke(Color.black.opacity(0.16), lineWidth: 0.5)
-        }
-        .shadow(color: Color.black.opacity(0.06), radius: 2, y: 1)
-        .accessibilityHidden(true)
-    }
-}
-
-private struct NoteMiniaturePattern: View {
-    let configuration: NoteCanvasConfiguration
-
-    var body: some View {
-        Canvas { context, size in
-            let color = Color.black.opacity(configuration.paperColor == .stone ? 0.16 : 0.10)
-            let spacing: CGFloat = 9
-            switch configuration.paperStyle {
-            case .plain:
-                break
-            case .ruled:
-                for y in stride(from: spacing, through: size.height, by: spacing) {
-                    var path = Path()
-                    path.move(to: CGPoint(x: 0, y: y))
-                    path.addLine(to: CGPoint(x: size.width, y: y))
-                    context.stroke(path, with: .color(color), lineWidth: 0.5)
-                }
-            case .grid:
-                drawGrid(context: &context, size: size, spacing: spacing, color: color)
-            case .dotted:
-                for x in stride(from: spacing, through: size.width, by: spacing) {
-                    for y in stride(from: spacing, through: size.height, by: spacing) {
-                        context.fill(
-                            Path(ellipseIn: CGRect(x: x - 0.6, y: y - 0.6, width: 1.2, height: 1.2)),
-                            with: .color(color)
-                        )
-                    }
-                }
-            case .isometric:
-                for offset in stride(from: -size.height, through: size.width, by: spacing) {
-                    var rising = Path()
-                    rising.move(to: CGPoint(x: offset, y: size.height))
-                    rising.addLine(to: CGPoint(x: offset + size.height * 0.58, y: 0))
-                    context.stroke(rising, with: .color(color), lineWidth: 0.5)
-                    var falling = Path()
-                    falling.move(to: CGPoint(x: offset, y: 0))
-                    falling.addLine(to: CGPoint(x: offset + size.height * 0.58, y: size.height))
-                    context.stroke(falling, with: .color(color), lineWidth: 0.5)
-                }
-            }
-        }
-    }
-
-    private func drawGrid(
-        context: inout GraphicsContext,
-        size: CGSize,
-        spacing: CGFloat,
-        color: Color
-    ) {
-        for x in stride(from: spacing, through: size.width, by: spacing) {
-            var path = Path()
-            path.move(to: CGPoint(x: x, y: 0))
-            path.addLine(to: CGPoint(x: x, y: size.height))
-            context.stroke(path, with: .color(color), lineWidth: 0.5)
-        }
-        for y in stride(from: spacing, through: size.height, by: spacing) {
-            var path = Path()
-            path.move(to: CGPoint(x: 0, y: y))
-            path.addLine(to: CGPoint(x: size.width, y: y))
-            context.stroke(path, with: .color(color), lineWidth: 0.5)
+        preview = nil
+        previewUnavailable = false
+        guard let store = model.store, let assets = model.assetManager else { previewUnavailable = true; return }
+        do {
+            async let loadedBlocks = store.list(NoteBlockPayload.self, parentId: note.id)
+            async let loadedPages = store.notePages(noteId: note.id)
+            let (content, pages) = try await (loadedBlocks, loadedPages)
+            try Task.checkCancellation()
+            blocks = content
+            fixedPageCount = configuration.pageFormat == .infinite ? 1 : max(pages.count, 1)
+            let image = try await NotePDFExportService(store: store, assetManager: assets)
+                .notePreview(note: note, pages: pages, blocks: content)
+            try Task.checkCancellation()
+            preview = image
+        } catch is CancellationError {
+            // A disappearing row must not publish a late decrypted image.
+        } catch {
+            guard !Task.isCancelled else { return }
+            previewUnavailable = true
         }
     }
 }
+
 
 struct NoteOrganizationView: View {
     @Bindable var model: AppModel

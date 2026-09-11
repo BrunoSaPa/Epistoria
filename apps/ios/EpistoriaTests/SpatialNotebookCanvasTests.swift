@@ -281,16 +281,88 @@ final class SpatialNotebookCanvasTests: XCTestCase {
     }
 
     func testContinuousDocumentSelectsPageNearestViewportMidpoint() {
-        let frames = [
-            0: CGRect(x: 0, y: -700, width: 700, height: 990),
-            1: CGRect(x: 0, y: 314, width: 700, height: 990),
-            2: CGRect(x: 0, y: 1_328, width: 700, height: 990),
-        ]
-
         XCTAssertEqual(
-            ContinuousNotebookPageSelection.nearestPage(in: frames, viewportHeight: 1_024),
+            ContinuousNotebookPageSelection.nearestPage(heights: [990, 990, 990], offset: 708, viewportHeight: 1_024),
             1
         )
+    }
+
+    func testFreehandSelectionExcludesObjectsOutsideLoopButInsideBoundingBox() {
+        let host = SpatialNotebookHostView(frame: CGRect(x: 0, y: 0, width: 1024, height: 768))
+        let inside = SpatialNotebookItem(id: UUID(),
+            placement: NoteCanvasPlacement(x: 10, y: 10, width: 10, height: 10, rotationRadians: .pi / 4),
+            content: .text(NSAttributedString(string: "Inside")))
+        let outside = SpatialNotebookItem(id: UUID(),
+            placement: NoteCanvasPlacement(x: 80, y: 80, width: 10, height: 10),
+            content: .text(NSAttributedString(string: "Outside")))
+        apply(to: host, configuration: NoteCanvasConfiguration(pageFormat: .infinite), items: [inside, outside])
+        host.setNeedsLayout()
+        host.layoutIfNeeded()
+        var selection = LassoSelection()
+        host.onLassoSelection = { selection = $0 }
+        host.selectRegionForTesting([CGPoint(x: 512, y: 384), CGPoint(x: 612, y: 384), CGPoint(x: 512, y: 484)])
+        XCTAssertEqual(selection.selectedBlockIds, [inside.id])
+        XCTAssertTrue(selection.drawingImagesByBlockId.isEmpty)
+        host.selectionOptions.content = [.ink]
+        host.selectRegionForTesting([CGPoint(x: 512, y: 384), CGPoint(x: 612, y: 384), CGPoint(x: 512, y: 484)])
+        XCTAssertTrue(selection.isEmpty, "Ink-only selection must not include intersecting text")
+        host.selectionOptions.content = [.text]
+        host.selectRegionForTesting(CanvasSelectionShape.rectangle.boundary(
+            start: CGPoint(x: 512, y: 384), current: CGPoint(x: 612, y: 484), samples: []))
+        XCTAssertEqual(Set(selection.selectedBlockIds), Set([inside.id, outside.id]))
+    }
+
+    func testInfiniteViewportRestoresDistantWorldCenterAndZoomAcrossResize() {
+        let host = SpatialNotebookHostView(frame: .zero)
+        host.initialViewport = NoteCanvasViewport(centerX: -50_000, centerY: 32_000, zoom: 1.75)
+        apply(to: host, configuration: NoteCanvasConfiguration(pageFormat: .infinite))
+        host.frame = CGRect(x: 0, y: 0, width: 1_024, height: 768)
+        host.setNeedsLayout()
+        host.layoutIfNeeded()
+        XCTAssertEqual(host.viewportZoomScaleForTesting, 1.75, accuracy: 0.001)
+        XCTAssertEqual(host.viewportWorldCenterForTesting.x, -50_000, accuracy: 0.01)
+        XCTAssertEqual(host.viewportWorldCenterForTesting.y, 32_000, accuracy: 0.01)
+        host.frame = CGRect(x: 0, y: 0, width: 768, height: 1_024)
+        host.setNeedsLayout()
+        host.layoutIfNeeded()
+        XCTAssertEqual(host.viewportZoomScaleForTesting, 1.75, accuracy: 0.001)
+        XCTAssertEqual(host.viewportWorldCenterForTesting.x, -50_000, accuracy: 0.01)
+        XCTAssertEqual(host.viewportWorldCenterForTesting.y, 32_000, accuracy: 0.01)
+    }
+
+    func testReturnViewportCommandRestoresCenterAndZoomWithoutEditingContent() {
+        let host = SpatialNotebookHostView(frame: CGRect(x: 0, y: 0, width: 1_024, height: 768))
+        let config = NoteCanvasConfiguration(pageFormat: .infinite)
+        apply(to: host, configuration: config)
+        host.setNeedsLayout()
+        host.layoutIfNeeded()
+        let target = NoteCanvasViewport(centerX: -30_000, centerY: 45_000, zoom: 2.25)
+        var inkWrites = 0
+        var reportedViews = 0
+        host.onInkChanged = { _ in inkWrites += 1 }
+        host.onViewportSettled = { _ in reportedViews += 1 }
+        let command = SpatialNotebookCommand(action: .restoreViewport(target))
+        apply(to: host, configuration: config, command: command)
+        XCTAssertEqual(host.viewportWorldCenterForTesting.x, target.centerX, accuracy: 0.01)
+        XCTAssertEqual(host.viewportWorldCenterForTesting.y, target.centerY, accuracy: 0.01)
+        XCTAssertEqual(host.viewportZoomScaleForTesting, target.zoom, accuracy: 0.001)
+        XCTAssertEqual(inkWrites, 0)
+        let firstReportCount = reportedViews
+        apply(to: host, configuration: config, command: command)
+        XCTAssertEqual(reportedViews, firstReportCount)
+    }
+
+    func testReturnViewportWaitsForLayout() {
+        let host = SpatialNotebookHostView(frame: .zero)
+        let target = NoteCanvasViewport(centerX: 22_000, centerY: -35_000, zoom: 0.75)
+        apply(to: host, configuration: NoteCanvasConfiguration(pageFormat: .infinite),
+              command: SpatialNotebookCommand(action: .restoreViewport(target)))
+        host.frame = CGRect(x: 0, y: 0, width: 900, height: 700)
+        host.setNeedsLayout()
+        host.layoutIfNeeded()
+        XCTAssertEqual(host.viewportWorldCenterForTesting.x, target.centerX, accuracy: 0.01)
+        XCTAssertEqual(host.viewportWorldCenterForTesting.y, target.centerY, accuracy: 0.01)
+        XCTAssertEqual(host.viewportZoomScaleForTesting, target.zoom, accuracy: 0.001)
     }
 
     private func apply(
@@ -304,7 +376,8 @@ final class SpatialNotebookCanvasTests: XCTestCase {
         inkColor: NoteCanvasColor = .black,
         eraserMode: SpatialNotebookEraserMode = .stroke,
         eraserWidth: CGFloat = 24,
-        allowsViewportNavigation: Bool = true
+        allowsViewportNavigation: Bool = true,
+        command: SpatialNotebookCommand? = nil
     ) {
         host.apply(
             configuration: configuration,
@@ -318,7 +391,7 @@ final class SpatialNotebookCanvasTests: XCTestCase {
             inkColor: inkColor,
             eraserMode: eraserMode,
             eraserWidth: eraserWidth,
-            command: nil,
+            command: command,
             allowsViewportNavigation: allowsViewportNavigation,
             selectedItemId: nil,
             lassoSelectedIds: [],

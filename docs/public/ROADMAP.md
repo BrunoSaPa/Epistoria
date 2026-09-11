@@ -28,12 +28,24 @@ change after personal use and beta testing.
 This sequence adopts the competitor research without adding another workspace, taxonomy, or
 required AI service. The items below remain planned unless explicitly marked implemented.
 
+**Notebook workspace — in progress.** Left-rail quick colors, sizes, previews, and an options
+action are implemented. The rail uses a compact options popover when space is
+limited. Paper uses the available width with smaller margins. Local open-note tabs across the
+top include close, overflow, and Open another note. Tab switching saves pending edits and
+restores fixed-page reading positions. Closing a tab does not delete the note. Next: validate
+narrow-window and accessibility layouts and validate infinite-canvas pan/zoom restoration on
+physical iPads. No pinned tabs
+or tab groups are planned.
+
 1. **Page navigation — in progress.** Content previews, optional page titles, bookmarks, and a
    bookmarked-pages filter in the page manager are implemented. Fixed-page notes restore their
-   device-local reading position. Next: infinite-canvas pan/zoom restoration and return to the previous location after a search or citation
-   jump. Extend real content previews to notebook-list rows separately. Validate large-page
+   device-local reading position, and infinite notes restore their settled position and zoom.
+   Return to the previous view is available for Find in Note and linked-object entry when a
+   prior view exists. Note-list content previews are implemented. Next: validate large-page
    collections on a physical iPad before considering the navigation milestone complete.
-2. **Selection and editing.** Freehand and rectangular editing selections; separate filters for
+2. **Selection and editing — in progress.** Ask and Math use the actual freehand boundary for
+   object selection and visual crops, with rectangle and content-type options in the left rail.
+   Editing still needs these selection modes and filters integrated with editing actions for
    ink, text, images, and shapes; move, duplicate, copy, and delete selected content; object
    locking; and one undo action for a group operation. Select ink over an image without moving
    or flattening the image. Preserve ink and exact source references when moving content.

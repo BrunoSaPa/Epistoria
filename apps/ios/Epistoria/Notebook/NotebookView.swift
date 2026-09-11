@@ -61,12 +61,8 @@ struct NotebookView: View {
                 } else if mode == .notes {
                     List {
                         ForEach(displayedNotes, id: \.id) { note in
-                            NavigationLink {
-                            NoteEditorView(
-                                model: model,
-                                noteId: note.id,
-                                onLifecycleChanged: { Task { await load() } }
-                            )
+                            Button {
+                                destination = .note(note.id)
                         } label: {
                             NoteReviewPreview(
                                 model: model,
@@ -76,6 +72,7 @@ struct NotebookView: View {
                                     : organizationByNoteId[note.id]?.label ?? "Unassigned · Organize later"
                             )
                         }
+                        .buttonStyle(.plain)
                         .accessibilityIdentifier("notebook.note.\(note.id.uuidString)")
                         .swipeActions(edge: .leading, allowsFullSwipe: true) {
                             Button(note.payload.pinnedAt == nil ? "Pin" : "Unpin", systemImage: note.payload.pinnedAt == nil ? "pin" : "pin.slash") {

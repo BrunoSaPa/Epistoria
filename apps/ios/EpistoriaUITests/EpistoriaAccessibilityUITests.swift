@@ -136,6 +136,61 @@ final class EpistoriaAccessibilityUITests: XCTestCase {
     }
 
     @MainActor
+    func testOpenNoteTabsSwitchCloseAndSurviveRelaunch() throws {
+        let app = ephemeralApplication()
+        app.launch()
+        let first = "First tab \(UUID().uuidString.prefix(6))"
+        let second = "Second tab \(UUID().uuidString.prefix(6))"
+        XCTAssertTrue(app.staticTexts["navigation.notebook"].waitForExistence(timeout: 12))
+        app.staticTexts["navigation.notebook"].tap()
+        for title in [first, second] {
+            XCTAssertTrue(app.buttons["notebook.new"].waitForExistence(timeout: 5))
+            app.buttons["notebook.new"].tap()
+            app.buttons["Note"].tap()
+            let field = app.textFields["notebook.new-note.title"]
+            XCTAssertTrue(field.waitForExistence(timeout: 5))
+            field.tap()
+            field.typeText(title)
+            app.buttons["notebook.new-note.create"].tap()
+            XCTAssertTrue(app.textFields["note.title"].waitForExistence(timeout: 10))
+            app.navigationBars.buttons["Notebook"].tap()
+        }
+        app.staticTexts[second].tap()
+        XCTAssertTrue(app.buttons["note.tabs.list"].waitForExistence(timeout: 10))
+        app.buttons["note.tabs.list"].tap()
+        app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@", "note.tabs.menu.", first)).firstMatch.tap()
+        let activeTitle = app.textFields["note.title"]
+        XCTAssertTrue(activeTitle.waitForExistence(timeout: 10))
+        expectation(for: NSPredicate(format: "value == %@", first), evaluatedWith: activeTitle)
+        waitForExpectations(timeout: 10)
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "Top note tabs with left writing rail"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+        app.buttons["note.tab.close"].tap()
+        XCTAssertTrue(app.textFields["note.title"].waitForExistence(timeout: 10))
+        expectation(for: NSPredicate(format: "value == %@", second), evaluatedWith: app.textFields["note.title"])
+        waitForExpectations(timeout: 10)
+        app.navigationBars.buttons["Notebook"].tap()
+        XCTAssertTrue(app.staticTexts[first].waitForExistence(timeout: 5))
+        app.terminate()
+        app.launch()
+        XCTAssertTrue(app.staticTexts["navigation.notebook"].waitForExistence(timeout: 12))
+        app.staticTexts["navigation.notebook"].tap()
+        app.staticTexts[first].tap()
+        XCTAssertTrue(app.buttons["note.tabs.list"].waitForExistence(timeout: 10))
+        app.buttons["note.tabs.list"].tap()
+        XCTAssertTrue(app.buttons[second].waitForExistence(timeout: 5))
+        app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@", "note.tabs.menu.", second)).firstMatch.tap()
+        XCTAssertTrue(app.buttons["note.tabs.open"].waitForExistence(timeout: 10))
+        app.buttons["note.tabs.open"].tap()
+        XCTAssertTrue(app.navigationBars["Open note"].waitForExistence(timeout: 5))
+        app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label == %@", "note.tabs.pick.", first)).firstMatch.tap()
+        expectation(for: NSPredicate(format: "value == %@", first), evaluatedWith: app.textFields["note.title"])
+        waitForExpectations(timeout: 10)
+    }
+
+    @MainActor
     func testEphemeralNotebookSmokeJourney() throws {
         let title = "UI smoke \(UUID().uuidString.prefix(8))"
         let app = ephemeralApplication()
@@ -159,6 +214,32 @@ final class EpistoriaAccessibilityUITests: XCTestCase {
 
         XCTAssertTrue(app.textFields["note.title"].waitForExistence(timeout: 8))
         XCTAssertTrue(app.descendants(matching: .any)["note.page.1"].exists)
+
+        app.buttons["note.tool.pen"].tap()
+        let quickOptions = app.buttons["note.quick.options"]
+        XCTAssertTrue(quickOptions.waitForExistence(timeout: 5), app.buttons.debugDescription)
+        let quickBlue = app.buttons["note.quick.color.BLUE"]
+        if quickBlue.exists {
+            quickBlue.tap()
+            XCTAssertTrue(quickBlue.isSelected)
+            app.buttons["note.quick.width"].tap()
+            app.buttons["8 pt"].tap()
+        } else {
+            quickOptions.tap()
+            XCTAssertTrue(app.staticTexts["Width"].waitForExistence(timeout: 3))
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.15)).tap()
+        }
+        let railScreen = XCTAttachment(screenshot: app.screenshot())
+        railScreen.name = "Left rail quick options and full-width page"
+        railScreen.lifetime = .keepAlways
+        add(railScreen)
+        app.buttons["note.tool.select"].tap()
+        app.buttons["note.tool.text"].tap()
+        let canvasText = app.textViews["Canvas text"]
+        XCTAssertTrue(canvasText.waitForExistence(timeout: 5))
+        canvasText.tap()
+        canvasText.typeText("Navigation target")
+        app.buttons["note.tool.select"].tap()
 
         let pages = app.buttons["note.tool.pages"]
         XCTAssertTrue(pages.waitForExistence(timeout: 3))
@@ -216,6 +297,22 @@ final class EpistoriaAccessibilityUITests: XCTestCase {
         add(findScreen)
         app.buttons["Cancel"].tap()
         app.buttons["Done"].tap()
+
+        more.tap()
+        find.tap()
+        XCTAssertTrue(findField.waitForExistence(timeout: 5))
+        findField.tap()
+        findField.typeText("Navigation target")
+        let result = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Navigation target")).firstMatch
+        XCTAssertTrue(result.waitForExistence(timeout: 5))
+        result.tap()
+        let returnView = app.buttons["note.return-view"]
+        XCTAssertTrue(returnView.waitForExistence(timeout: 5))
+        returnView.tap()
+        pages.tap()
+        XCTAssertTrue(app.buttons["note.page-manager.page.2"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["note.page-manager.page.2"].label.contains("Current page"))
+        app.buttons["Done"].tap()
         XCTAssertTrue(pages.waitForExistence(timeout: 3))
 
         more.tap()
@@ -243,6 +340,14 @@ final class EpistoriaAccessibilityUITests: XCTestCase {
         app.buttons["note.page-manager.page.2"].tap()
         app.navigationBars.buttons["Notebook"].tap()
         XCTAssertTrue(app.staticTexts[title].waitForExistence(timeout: 5))
+
+        let previewRow = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@", "notebook.note.", title)).firstMatch
+        expectation(for: NSPredicate(format: "value == %@", "Content preview available"), evaluatedWith: previewRow)
+        waitForExpectations(timeout: 10)
+        let listPreviewScreen = XCTAttachment(screenshot: app.screenshot())
+        listPreviewScreen.name = "Notebook list saved-content preview"
+        listPreviewScreen.lifetime = .keepAlways
+        add(listPreviewScreen)
 
         app.terminate()
         app.launch()

@@ -88,6 +88,20 @@ public struct BoundedEntitySnapshot: Equatable, Sendable {
     public var slices: [EntitySnapshotSlice]
 }
 
+/// Local-only optimistic concurrency guard. Sync revisions alone do not identify local edits.
+public enum LocalEntityExpectation: Equatable, Sendable {
+    case unchanged(StoredEntity)
+    case available(StoredEntity)
+    case absent(UUID)
+
+    var id: UUID {
+        switch self {
+        case let .unchanged(entity), let .available(entity): entity.id
+        case let .absent(id): id
+        }
+    }
+}
+
 public struct LocalEntityWrite: Equatable, Sendable {
     public var id: UUID
     public var entityType: EntityType
@@ -394,6 +408,7 @@ public enum LocalDatabaseError: Error, Equatable, LocalizedError {
     case payloadTooLarge
     case cursorRegression
     case incompatibleSchema(Int)
+    case staleLocalEdit
 
     public var errorDescription: String? {
         switch self {
@@ -411,6 +426,8 @@ public enum LocalDatabaseError: Error, Equatable, LocalizedError {
             "Epistoria rejected an older synchronization position. Local data was not changed."
         case .incompatibleSchema:
             "This development notebook uses an older storage generation. Create and verify its readable archive before resetting it. No local data was changed."
+        case .staleLocalEdit:
+            "The selected content changed. Select it again and retry. No part of this edit was saved."
         }
     }
 }
@@ -606,13 +623,17 @@ public actor SQLCipherDatabase {
         deleting deletionIds: [UUID] = [],
         deletedAt: Date = .now,
         registeringAssets assets: [LocalAsset] = [],
-        registeringConflicts conflicts: [ImportedLocalConflict] = []
+        registeringConflicts conflicts: [ImportedLocalConflict] = [],
+        expecting expectations: [LocalEntityExpectation] = []
     ) throws {
         guard !writes.isEmpty || !deletionIds.isEmpty || !assets.isEmpty || !conflicts.isEmpty else {
             return
         }
         guard Set(writes.map(\.id)).count == writes.count else {
             throw LocalDatabaseError.queryFailed("duplicate entity in atomic write")
+        }
+        guard Set(expectations.map(\.id)).count == expectations.count else {
+            throw LocalDatabaseError.invalidRow
         }
         guard Set(deletionIds).count == deletionIds.count,
               Set(writes.map(\.id)).isDisjoint(with: deletionIds)
@@ -643,6 +664,19 @@ public actor SQLCipherDatabase {
         }
         do {
             try transaction {
+                for expectation in expectations {
+                    let current = try entity(id: expectation.id)
+                    switch expectation {
+                    case let .unchanged(expected):
+                        guard current == expected else { throw LocalDatabaseError.staleLocalEdit }
+                    case let .available(expected):
+                        guard current == expected, try !entities(ids: [expected.id]).isEmpty else {
+                            throw LocalDatabaseError.staleLocalEdit
+                        }
+                    case .absent:
+                        guard current == nil else { throw LocalDatabaseError.staleLocalEdit }
+                    }
+                }
                 var affectedSearchOwners = Set<String>()
                 for item in prepared {
                     let write = item.write
@@ -1190,6 +1224,36 @@ public actor SQLCipherDatabase {
         let value = try JSONDecoder().decode(NoteReadingPosition.self, from: data)
         guard value.fraction.isFinite, (0...1).contains(value.fraction) else { return nil }
         return value
+    }
+
+    public func notebookOpenTabs() throws -> NotebookOpenTabs {
+        guard let row = try query("SELECT content FROM notebook_open_tabs WHERE singleton=1").first,
+              case let .blob(data) = row["content"] else { return NotebookOpenTabs() }
+        let saved = try JSONDecoder().decode(NotebookOpenTabs.self, from: data)
+        return NotebookOpenTabs(noteIds: saved.noteIds, selectedId: saved.selectedId)
+    }
+
+    public func noteCanvasViewport(noteId: UUID) throws -> NoteCanvasViewport? {
+        guard let row = try query("SELECT content FROM note_canvas_viewports WHERE note_id=?", [.text(canonical(noteId))]).first,
+              case let .blob(data) = row["content"] else { return nil }
+        let viewport = try JSONDecoder().decode(NoteCanvasViewport.self, from: data)
+        return viewport.isValid ? viewport : nil
+    }
+
+    public func saveNoteCanvasViewport(noteId: UUID, viewport: NoteCanvasViewport) throws {
+        guard viewport.isValid else { return }
+        try run("""
+            INSERT INTO note_canvas_viewports(note_id, content, recorded_at) VALUES (?, ?, ?)
+            ON CONFLICT(note_id) DO UPDATE SET content=excluded.content, recorded_at=excluded.recorded_at
+            WHERE excluded.recorded_at >= note_canvas_viewports.recorded_at
+            """, [.text(canonical(noteId)), .blob(try JSONEncoder().encode(viewport)), .real(viewport.recordedAt.timeIntervalSince1970)])
+    }
+
+    public func saveNotebookOpenTabs(_ tabs: NotebookOpenTabs) throws {
+        try run("""
+            INSERT INTO notebook_open_tabs(singleton, content) VALUES (1, ?)
+            ON CONFLICT(singleton) DO UPDATE SET content=excluded.content
+            """, [.blob(try JSONEncoder().encode(tabs))])
     }
 
     public func saveNoteReadingPosition(noteId: UUID, position: NoteReadingPosition) throws {
@@ -1849,6 +1913,15 @@ public actor SQLCipherDatabase {
             ON workspace_summary(due_at ASC) WHERE due_at IS NOT NULL;
 
         CREATE TABLE IF NOT EXISTS note_reading_positions (
+            note_id TEXT PRIMARY KEY,
+            content BLOB NOT NULL,
+            recorded_at REAL NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS notebook_open_tabs (
+            singleton INTEGER PRIMARY KEY CHECK (singleton=1),
+            content BLOB NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS note_canvas_viewports (
             note_id TEXT PRIMARY KEY,
             content BLOB NOT NULL,
             recorded_at REAL NOT NULL

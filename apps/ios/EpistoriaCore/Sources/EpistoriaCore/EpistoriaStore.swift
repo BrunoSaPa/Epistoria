@@ -1271,7 +1271,11 @@ public actor EpistoriaStore {
         displayName: String,
         at date: Date = .now
     ) async throws -> UUID {
-        var block = try await payload(NoteBlockPayload.self, id: id)
+        guard let original = try await database.entity(id: id), !original.tombstone,
+              original.entityType == .noteBlock, original.syncState != .conflict else {
+            throw LocalDatabaseError.staleLocalEdit
+        }
+        var block = try decode([original], as: NoteBlockPayload.self)[0]
         guard !block.payload.tombstone else {
             if let existing = try await trashEntries().first(where: { $0.payload.targetId == id }) {
                 return existing.id
@@ -1303,8 +1307,63 @@ public actor EpistoriaStore {
                 parentId: block.payload.noteId,
                 relationIds: [block.payload.noteId, id]
             ),
-        ])
+        ], expecting: [.available(original), .absent(trashId)])
         return trashId
+    }
+
+    /// Trashes complete selected objects, never a partial selection of an ink layer.
+    /// Callers supply the saved records captured for the selection, not just sync revisions.
+    public func moveCanvasObjectsToTrash(
+        selected: [StoredEntity],
+        noteId: UUID,
+        at date: Date = .now
+    ) async throws -> [UUID] {
+        guard !selected.isEmpty, Set(selected.map(\.id)).count == selected.count else {
+            throw LocalDatabaseError.invalidRow
+        }
+        guard let noteRecord = try await database.entity(id: noteId), noteRecord.entityType == .note,
+              !noteRecord.tombstone, noteRecord.syncState != .conflict,
+              try CanonicalJSON.decode(NotePayload.self, from: noteRecord.content).archivedAt == nil else {
+            throw LocalDatabaseError.staleLocalEdit
+        }
+        let groupId = UUID()
+        var writes: [LocalEntityWrite] = []
+        var expectations: [LocalEntityExpectation] = [.available(noteRecord)]
+        var checkedPages = Set<UUID>()
+        var trashIds: [UUID] = []
+        for record in selected {
+            guard record.entityType == .noteBlock, !record.tombstone, record.syncState != .conflict else {
+                throw LocalDatabaseError.staleLocalEdit
+            }
+            var block = try CanonicalJSON.decode(NoteBlockPayload.self, from: record.content)
+            guard block.noteId == noteId, !block.tombstone, block.canvasRole != .inkLayer else {
+                throw LocalDatabaseError.invalidRow
+            }
+            if let pageId = block.pageId, checkedPages.insert(pageId).inserted {
+                guard let pageRecord = try await database.entity(id: pageId), pageRecord.entityType == .notePage,
+                      !pageRecord.tombstone, pageRecord.syncState != .conflict else {
+                    throw LocalDatabaseError.staleLocalEdit
+                }
+                let page = try CanonicalJSON.decode(NotePagePayload.self, from: pageRecord.content)
+                guard page.noteId == noteId, page.trashedAt == nil else { throw LocalDatabaseError.staleLocalEdit }
+                expectations.append(.available(pageRecord))
+            }
+            block.tombstone = true
+            block.updatedAt = date
+            let trashId = UUID()
+            let entry = TrashEntryPayload(targetId: record.id, targetType: .noteBlock,
+                deletionGroupId: groupId, previousParentId: noteId,
+                displayName: "Canvas item", estimatedByteCount: Int64(record.content.count), now: date)
+            writes.append(try localWrite(id: record.id, payload: block, parentId: noteId,
+                relationIds: noteBlockRelationIds(block, pageId: block.pageId)))
+            writes.append(try localWrite(id: trashId, payload: entry, parentId: noteId,
+                relationIds: [noteId, record.id]))
+            expectations.append(.available(record))
+            expectations.append(.absent(trashId))
+            trashIds.append(trashId)
+        }
+        try await database.saveLocalBatch(writes, expecting: expectations)
+        return trashIds
     }
 
     public func trashEntries() async throws -> [IdentifiedPayload<TrashEntryPayload>] {

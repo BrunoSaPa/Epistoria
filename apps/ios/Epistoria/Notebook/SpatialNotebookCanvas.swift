@@ -55,6 +55,7 @@ struct SpatialNotebookCommand: Equatable {
     enum Action: Equatable {
         case undo
         case redo
+        case restoreViewport(NoteCanvasViewport)
     }
 
     let id = UUID()
@@ -116,6 +117,9 @@ struct SpatialNotebookCanvas: UIViewRepresentable {
     let isReadOnly: Bool
     var snappingEnabled = true
     var holdShapesEnabled = false
+    var selectionOptions = CanvasSelectionOptions()
+    var initialViewport: NoteCanvasViewport? = nil
+    var onViewportSettled: ((NoteCanvasViewport) -> Void)? = nil
 
     func makeUIView(context: Context) -> SpatialNotebookHostView {
         let view = SpatialNotebookHostView()
@@ -130,6 +134,9 @@ struct SpatialNotebookCanvas: UIViewRepresentable {
     private func update(_ view: SpatialNotebookHostView) {
         view.snappingEnabled = snappingEnabled
         view.holdShapesEnabled = holdShapesEnabled
+        view.selectionOptions = selectionOptions
+        view.initialViewport = initialViewport
+        view.onViewportSettled = onViewportSettled
         view.onSelect = onSelect
         view.onViewportChanged = onViewportChanged
         view.onPlacementChanged = onPlacementChanged
@@ -164,6 +171,8 @@ struct SpatialNotebookCanvas: UIViewRepresentable {
 
 @MainActor
 final class SpatialNotebookHostView: UIView, UIScrollViewDelegate, PKCanvasViewDelegate {
+    var initialViewport: NoteCanvasViewport?
+    var onViewportSettled: ((NoteCanvasViewport) -> Void)?
     var snappingEnabled = true
     var holdShapesEnabled = false
     private var heldShapes: HeldShapeController?
@@ -176,6 +185,9 @@ final class SpatialNotebookHostView: UIView, UIScrollViewDelegate, PKCanvasViewD
     var onInkChanged: ((Data) -> Void)?
     var onPencilActivityChanged: ((Bool) -> Void)?
     var onLassoSelection: ((LassoSelection) -> Void)?
+    var selectionOptions = CanvasSelectionOptions() {
+        didSet { lassoView.selectionShape = selectionOptions.shape }
+    }
     var onCanvasTap: ((CGPoint) -> Void)?
 
     private let scrollView = UIScrollView()
@@ -208,6 +220,7 @@ final class SpatialNotebookHostView: UIView, UIScrollViewDelegate, PKCanvasViewD
     private var isApplyingDrawing = false
     private var lastFocus: SpatialNotebookFocus?
     private var pendingFocus: SpatialNotebookFocus?
+    private var pendingViewport: NoteCanvasViewport?
     private var lastEditingItemId: UUID?
     private var isReadOnly = false
     private var allowsViewportNavigation = true
@@ -281,8 +294,8 @@ final class SpatialNotebookHostView: UIView, UIScrollViewDelegate, PKCanvasViewD
         contentView.addSubview(focusHighlightView)
 
         lassoView.isHidden = true
-        lassoView.onSelectionRect = { [weak self] rect in
-            self?.finishLasso(in: rect)
+        lassoView.onSelectionRegion = { [weak self] region in
+            self?.finishLasso(in: region)
         }
         addSubview(lassoView)
         heldShapes = HeldShapeController(canvas: pencilCanvas, container: self)
@@ -299,6 +312,10 @@ final class SpatialNotebookHostView: UIView, UIScrollViewDelegate, PKCanvasViewD
 
     override func layoutSubviews() {
         super.layoutSubviews()
+        let priorContentCenter = contentView.convert(
+            CGPoint(x: lastLayoutSize.width / 2, y: lastLayoutSize.height / 2), from: self)
+        let priorWorldCenter = CGPoint(x: priorContentCenter.x - documentOrigin.x,
+                                       y: priorContentCenter.y - documentOrigin.y)
         scrollView.frame = bounds
         lassoView.frame = bounds
         guard bounds.width > 0, bounds.height > 0 else { return }
@@ -316,8 +333,12 @@ final class SpatialNotebookHostView: UIView, UIScrollViewDelegate, PKCanvasViewD
             configureGeometry(preserving: nil)
             positionInitialViewport()
             reportViewport()
+        } else if sizeChanged, configuration.pageFormat == .infinite {
+            centerViewport(on: priorWorldCenter, animated: false)
+            reportViewport()
         }
         applyPendingFocusIfPossible()
+        if let viewport = pendingViewport { restoreViewport(viewport) }
     }
 
     func apply(
@@ -404,7 +425,10 @@ final class SpatialNotebookHostView: UIView, UIScrollViewDelegate, PKCanvasViewD
         if focus != lastFocus {
             lastFocus = focus
             pendingFocus = focus
-            if focus == nil { focusHighlightView.isHidden = true }
+            if focus == nil {
+                focusHighlightView.isHidden = true
+                if !allowsViewportNavigation { positionInitialViewport() }
+            }
         }
         applyPendingFocusIfPossible()
         if editingItemId != lastEditingItemId {
@@ -492,8 +516,9 @@ final class SpatialNotebookHostView: UIView, UIScrollViewDelegate, PKCanvasViewD
             scrollView.setZoomScale(targetScale, animated: false)
             centerViewport(on: CGPoint(x: width / 2, y: height / 2), animated: false)
         } else {
-            scrollView.setZoomScale(1, animated: false)
-            centerViewport(on: .zero, animated: false)
+            let saved = initialViewport.flatMap { $0.isValid ? $0 : nil }
+            scrollView.setZoomScale(CGFloat(saved?.zoom ?? 1), animated: false)
+            centerViewport(on: CGPoint(x: saved?.centerX ?? 0, y: saved?.centerY ?? 0), animated: false)
         }
     }
 
@@ -683,7 +708,22 @@ final class SpatialNotebookHostView: UIView, UIScrollViewDelegate, PKCanvasViewD
             pencilCanvas.undoManager?.undo()
         case .redo:
             pencilCanvas.undoManager?.redo()
+        case let .restoreViewport(viewport):
+            pendingFocus = nil
+            lastFocus = nil
+            focusHighlightView.isHidden = true
+            restoreViewport(viewport)
         }
+    }
+
+    private func restoreViewport(_ viewport: NoteCanvasViewport) {
+        guard configuration.pageFormat == .infinite, viewport.isValid else { return }
+        guard hasUsableViewportGeometry else { pendingViewport = viewport; return }
+        pendingViewport = nil
+        configureZoomLimits()
+        scrollView.setZoomScale(viewport.zoom, animated: false)
+        centerViewport(on: CGPoint(x: viewport.centerX, y: viewport.centerY), animated: false)
+        reportViewport()
     }
 
     @objc private func handlePlacementTap(_ recognizer: UITapGestureRecognizer) {
@@ -738,6 +778,7 @@ final class SpatialNotebookHostView: UIView, UIScrollViewDelegate, PKCanvasViewD
             return
         }
         centerViewport(on: point, animated: UIAccessibility.isReduceMotionEnabled == false)
+        if UIAccessibility.isReduceMotionEnabled { reportViewport() }
         if let highlightWorldRect {
             focusHighlightView.frame = highlightWorldRect.offsetBy(
                 dx: documentOrigin.x,
@@ -751,30 +792,39 @@ final class SpatialNotebookHostView: UIView, UIScrollViewDelegate, PKCanvasViewD
         }
     }
 
-    private func finishLasso(in viewportRect: CGRect) {
-        let contentRect = contentView.convert(viewportRect, from: self)
-        let worldRect = contentRect.offsetBy(dx: -documentOrigin.x, dy: -documentOrigin.y)
+    private func finishLasso(in region: CanvasSelectionRegion) {
+        let worldRegion = CanvasSelectionRegion(points: region.points.map {
+            let point = contentView.convert($0, from: self)
+            return CGPoint(x: point.x - documentOrigin.x, y: point.y - documentOrigin.y)
+        })
+        guard worldRegion.isValid else { lassoView.reset(); return }
+        let worldRect = worldRegion.bounds
         var selected: [UUID] = []
         var drawingImages: [UUID: Data] = [:]
 
         for item in itemsByID.values {
+            guard selectionOptions.content.contains(CanvasSelectionContent(item.content)) else { continue }
             let itemRect = CGRect(
                 x: item.placement.x,
                 y: item.placement.y,
                 width: item.placement.width,
                 height: item.placement.height
             )
-            guard itemRect.intersects(worldRect) else { continue }
+            let rotation = CGAffineTransform(translationX: itemRect.midX, y: itemRect.midY)
+                .rotated(by: item.placement.rotationRadians)
+                .translatedBy(x: -itemRect.width / 2, y: -itemRect.height / 2)
+            let localBounds = CGRect(origin: .zero, size: itemRect.size)
+            let corners = [CGPoint.zero, CGPoint(x: itemRect.width, y: 0),
+                           CGPoint(x: itemRect.width, y: itemRect.height), CGPoint(x: 0, y: itemRect.height)]
+            guard worldRegion.intersects(corners.map { $0.applying(rotation) }) else { continue }
+            let localRegion = CanvasSelectionRegion(points: worldRegion.points.map { $0.applying(rotation.inverted()) })
+            let local = localBounds.intersection(localRegion.bounds)
             selected.append(item.id)
             if case let .legacyDrawing(drawing) = item.content {
-                let intersection = itemRect.intersection(worldRect)
-                let local = intersection.offsetBy(dx: -itemRect.minX, dy: -itemRect.minY)
                 if let image = cropDrawing(drawing, to: local) {
-                    drawingImages[item.id] = image
+                    drawingImages[item.id] = maskSelectionPNG(image, region: localRegion, cropRect: local)
                 }
             } else if case let .image(image, _, configuration) = item.content {
-                let intersection = itemRect.intersection(worldRect)
-                let local = intersection.offsetBy(dx: -itemRect.minX, dy: -itemRect.minY)
                 if let encoded = selectionPNG(
                     from: image,
                     configuration: configuration,
@@ -782,13 +832,17 @@ final class SpatialNotebookHostView: UIView, UIScrollViewDelegate, PKCanvasViewD
                     cropRect: local
                 )
                 {
-                    drawingImages[item.id] = encoded
+                    drawingImages[item.id] = maskSelectionPNG(encoded, region: localRegion, cropRect: local)
                 }
             }
         }
-        if let inkBlockId, let image = cropDrawing(worldDrawing, to: worldRect) {
+        let selectedStrokes = worldDrawing.strokes.enumerated().filter { _, stroke in
+            selectionOptions.content.contains(.ink) && stroke.renderBounds.intersects(worldRect)
+                && worldRegion.intersectsLine(stroke.path.map { $0.location.applying(stroke.transform) })
+        }
+        if let inkBlockId, let image = cropDrawing(PKDrawing(strokes: selectedStrokes.map(\.element)), to: worldRect) {
             selected.append(inkBlockId)
-            drawingImages[inkBlockId] = image
+            drawingImages[inkBlockId] = maskSelectionPNG(image, region: worldRegion, cropRect: worldRect)
         }
         lassoView.reset()
         let pageSize = CGSize(
@@ -808,7 +862,8 @@ final class SpatialNotebookHostView: UIView, UIScrollViewDelegate, PKCanvasViewD
             LassoSelection(
                 selectedBlockIds: Array(Set(selected)),
                 drawingImagesByBlockId: drawingImages,
-                locatorsByBlockId: locators
+                locatorsByBlockId: locators,
+                selectedStrokeIndicesByBlockId: inkBlockId.map { [$0: selectedStrokes.map(\.offset)] } ?? [:]
             )
         )
     }
@@ -824,6 +879,8 @@ final class SpatialNotebookHostView: UIView, UIScrollViewDelegate, PKCanvasViewD
     }
 
     func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) { settleViewport() }
+
+    func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) { settleViewport() }
 
     func scrollViewDidEndZooming(
         _ scrollView: UIScrollView,
@@ -862,7 +919,12 @@ final class SpatialNotebookHostView: UIView, UIScrollViewDelegate, PKCanvasViewD
     }
 
     private func reportViewport() {
-        onViewportChanged?(currentWorldCenter())
+        let center = currentWorldCenter()
+        onViewportChanged?(center)
+        if configuration.pageFormat == .infinite {
+            let viewport = NoteCanvasViewport(centerX: center.x, centerY: center.y, zoom: scrollView.zoomScale)
+            if viewport.isValid { onViewportSettled?(viewport) }
+        }
     }
 
     private func settleViewport() {
@@ -889,7 +951,7 @@ final class SpatialNotebookHostView: UIView, UIScrollViewDelegate, PKCanvasViewD
         UIView.performWithoutAnimation {
             scrollView.setContentOffset(target, animated: false)
         }
-        onViewportChanged?(worldCenter)
+        reportViewport()
     }
 
     private func centerViewport(on worldPoint: CGPoint, animated: Bool) {
@@ -926,6 +988,7 @@ final class SpatialNotebookHostView: UIView, UIScrollViewDelegate, PKCanvasViewD
     }
 
 #if DEBUG
+    func selectRegionForTesting(_ points: [CGPoint]) { finishLasso(in: CanvasSelectionRegion(points: points)) }
     var viewportZoomScaleForTesting: CGFloat { scrollView.zoomScale }
     var viewportWorldCenterForTesting: CGPoint { currentWorldCenter() }
     var hasPendingFocusForTesting: Bool { pendingFocus != nil }

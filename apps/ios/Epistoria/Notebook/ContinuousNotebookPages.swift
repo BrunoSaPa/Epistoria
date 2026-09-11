@@ -1,24 +1,23 @@
 import EpistoriaCore
 import SwiftUI
 
-private struct NotebookPageFramePreferenceKey: PreferenceKey {
-    static let defaultValue: [Int: CGRect] = [:]
-
-    static func reduce(value: inout [Int: CGRect], nextValue: () -> [Int: CGRect]) {
-        value.merge(nextValue(), uniquingKeysWith: { _, newest in newest })
-    }
-}
-
 enum ContinuousNotebookPageSelection {
+    static let pageGap: CGFloat = 16
+    static let outerPadding: CGFloat = 8
+
+    static func pageWidth(viewportWidth: CGFloat) -> CGFloat {
+        guard viewportWidth.isFinite else { return 1 }
+        return max(1, viewportWidth - 2 * outerPadding)
+    }
     static func readingPosition(pageIds: [UUID], heights: [CGFloat], offset: CGFloat) -> NoteReadingPosition? {
         guard offset.isFinite, pageIds.count == heights.count else { return nil }
-        var top: CGFloat = 28
+        var top = outerPadding
         for (index, height) in heights.enumerated() {
             guard height.isFinite, height > 0 else { return nil }
-            if offset < top + height + 24 || index == heights.count - 1 {
+            if offset < top + height + pageGap || index == heights.count - 1 {
                 return NoteReadingPosition(pageId: pageIds[index], fraction: Double((offset - top) / height))
             }
-            top += height + 24
+            top += height + pageGap
         }
         return nil
     }
@@ -26,18 +25,24 @@ enum ContinuousNotebookPageSelection {
     static func offset(for position: NoteReadingPosition, pageIds: [UUID], heights: [CGFloat]) -> CGFloat? {
         guard pageIds.count == heights.count, let index = pageIds.firstIndex(of: position.pageId),
               position.fraction.isFinite, heights.allSatisfy({ $0.isFinite && $0 > 0 }) else { return nil }
-        return max(0, 28 + heights.prefix(index).reduce(0) { $0 + $1 + 24 }
+        return max(0, outerPadding + heights.prefix(index).reduce(0) { $0 + $1 + pageGap }
             + heights[index] * CGFloat(min(max(position.fraction, 0), 1)))
     }
 
     static func nearestPage(
-        in frames: [Int: CGRect],
+        heights: [CGFloat],
+        offset: CGFloat,
         viewportHeight: CGFloat
     ) -> Int? {
-        let centerY = viewportHeight / 2
-        return frames.min {
-            abs($0.value.midY - centerY) < abs($1.value.midY - centerY)
-        }?.key
+        guard offset.isFinite, viewportHeight.isFinite, viewportHeight > 0,
+              !heights.isEmpty, heights.allSatisfy({ $0.isFinite && $0 > 0 }) else { return nil }
+        let centerY = offset + viewportHeight / 2
+        var top = outerPadding
+        for (index, height) in heights.enumerated() {
+            if centerY < top + height + pageGap / 2 { return index }
+            top += height + pageGap
+        }
+        return heights.count - 1
     }
 }
 
@@ -51,24 +56,26 @@ struct ContinuousNotebookPages<PageContent: View>: View {
     let onReadingPaused: () -> Void
     @Binding var currentPageIndex: Int
     @Binding var requestedPageIndex: Int?
+    @Binding var requestedReadingPosition: NoteReadingPosition?
     let onPageVisible: (Int) -> Void
     @ViewBuilder let pageContent: (Int, NoteCanvasConfiguration) -> PageContent
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var scrollPosition = ScrollPosition()
     @State private var restoredInitialPosition = false
+    @State private var hasNavigated = false
 
     var body: some View {
         GeometryReader { viewport in
             let heights = pageConfigurations.map {
-                min(max(viewport.size.width - 56, 320), 920)
+                ContinuousNotebookPageSelection.pageWidth(viewportWidth: viewport.size.width)
                     * CGFloat($0.pageHeight ?? 842) / CGFloat($0.pageWidth ?? 595)
             }
             ScrollViewReader { reader in
                 ScrollView(.vertical) {
-                    LazyVStack(spacing: 24) {
+                    LazyVStack(spacing: ContinuousNotebookPageSelection.pageGap) {
                         ForEach(Array(pageConfigurations.enumerated()), id: \.offset) { pageIndex, configuration in
-                            let pageWidth = min(max(viewport.size.width - 56, 320), 920)
+                            let pageWidth = ContinuousNotebookPageSelection.pageWidth(viewportWidth: viewport.size.width)
                             let ratio = CGFloat(configuration.pageHeight ?? 842)
                                 / CGFloat(configuration.pageWidth ?? 595)
                             let pageHeight = pageWidth * ratio
@@ -88,18 +95,6 @@ struct ContinuousNotebookPages<PageContent: View>: View {
                                         .allowsHitTesting(false)
                                         .accessibilityHidden(true)
                                 }
-                                .background {
-                                    GeometryReader { page in
-                                        Color.clear.preference(
-                                            key: NotebookPageFramePreferenceKey.self,
-                                            value: [
-                                                pageIndex: page.frame(
-                                                    in: .named("epistoria-continuous-pages")
-                                                ),
-                                            ]
-                                        )
-                                    }
-                                }
                                 .id(pageIndex)
                                 .onAppear { onPageVisible(pageIndex) }
                                 .accessibilityLabel("Notebook page \(pageIndex + 1)")
@@ -107,20 +102,38 @@ struct ContinuousNotebookPages<PageContent: View>: View {
                         }
                     }
                     .frame(maxWidth: .infinity)
-                    .padding(.vertical, 28)
+                    .padding(.vertical, ContinuousNotebookPageSelection.outerPadding)
                 }
-                .coordinateSpace(name: "epistoria-continuous-pages")
                 .scrollDismissesKeyboard(.interactively)
                 .scrollPosition($scrollPosition)
-                .onScrollGeometryChange(for: CGFloat.self) { geometry in
-                    geometry.contentOffset.y + geometry.contentInsets.top
-                } action: { _, offset in
+                .onScrollGeometryChange(for: CGSize.self) { geometry in
+                    geometry.contentSize
+                } action: { _, size in
+                    guard !hasNavigated, size.height > 0, let initialReadingPosition,
+                          let offset = ContinuousNotebookPageSelection.offset(for: initialReadingPosition, pageIds: pageIds, heights: heights) else { return }
+                    scrollPosition.scrollTo(y: offset)
+                }
+                .onScrollGeometryChange(for: CGRect.self) { geometry in
+                    CGRect(x: 0, y: geometry.contentOffset.y + geometry.contentInsets.top,
+                           width: geometry.containerSize.width, height: geometry.containerSize.height)
+                } action: { _, visible in
+                    if let index = ContinuousNotebookPageSelection.nearestPage(
+                        heights: heights, offset: visible.minY, viewportHeight: visible.height
+                    ) { currentPageIndex = index }
                     guard restoredInitialPosition,
-                          let position = ContinuousNotebookPageSelection.readingPosition(pageIds: pageIds, heights: heights, offset: offset) else { return }
+                          let position = ContinuousNotebookPageSelection.readingPosition(pageIds: pageIds, heights: heights, offset: visible.minY) else { return }
                     onReadingPositionChanged(position)
                 }
                 .onScrollPhaseChange { _, phase in
+                    if phase == .tracking || phase == .interacting { hasNavigated = true }
                     if phase == .idle { onReadingPaused() }
+                }
+                .onChange(of: viewport.size) { _, _ in
+                    // Opening an editor collapses the app sidebar. Resolve against the final
+                    // page width, but never override a scroll or explicit navigation by the owner.
+                    guard !hasNavigated, let initialReadingPosition,
+                          let offset = ContinuousNotebookPageSelection.offset(for: initialReadingPosition, pageIds: pageIds, heights: heights) else { return }
+                    scrollPosition.scrollTo(y: offset)
                 }
                 .task {
                     guard !restoredInitialPosition else { return }
@@ -133,17 +146,9 @@ struct ContinuousNotebookPages<PageContent: View>: View {
                     }
                     restoredInitialPosition = true
                 }
-                .onPreferenceChange(NotebookPageFramePreferenceKey.self) { frames in
-                    guard let nearest = ContinuousNotebookPageSelection.nearestPage(
-                        in: frames,
-                        viewportHeight: viewport.size.height
-                    ),
-                        nearest != currentPageIndex
-                    else { return }
-                    DispatchQueue.main.async { currentPageIndex = nearest }
-                }
                 .onChange(of: requestedPageIndex) { _, target in
                     guard let target else { return }
+                    hasNavigated = true
                     if reduceMotion {
                         reader.scrollTo(target, anchor: .center)
                     } else {
@@ -152,6 +157,13 @@ struct ContinuousNotebookPages<PageContent: View>: View {
                         }
                     }
                     DispatchQueue.main.async { requestedPageIndex = nil }
+                }
+                .onChange(of: requestedReadingPosition) { _, target in
+                    guard let target,
+                          let offset = ContinuousNotebookPageSelection.offset(for: target, pageIds: pageIds, heights: heights) else { return }
+                    hasNavigated = true
+                    scrollPosition.scrollTo(y: offset)
+                    requestedReadingPosition = nil
                 }
             }
         }

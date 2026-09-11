@@ -71,10 +71,9 @@ private final class InkSaveBuffer {
     }
 }
 
-struct NoteEditorView: View {
+struct NoteCanvasEditorView: View {
     @Bindable var model: AppModel
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.epistoriaWorkspacePresentation) private var workspacePresentation
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.scenePhase) private var scenePhase
@@ -83,6 +82,7 @@ struct NoteEditorView: View {
     var highlightText: String?
     var focusRectangles: [AnnotationRectangle]
     var onLifecycleChanged: (() -> Void)?
+    let tabSession: NotebookTabSession
 
     @State private var note: IdentifiedPayload<NotePayload>?
     @State private var pages: [IdentifiedPayload<NotePagePayload>] = []
@@ -96,6 +96,10 @@ struct NoteEditorView: View {
     @State private var currentPageIndex = 0
     @State private var initialReadingPosition: NoteReadingPosition?
     @State private var latestReadingPosition: NoteReadingPosition?
+    @State private var initialCanvasViewport: NoteCanvasViewport?
+    @State private var latestCanvasViewport: NoteCanvasViewport?
+    @State private var jumpHistory = NotebookJumpHistory()
+    @State private var requestedReadingPosition: NoteReadingPosition?
     @State private var mode = SpatialNotebookMode.select
     @State private var inkTool = SpatialNotebookInkTool.pen
     @State private var inkWidth: CGFloat = 4
@@ -140,6 +144,7 @@ struct NoteEditorView: View {
     @State private var pdfExportResult: NotePDFExportResult?
     @State private var pdfExportTask: Task<Void, Never>?
     @State private var lassoSelection = LassoSelection()
+    @State private var selectionOptions = CanvasSelectionOptions()
     @State private var lassoPurpose = NotebookLassoPurpose.question
     @State private var showNoteQuerySheet = false
     @State private var showNoteQueryArtifacts = false
@@ -166,7 +171,6 @@ struct NoteEditorView: View {
     @State private var openedEvidenceId: UUID?
     @State private var inspectedEvidenceId: UUID?
     @State private var inspectedEvidenceBacklinks: [EvidenceBacklink] = []
-    @State private var immersiveEditorID = UUID()
 
     init(
         model: AppModel,
@@ -174,7 +178,8 @@ struct NoteEditorView: View {
         focusedBlockId: UUID? = nil,
         highlightText: String? = nil,
         focusRectangles: [AnnotationRectangle] = [],
-        onLifecycleChanged: (() -> Void)? = nil
+        onLifecycleChanged: (() -> Void)? = nil,
+        tabSession: NotebookTabSession
     ) {
         self.model = model
         self.noteId = noteId
@@ -182,6 +187,7 @@ struct NoteEditorView: View {
         self.highlightText = highlightText
         self.focusRectangles = focusRectangles
         self.onLifecycleChanged = onLifecycleChanged
+        self.tabSession = tabSession
         _activeFocusedBlockId = State(initialValue: focusedBlockId)
         _activeHighlightText = State(initialValue: highlightText)
         _activeFocusRectangles = State(initialValue: focusRectangles)
@@ -195,6 +201,33 @@ struct NoteEditorView: View {
         editorCanvasContent
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { editorToolbar }
+            .onChange(of: title) { _, value in
+                tabSession.titles[noteId] = value
+                if suppressNextTitleChange { suppressNextTitleChange = false }
+                else { scheduleTitleSave(value) }
+            }
+            .onChange(of: tabSession.request) { _, request in
+                guard let request else { return }
+                Task {
+                    do {
+                        guard !isLoading, let store = model.store else {
+                            throw NoteEditorSaveError.encryptedStoreUnavailable
+                        }
+                        try await flushPendingChanges()
+                        if let viewport = latestCanvasViewport, configuration.pageFormat == .infinite {
+                            try await store.database.saveNoteCanvasViewport(noteId: noteId, viewport: viewport)
+                        }
+                        if let position = latestReadingPosition, configuration.pageFormat != .infinite {
+                            try await store.database.saveNoteReadingPosition(noteId: noteId, position: position)
+                        }
+                        try await tabSession.complete(request, store: store)
+                    } catch {
+                        tabSession.request = nil
+                        report(error)
+                    }
+                }
+            }
+            .disabled(tabSession.request != nil)
             .toolbarBackground(.regularMaterial, for: .navigationBar)
             .fileImporter(
                 isPresented: $isImportingImage,
@@ -237,12 +270,10 @@ struct NoteEditorView: View {
                 }
             }
             .task {
-                workspacePresentation?.beginImmersiveEditing(id: immersiveEditorID)
                 await load()
             }
             .onDisappear {
                 persistReadingPosition()
-                workspacePresentation?.endImmersiveEditing(id: immersiveEditorID)
                 pdfExportTask?.cancel()
                 pdfExportTask = nil
                 if let pdfExportResult {
@@ -347,6 +378,7 @@ struct NoteEditorView: View {
                     artifacts: ocrArtifacts,
                     store: model.store
                 ) { match in
+                    recordCurrentViewBeforeJump()
                     activeFocusedBlockId = match.blockId
                     activeHighlightText = match.text
                     activeFocusRectangles = match.rectangles
@@ -544,6 +576,7 @@ struct NoteEditorView: View {
                 onReadingPaused: { persistReadingPosition() },
                 currentPageIndex: $currentPageIndex,
                 requestedPageIndex: $requestedPageIndex,
+                requestedReadingPosition: $requestedReadingPosition,
                 onPageVisible: { pageIndex in
                     Task { await prepareVisiblePage(pageIndex) }
                 }
@@ -620,7 +653,13 @@ struct NoteEditorView: View {
             },
             isReadOnly: isArchived,
             snappingEnabled: snappingEnabled,
-            holdShapesEnabled: holdShapesEnabled
+            holdShapesEnabled: holdShapesEnabled,
+            selectionOptions: selectionOptions,
+            initialViewport: pageConfiguration.pageFormat == .infinite ? initialCanvasViewport : nil,
+            onViewportSettled: { viewport in
+                latestCanvasViewport = viewport
+                persistReadingPosition()
+            }
         )
         .accessibilityIdentifier("note.spatial-canvas.\(pageIndex + 1)")
         .accessibilityValue("\(canvasItems(on: pageIndex).count) canvas items")
@@ -668,25 +707,19 @@ struct NoteEditorView: View {
     @ToolbarContentBuilder
     private var editorToolbar: some ToolbarContent {
         ToolbarItem(placement: .principal) {
-            TextField("Untitled note", text: $title)
-                .font(.headline)
-                .multilineTextAlignment(.center)
-                .textFieldStyle(.plain)
-                .frame(minWidth: 180, idealWidth: 300, maxWidth: 380)
-                .submitLabel(.done)
-                .onSubmit { Task { await saveTitle() } }
-                .onChange(of: title) { _, value in
-                    if suppressNextTitleChange {
-                        suppressNextTitleChange = false
-                    } else {
-                        scheduleTitleSave(value)
-                    }
-                }
-                .accessibilityIdentifier("note.title")
-                .disabled(isArchived)
+            NotebookTabBar(session: tabSession, title: $title, isEditable: !isArchived)
+                .disabled(isLoading)
         }
 
         ToolbarItemGroup(placement: .primaryAction) {
+            if !jumpHistory.isEmpty {
+                Button("Return to previous view", systemImage: "arrow.uturn.backward") {
+                    returnToPreviousView()
+                }
+                .keyboardShortcut(.leftArrow, modifiers: [.command, .option])
+                .accessibilityIdentifier("note.return-view")
+                .disabled(isLoading)
+            }
             canvasMenu
             Menu {
                 if let selectedBlock, !isArchived {
@@ -878,6 +911,85 @@ struct NoteEditorView: View {
     }
 
     private var notebookToolRail: some View {
+        GeometryReader { rail in
+            VStack(spacing: 0) {
+                notebookRailButtons
+                if mode == .lasso {
+                    Menu {
+                        Picker("Boundary", selection: $selectionOptions.shape) {
+                            ForEach(CanvasSelectionShape.allCases, id: \.self) { shape in
+                                Text(shape.rawValue).tag(shape)
+                            }
+                        }
+                        Section("Include") {
+                            ForEach(CanvasSelectionContent.allCases, id: \.self) { kind in
+                                Toggle(kind.rawValue, isOn: Binding(
+                                    get: { selectionOptions.content.contains(kind) },
+                                    set: { enabled in
+                                        if enabled { selectionOptions.content.insert(kind) }
+                                        else { selectionOptions.content.remove(kind) }
+                                    }
+                                ))
+                            }
+                        }
+                        Button("Restore Selection Defaults") { selectionOptions = CanvasSelectionOptions() }
+                    } label: {
+                        VStack(spacing: 4) {
+                            Image(systemName: selectionOptions.shape == .freehand ? "lasso" : "rectangle.dashed")
+                            Text("Selection").font(.caption)
+                            Text("\(selectionOptions.content.count) types").font(.caption2)
+                        }
+                        .frame(width: 88).frame(minHeight: 64)
+                    }
+                    .accessibilityLabel("Selection options")
+                    .accessibilityValue("\(selectionOptions.shape.rawValue), \(selectionOptions.content.count) content types")
+                    .accessibilityIdentifier("note.selection.options")
+                    .onChange(of: selectionOptions) { _, _ in lassoSelection = LassoSelection() }
+                }
+                if let tool = quickOptionsTool {
+                    NotebookQuickToolOptions(
+                        tool: tool,
+                        compact: rail.size.height < CGFloat(model.workspacePreferences.visibleNotebookTools.count + 1) * (railButtonHeight + 2) + 370,
+                        color: $inkColor, width: $inkWidth,
+                        eraserMode: $eraserMode, eraserWidth: $eraserWidth,
+                        shapeKind: $selectedShapeKind, shapeColor: $shapeStrokeColor,
+                        shapeWidth: $shapeLineWidth, shapeFill: $shapeFillColor,
+                        showDetails: {
+                            switch tool {
+                            case .pen: showPenOptions = true
+                            case .marker: showMarkerOptions = true
+                            case .eraser: showEraserOptions = true
+                            case .shape: showShapeOptions = true
+                            default: showSymbolOptions = true
+                            }
+                        }
+                    )
+                    .disabled(isArchived)
+                }
+                Spacer(minLength: 0)
+            }
+            .frame(width: 96)
+        }
+        .frame(width: 96)
+        .background(reduceTransparency ? AnyShapeStyle(EpistoriaDesign.sidebar) : AnyShapeStyle(.regularMaterial))
+        .overlay(alignment: .trailing) { Divider() }
+    }
+
+    private var quickOptionsTool: NotebookToolID? {
+        switch mode {
+        case .ink:
+            switch inkTool {
+            case .pen: .pen
+            case .marker: .marker
+            case .eraser: .eraser
+            }
+        case .shape: .shape
+        case .symbol: .symbol
+        default: nil
+        }
+    }
+
+    private var notebookRailButtons: some View {
         VStack(spacing: 2) {
             ForEach(model.workspacePreferences.visibleNotebookTools) { tool in
                 notebookRailTool(tool)
@@ -905,10 +1017,7 @@ struct NoteEditorView: View {
         .foregroundStyle(EpistoriaDesign.ink)
         .padding(.horizontal, 6)
         .padding(.vertical, 6)
-        .frame(width: 82)
-        .frame(maxHeight: .infinity, alignment: .top)
-        .background(.regularMaterial)
-        .overlay(alignment: .trailing) { Divider() }
+        .frame(width: 96)
         .accessibilityElement(children: .contain)
     }
 
@@ -2214,6 +2323,16 @@ struct NoteEditorView: View {
                 : initialOCR
             evidence = loadedEvidence.filter { sourcesById[$0.payload.sourceId] != nil }
                 .sorted { $0.payload.updatedAt > $1.payload.updatedAt }
+            if isInitialLoad, activeFocusedBlockId != nil {
+                if configuration.pageFormat == .infinite {
+                    if let saved = try await store.database.noteCanvasViewport(noteId: noteId) {
+                        jumpHistory.record(.canvas(saved))
+                    }
+                } else if let saved = try await store.database.noteReadingPosition(noteId: noteId),
+                          pages.contains(where: { $0.id == saved.pageId }) {
+                    jumpHistory.record(.page(saved))
+                }
+            }
             if isInitialLoad, activeFocusedBlockId == nil, configuration.pageFormat != .infinite {
                 if let saved = try? await store.database.noteReadingPosition(noteId: noteId),
                    let index = pages.firstIndex(where: { $0.id == saved.pageId }) {
@@ -2224,6 +2343,10 @@ struct NoteEditorView: View {
             }
             if configuration.pageFormat == .infinite {
                 currentPageIndex = 0
+                if isInitialLoad, activeFocusedBlockId == nil {
+                    initialCanvasViewport = try await store.database.noteCanvasViewport(noteId: noteId)
+                    latestCanvasViewport = initialCanvasViewport
+                }
             } else if isInitialLoad,
                 let activeFocusedBlockId,
                 let focused = blocks.first(where: { $0.id == activeFocusedBlockId })
@@ -2256,12 +2379,45 @@ struct NoteEditorView: View {
     }
 
     private func persistReadingPosition() {
+        if !isLoading, configuration.pageFormat == .infinite,
+           let viewport = latestCanvasViewport, let store = model.store {
+            Task {
+                do { try await store.database.saveNoteCanvasViewport(noteId: noteId, viewport: viewport) }
+                catch { report(error) }
+            }
+            return
+        }
         guard !isLoading, configuration.pageFormat != .infinite,
               let position = latestReadingPosition,
               pages.contains(where: { $0.id == position.pageId }), let store = model.store else { return }
         Task {
             do { try await store.database.saveNoteReadingPosition(noteId: noteId, position: position) }
             catch { report(error) }
+        }
+    }
+
+    private func recordCurrentViewBeforeJump() {
+        if configuration.pageFormat == .infinite {
+            if let viewport = latestCanvasViewport { jumpHistory.record(.canvas(viewport)) }
+        } else if let position = latestReadingPosition {
+            jumpHistory.record(.page(position))
+        } else if let page = pages.first(where: { $0.id == pageId(at: currentPageIndex) }) {
+            jumpHistory.record(.page(NoteReadingPosition(pageId: page.id, fraction: 0)))
+        }
+    }
+
+    private func returnToPreviousView() {
+        guard let previous = jumpHistory.previous(pageIds: Set(pages.map(\.id)),
+                                                  infinite: configuration.pageFormat == .infinite) else { return }
+        activeFocusedBlockId = nil
+        activeHighlightText = nil
+        activeFocusRectangles = []
+        selectedItemId = nil
+        editingItemId = nil
+        requestedPageIndex = nil
+        switch previous {
+        case let .page(position): requestedReadingPosition = position
+        case let .canvas(viewport): canvasCommand = SpatialNotebookCommand(action: .restoreViewport(viewport))
         }
     }
 

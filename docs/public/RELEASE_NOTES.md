@@ -1,5 +1,62 @@
 # Release notes
 
+## 2026-09-10 — 0.1.0 canvas deletion checks
+
+- Reject a canvas-item Trash action if its saved content changed before the action finished.
+- Preserve newer content and ask the user to select it again.
+- Group editing and grouped undo remain in development.
+
+## 2026-09-10 — 0.1.0 selection options
+
+- Choose a freehand or rectangular boundary for Ask and Math.
+- Filter ink, text, images, shapes, Evidence, and other objects from the left-rail Selection menu.
+- Clear the previous selection when its settings change. Keep original note content unchanged.
+- Keep selection editing, group operations, and physical gesture validation open.
+
+## 2026-09-10 — 0.1.0 freehand selection accuracy
+
+- Use the drawn loop instead of its bounding box when selecting objects for Ask or Math.
+- Account for rotated objects and mask visual crops outside the selected boundary.
+- Preserve original images and Pencil strokes.
+- Keep group editing and physical Pencil boundary validation open.
+
+## 2026-09-10 — 0.1.0 note-list content previews
+
+- Replace decorative miniatures with previews of saved note content.
+- Show the first active fixed page or the used area of an infinite note.
+- Release preview images when rows disappear and show unavailable content explicitly.
+- Keep rendering local without creating files, syncing thumbnails, or using AI.
+
+## 2026-09-10 — 0.1.0 return after notebook jumps
+
+- Return to the prior reading position after opening a Find in Note result.
+- Offer the prior saved view when a note opens at a linked object.
+- Restore fixed-page positions or infinite-canvas center and zoom without undoing edits.
+- Add Command-Option-Left Arrow for the return action while it is available.
+
+## 2026-09-10 — 0.1.0 infinite-canvas position
+
+- Restore the last settled document position and zoom when reopening an infinite note.
+- Preserve the canvas center and zoom when its window size changes.
+- Keep view state device-local without moving original ink or objects.
+- Keep physical interrupted-gesture checks and return-after-jump navigation open.
+
+## 2026-09-10 — 0.1.0 open-note tabs
+
+- Switch between open notes in the top bar without moving writing tools off the left rail.
+- Open another note from a paginated picker and use the tabs menu for overflow.
+- Save pending edits before switching or closing. Closing a tab keeps its note in the notebook.
+- Restore the open-tab list on this iPad when a note is opened again.
+- Keep infinite-canvas pan/zoom restoration and narrow-window validation as open work.
+
+## 2026-09-09 — 0.1.0 left-rail quick controls
+
+- Put selected-tool previews, colors, and common settings below the writing tools.
+- Keep full options available in shorter windows and from a second tap on the selected tool.
+- Give fixed pages more space by hiding the app sidebar and reducing unused margins.
+- Determine the current page from the visible document position, including mixed page sizes.
+- Keep open-note tabs on the roadmap; they are not included in this change.
+
 ## 2026-09-09 — 0.1.0 fixed-page reading position
 
 - Restore the last saved page and relative vertical position when reopening a fixed-page note.

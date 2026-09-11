@@ -55,8 +55,24 @@ numbered-page controls.
 
 ## Write and arrange content
 
-- Select **Pen** or **Marker** to write with Apple Pencil. Tap the selected tool again to change
-  width and color. The preview updates as you change either setting.
+Note lists show saved content beside each title: the first active page for fixed notes, or an
+overview of the used area for infinite notes. These previews load locally. If an original image
+is unavailable on this iPad or content cannot be rendered, the row shows **Preview unavailable**.
+You can still open the note. Previews do not change the original content or create export files.
+
+The top bar shows open notes. Select a tab to switch, or use the down-arrow menu to see all
+open tabs. Select **Open another note** (plus) to choose another note; load more results in the
+picker when needed. Edit the active tab's title to rename the note. Close its tab with **×**;
+the note remains in Notebook. Closing the final tab returns to the previous screen.
+
+Pending edits save before switching or closing. The tab list stays on this iPad and reappears
+when you open a note again. A note opened from Search takes you to the requested result.
+Fixed-page reading positions and the last settled infinite-canvas position and zoom restore
+between tabs. These view settings stay on this iPad.
+
+- Select **Pen** or **Marker** to write with Apple Pencil. Change color and width below the left
+  tool buttons; the preview updates with your settings. In a shorter window, select **Options**.
+  Tapping the selected tool again also opens its detailed settings.
 - Select **Eraser** once to activate it. Tap the selected Eraser again to open its options. Use
   **Pixel eraser** to remove only the area under the adjustable circle. Use **Stroke eraser** to
   remove the complete Pencil stroke you touch. The preview shows the current round footprint or
@@ -135,7 +151,12 @@ Fixed-page notes remember your reading position on this iPad when scrolling stop
 backgrounds, or you leave the note. Reordering retains the saved page; resizing uses its relative
 vertical position. If that page is no longer available, the note opens at the beginning.
 Search and linked-object destinations take precedence. This position does not synchronize or
-enter readable exports. Infinite-canvas pan/zoom restoration and PDF outline bookmarks remain planned.
+enter readable exports. Infinite notes also restore their last settled canvas position and zoom.
+PDF outline bookmarks remain planned. After opening a Find in Note result, select **Return to
+previous view** in the top bar, or press **Command-Option-Left Arrow**. This restores the prior
+page position or infinite-canvas view. A note opened at a linked object also offers this action
+when it has a prior saved view. The temporary return history clears when you leave the editor
+or switch to another note tab; it does not undo edits.
 
 Select **More → Find in Note** to search typed text, equations, accepted recognition, and labeled
 unreviewed recognition in the open note. Results are grouped by page. Selecting a result opens
@@ -799,6 +820,11 @@ uses its matched excerpt to locate a supporting passage when one is available. S
 devices may show exact matches only.
 
 ## Ask about part of a note
+
+In Ask or Math selection mode, open **Selection** beneath the left-rail tools. Choose Freehand
+or Rectangle, then choose the content types to include. Rectangle selection uses a drag between
+opposite corners. Changing these options clears the previous selection; draw a new boundary
+before continuing. These options do not move or delete selected content.
 
 This optional feature requires a configured provider or an explicitly selected Compute Node
 route.

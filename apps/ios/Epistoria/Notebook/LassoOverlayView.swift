@@ -11,6 +11,7 @@ struct LassoSelection {
     /// PNG data for selected Pencil content or canvas-image previews.
     var drawingImagesByBlockId: [UUID: Data] = [:]
     var locatorsByBlockId: [UUID: SourceLocator] = [:]
+    var selectedStrokeIndicesByBlockId: [UUID: [Int]] = [:]
 
     var isEmpty: Bool { selectedBlockIds.isEmpty }
 }
@@ -38,9 +39,18 @@ struct BlockFrameAnchorPreferenceKey: PreferenceKey {
 // MARK: - UIKit lasso gesture view
 
 /// A transparent UIKit view that captures a pan gesture to draw a freehand lasso path.
-/// Reports the bounding CGRect of the path on gesture end.
+/// Reports the drawn boundary, retaining concavities instead of selecting its bounding box.
 final class LassoGestureView: UIView {
-    var onSelectionRect: ((CGRect) -> Void)?
+    var selectionShape: CanvasSelectionShape = .freehand {
+        didSet {
+            guard oldValue != selectionShape else { return }
+            reset()
+            accessibilityLabel = selectionShape == .freehand
+                ? "Region selection mode. Draw a boundary around notebook content to select it."
+                : "Rectangle selection mode. Drag between opposite corners to select notebook content."
+        }
+    }
+    var onSelectionRegion: ((CanvasSelectionRegion) -> Void)?
     var onCancel: (() -> Void)?
 
     private var path: UIBezierPath = .init()
@@ -84,10 +94,9 @@ final class LassoGestureView: UIView {
             path = UIBezierPath()
             path.move(to: location)
         case .changed:
-            points.append(location)
-            path.addLine(to: location)
-            shapeLayer.path = path.cgPath
+            updateBoundary(at: location)
         case .ended, .cancelled:
+            if recognizer.state == .ended { updateBoundary(at: location) }
             // Close the path visually.
             if let first = points.first {
                 path.addLine(to: first)
@@ -104,7 +113,7 @@ final class LassoGestureView: UIView {
                 )
                 // Only report if the selection has meaningful area.
                 if rect.width > 20 && rect.height > 20 {
-                    onSelectionRect?(rect)
+                    onSelectionRegion?(CanvasSelectionRegion(points: points))
                 } else {
                     reset()
                     onCancel?()
@@ -118,6 +127,22 @@ final class LassoGestureView: UIView {
         }
     }
 
+    private func updateBoundary(at location: CGPoint) {
+        guard let start = points.first else { return }
+        switch selectionShape {
+        case .freehand:
+            points.append(location)
+            path.addLine(to: location)
+        case .rectangle:
+            points = selectionShape.boundary(start: start, current: location, samples: [])
+            path = UIBezierPath()
+            path.move(to: start)
+            for point in points.dropFirst() { path.addLine(to: point) }
+            path.close()
+        }
+        shapeLayer.path = path.cgPath
+    }
+
     func reset() {
         points = []
         path = UIBezierPath()
@@ -125,30 +150,6 @@ final class LassoGestureView: UIView {
     }
 }
 
-// MARK: - SwiftUI wrapper
-
-struct LassoOverlayView: UIViewRepresentable {
-    @Binding var isActive: Bool
-    var onSelectionRect: (CGRect) -> Void
-    var onCancel: () -> Void
-
-    func makeUIView(context: Context) -> LassoGestureView {
-        let view = LassoGestureView()
-        view.onSelectionRect = { rect in
-            onSelectionRect(rect)
-        }
-        view.onCancel = {
-            onCancel()
-        }
-        return view
-    }
-
-    func updateUIView(_ uiView: LassoGestureView, context: Context) {
-        if !isActive {
-            uiView.reset()
-        }
-    }
-}
 
 // MARK: - Drawing crop helper
 
@@ -162,11 +163,26 @@ func cropDrawing(_ drawing: PKDrawing, to rect: CGRect, scale: CGFloat = 2.0) ->
     guard !relevantStrokes.isEmpty else { return nil }
 
     let cropped = PKDrawing(strokes: relevantStrokes)
-    let image = cropped.image(from: rect, scale: scale)
+    let boundedScale = min(scale, 1024 / max(rect.width, rect.height, 1))
+    let image = cropped.image(from: rect, scale: boundedScale)
 
     // Reject empty images (fully transparent).
     guard let cgImage = image.cgImage, cgImage.width > 0, cgImage.height > 0 else {
         return nil
     }
     return image.pngData()
+}
+
+func maskSelectionPNG(_ data: Data, region: CanvasSelectionRegion, cropRect: CGRect) -> Data? {
+    guard let image = UIImage(data: data), region.isValid, cropRect.width > 0, cropRect.height > 0 else { return nil }
+    let format = UIGraphicsImageRendererFormat()
+    format.scale = 1
+    format.opaque = false
+    return UIGraphicsImageRenderer(size: image.size, format: format).image { context in
+        context.cgContext.scaleBy(x: image.size.width / cropRect.width, y: image.size.height / cropRect.height)
+        context.cgContext.translateBy(x: -cropRect.minX, y: -cropRect.minY)
+        context.cgContext.addPath(region.path)
+        context.cgContext.clip(using: .evenOdd)
+        image.draw(in: cropRect)
+    }.pngData()
 }

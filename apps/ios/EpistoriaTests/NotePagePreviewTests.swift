@@ -6,6 +6,34 @@ import UIKit
 
 @MainActor
 struct NotePagePreviewTests {
+    @Test func noteCoversUseFirstActivePageAndInfiniteContentWithoutWrites() async throws {
+        let f = try fixture()
+        defer { try? FileManager.default.removeItem(at: f.root) }
+        let id = try await f.store.createNote(title: "Synthetic cover")
+        var note = try await f.store.payload(NotePayload.self, id: id)
+        let first = try #require(try await f.store.notePages(noteId: id).first)
+        var second = first
+        second.id = UUID()
+        second.payload.orderKey = "zzzz"
+        let text = block(page: first, kind: .text, text: "Actual cover text")
+        let mutations = try await f.store.database.pendingMutations()
+        let expected = try await f.service.pagePreview(page: first, blocks: [text])
+        let cover = try await f.service.notePreview(note: note, pages: [second, first], blocks: [text])
+        #expect(cover.pngData() == expected.pngData())
+        var trashed = first
+        trashed.payload.trashedAt = .now
+        let secondBlank = try await f.service.pagePreview(page: second, blocks: [])
+        #expect(try await f.service.notePreview(note: note, pages: [trashed, second], blocks: [text]).pngData() == secondBlank.pngData())
+        note.payload.canvas = NoteCanvasConfiguration(pageFormat: .infinite)
+        var infiniteText = text
+        infiniteText.payload.pageId = nil
+        infiniteText.payload.canvasPlacement = NoteCanvasPlacement(x: -5000, y: 2000, width: 300, height: 120)
+        let infinite = try await f.service.notePreview(note: note, pages: [], blocks: [infiniteText])
+        #expect(max(infinite.size.width, infinite.size.height) <= 384.01)
+        #expect(min(infinite.size.width, infinite.size.height) > 0)
+        #expect(try await f.store.database.pendingMutations() == mutations)
+    }
+
     private struct Fixture {
         let root: URL
         let store: EpistoriaStore

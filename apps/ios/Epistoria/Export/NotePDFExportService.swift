@@ -218,10 +218,36 @@ final class NotePDFExportService {
             !$0.payload.tombstone && $0.payload.pageId == page.id
                 && $0.payload.noteId == page.payload.noteId
         }.sorted { $0.payload.orderKey < $1.payload.orderKey }
-        guard var plan = try pagePlans(pages: [page],
+        guard let plan = try pagePlans(pages: [page],
             fallbackConfiguration: page.payload.configuration, blocks: visible).first else {
             throw NotePDFExportError.invalidPageGeometry
         }
+        return try await renderPreview(plan: plan, visible: visible)
+    }
+
+    /// First active fixed page, or the used area of an infinite note. No synthetic page records.
+    func notePreview(note: IdentifiedPayload<NotePayload>, pages: [IdentifiedPayload<NotePagePayload>],
+                     blocks: [IdentifiedPayload<NoteBlockPayload>]) async throws -> UIImage {
+        try Task.checkCancellation()
+        let configuration = note.payload.canvas ?? NoteCanvasConfiguration()
+        if configuration.pageFormat != .infinite {
+            guard let page = pages.filter({ $0.payload.noteId == note.id && $0.payload.trashedAt == nil })
+                .sorted(by: { $0.payload.orderKey < $1.payload.orderKey }).first else {
+                throw NotePDFExportError.invalidPageGeometry
+            }
+            return try await pagePreview(page: page, blocks: blocks)
+        }
+        let visible = blocks.filter { !$0.payload.tombstone && $0.payload.noteId == note.id && $0.payload.pageId == nil }
+            .sorted { $0.payload.orderKey < $1.payload.orderKey }
+        guard let plan = try pagePlans(pages: [], fallbackConfiguration: configuration, blocks: visible).first else {
+            throw NotePDFExportError.invalidPageGeometry
+        }
+        return try await renderPreview(plan: plan, visible: visible)
+    }
+
+    private func renderPreview(plan originalPlan: PagePlan, visible: [IdentifiedPayload<NoteBlockPayload>]) async throws -> UIImage {
+        try Task.checkCancellation()
+        var plan = originalPlan
         let dimension: CGFloat = 384
         plan.worldScale = dimension / max(plan.worldRect.width, plan.worldRect.height)
         plan.outputSize = CGSize(width: plan.worldRect.width * plan.worldScale,

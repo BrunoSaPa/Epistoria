@@ -29,10 +29,18 @@ Epistoria remains in personal beta. The following limits apply to the current pr
 
 ## Notebook
 
-- Content previews are available in the page manager. Notebook-list miniatures still use a text
-  excerpt and content indicator. Page titles and bookmarks are available in Pages. Fixed-page
-  reading position is device-local; infinite-canvas pan/zoom restoration, PDF outline bookmarks,
-  and return-after-jump navigation remain planned. Reading-position restoration across rotation
+- Left-rail quick controls and expanded page width have Simulator coverage. Their short-window,
+  rotation, Pencil, and accessibility behavior still requires physical-iPad validation.
+  Top-bar tabs have Simulator switch, close, and relaunch coverage. Narrow-window and large-text
+  tab layouts still require validation. Fixed-page positions and settled infinite-canvas pan/zoom
+  restore locally. Interrupted gestures and repeated rotation still require physical validation.
+
+- Content previews are available in the page manager and note lists. List previews show the
+  first active fixed page or an infinite note's used area. Large-note block loading and preview
+  memory/latency still require physical validation. Page titles and bookmarks are available in Pages. Fixed-page
+  reading position is device-local; PDF outline bookmarks remain planned. Return navigation
+  keeps a temporary history for the current editor, not a permanent cross-note history.
+  Reading-position restoration across rotation
   and multitasking still needs physical-iPad validation. Preview memory, energy use, and scrolling with
   large handwritten pages still need physical-iPad validation. Missing local images prevent a
   complete preview; this does not prevent opening the page or change its originals.
@@ -51,7 +59,10 @@ Epistoria remains in personal beta. The following limits apply to the current pr
   remains development-gated until a permissively licensed on-device model passes physical-iPad
   accuracy, latency, memory, and thermal checks.
 - Existing shapes support appearance editing and PDF output. Alignment applies to individual
-  object movement, not resizing, spacing distribution or lasso-group movement. Connectors remain
+  object movement, not resizing, spacing distribution or lasso-group movement. Freehand Ask and
+  Math selections use sampled ink paths, not the full rendered stroke outline; thick or curved
+  stroke boundary cases still need physical Pencil validation. Source links use the selection's
+  enclosing rectangle. Intersecting text objects include their full text. Connectors remain
   planned. Physical Pencil, pointer and zoom testing of alignment remains open.
 - Draw-and-hold shapes are an opt-in Pen-only prototype. Accepted shapes remain ink, not separate
   objects for the shape editor. Only single-stroke lines, circles, axis-aligned ellipses and

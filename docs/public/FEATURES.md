@@ -14,17 +14,25 @@ the current personal beta.
   change a page template, move a page to Trash, or restore it.
 - Page-manager previews show saved handwriting, text, images, shapes, and Evidence in the page's
   orientation. They are generated locally without AI. Unavailable content shows a preview warning.
+- Note lists show a preview of the first active fixed page or the used area of an infinite
+  note, alongside the text excerpt. Previews use saved local content and are not uploaded.
 - Add optional page titles and bookmarks from Pages. Filter to bookmarked pages without changing
   page order. Titles and bookmarks stay with pages when reordered or restored from Trash.
 - Reopen fixed-page notes at the last saved reading position on this iPad. Opening a search
   result or linked object takes precedence over the saved position.
+- Reopen infinite notes at their last settled canvas position and zoom on this iPad. The saved
+  view does not change the position of handwriting or objects.
+- Use **Return to previous view** after opening a Find in Note result. Notes opened at a linked
+  object also offer a return to their prior saved view when one exists.
 - Switch between Select, Pen, Marker, Eraser, Text, Image, Shape, Pages, Undo, and Redo without
   opening the system Pencil palette.
 - Open **More** for optional Evidence, recognition review, Learn, Ask, Math, and Symbol tools. Pin
   the optional tools you use regularly without making the rail scroll.
 - Choose a pixel eraser with an adjustable circular width or a stroke eraser that removes a
   complete Pencil stroke.
-- Tap a selected Pen or Marker again to change its width and color.
+- Change Pen, Marker, Eraser, and Shape settings below the left tool rail. Quick controls include
+  a preview; shorter windows show an Options button for the full settings. Tapping a selected
+  tool again also opens its detailed settings.
 - See a live sample of Pen, Marker, Eraser, Shape, and Symbol settings before using them.
 - Place rectangles, rounded rectangles, ellipses, triangles, diamonds, lines, and arrows. Choose
   outline color, fill, and line width before placement.
@@ -45,6 +53,11 @@ the current personal beta.
   Disable alignment from the page menu for free positioning.
 - Write over text and images without flattening the underlying material.
 - Open a note in an immersive workspace that uses the full iPad detail area.
+- Hide the app sidebar while writing. Fixed paper fills the available width with small margins
+  and keeps its page proportions.
+- Switch between open notes from the top bar. Use the open-tabs menu for other tabs and **Open
+  another note** to choose from the notebook. Closing a tab does not delete the note. The tab
+  list stays on this iPad and is restored when you next open a note.
 - Keep Pencil data separate by page so editing one page does not rewrite the complete note.
 - Find typed text, equations, and labeled recognition inside the current note, with accent-insensitive
   matching and emphasized snippets. Owner corrections replace original OCR in search. Open a match on its
@@ -198,6 +211,10 @@ the current personal beta.
 ## Selected-region questions
 
 - Draw a boundary around text, handwriting, or images in a note.
+- In Ask or Math, use **Selection** beneath the left-rail tools to choose a freehand or rectangular
+  boundary and include only the content types you need. Restore the default settings from that menu.
+- Select intersecting objects using the drawn loop, including rotated objects. Visual crops
+  exclude pixels outside the loop; an intersecting text object includes its full text.
 - Ask a question about the selected area.
 - Review what will be processed before approving the request.
 - Receive an answer with references to the selected notebook material.

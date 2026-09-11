@@ -148,9 +148,9 @@ struct AppRootView: View {
             } detail: {
                 destination(model.selectedSection ?? .today)
                     .epistoriaPageBackground()
-                    .environment(\.epistoriaWorkspacePresentation, workspacePresentation)
             }
             .navigationSplitViewStyle(.balanced)
+            .environment(\.epistoriaWorkspacePresentation, workspacePresentation)
             .tint(EpistoriaDesign.accent)
             .onChange(of: workspacePresentation.activeImmersiveEditorID) { _, editorID in
                 setColumnVisibility(editorID == nil ? .all : .detailOnly)
