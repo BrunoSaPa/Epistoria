@@ -208,6 +208,23 @@ the current personal beta.
 - Require accepted or owner-corrected OCR before Evidence, AI grounding, cards, tests, Concepts,
   mastery, Study Next, worked steps, graphing, or error diagnosis can use it.
 
+## Whole-object selection
+
+- On an infinite canvas, open **More → Canvas view** to fit all content or the current selection
+  within the supported zoom range. Use **Return** to restore the prior position and zoom.
+
+- Tap Select again to draw an editing selection. Choose its boundary and content filters from
+  Selection beneath the left-rail tools.
+- Move selected objects to Trash together, then use **Undo delete** to restore that deletion.
+- Choose **Move selected objects**, then drag the selection bounds to move whole objects together.
+  **Undo move** restores their previous positions; **Redo move** reapplies the checked move.
+- Use VoiceOver actions on the movement handle to move left, right, up, or down.
+- Duplicate selected objects with a consistent offset. Copies reuse original image files and
+  Evidence references. **Undo duplicate** moves unchanged copies to Trash without touching originals.
+- Keep original content and Source references. If saved content changes, select it again.
+- Exclude Ink for this operation. Partial-stroke editing and an integrated group undo/redo
+  history are not available yet. Dismissing Undo delete leaves the objects in Trash.
+
 ## Selected-region questions
 
 - Draw a boundary around text, handwriting, or images in a note.

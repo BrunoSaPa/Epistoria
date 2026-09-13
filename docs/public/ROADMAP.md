@@ -45,15 +45,17 @@ or tab groups are planned.
    collections on a physical iPad before considering the navigation milestone complete.
 2. **Selection and editing — in progress.** Ask and Math use the actual freehand boundary for
    object selection and visual crops, with rectangle and content-type options in the left rail.
-   Editing still needs these selection modes and filters integrated with editing actions for
+   Whole-object selection supports duplication, group Trash and separate undo banners. Editing still
+   needs integrated actions for
    ink, text, images, and shapes; move, duplicate, copy, and delete selected content; object
    locking; and one undo action for a group operation. Select ink over an image without moving
    or flattening the image. Preserve ink and exact source references when moving content.
 3. **Source access while writing.** Open a PDF beside the current note, keep independent reading
    and writing positions, insert excerpts as reusable Evidence, and return to the same note
    position and zoom. Start with PDFs and existing Evidence rather than replacing every reader.
-4. **Canvas navigation.** Fit page, fit all infinite-canvas content, fit selection, and return to
-   the previous view. Use the existing view menu and keyboard shortcuts rather than more rail
+4. **Canvas navigation — in progress.** Infinite-canvas content/selection fitting and Return are
+   implemented within the existing zoom range. Complete fixed-page fitting, larger content
+   overviews and keyboard navigation. Use the existing view menu and keyboard shortcuts rather than more rail
    buttons. Group alignment and connectors follow reliable selection.
 5. **Portable output.** Preserve page titles and bookmarks as PDF navigation where supported;
    include readable Evidence attribution; clarify visual PDF versus editable notebook archive;

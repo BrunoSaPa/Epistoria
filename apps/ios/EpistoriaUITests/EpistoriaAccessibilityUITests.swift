@@ -1,6 +1,50 @@
 import XCTest
 
 final class EpistoriaAccessibilityUITests: XCTestCase {
+    @MainActor
+    func testInfiniteCanvasFitAndReturnPreserveContentAndPosition() throws {
+        let app = ephemeralApplication()
+        app.launch()
+        XCTAssertTrue(app.buttons["today.quick-note"].waitForExistence(timeout: 12))
+        app.buttons["today.quick-note"].tap()
+        XCTAssertTrue(app.buttons["note.canvas-settings"].waitForExistence(timeout: 10))
+        app.buttons["note.canvas-settings"].tap()
+        app.buttons["Infinite canvas"].tap()
+        app.buttons["note.tool.text"].tap()
+        let field = app.textViews.matching(identifier: "Canvas text").firstMatch
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        field.tap()
+        field.typeText("Canvas fitting fixture")
+        app.buttons["note.tool.select"].tap()
+        let originalFrame = field.frame
+        app.buttons["note.tool.more"].tap()
+        let fit = app.buttons["note.view.fit-content"]
+        XCTAssertTrue(fit.waitForExistence(timeout: 5))
+        fit.tap()
+        let back = app.buttons["note.return-view"]
+        XCTAssertTrue(back.waitForExistence(timeout: 5))
+        XCTAssertGreaterThan(field.frame.width, originalFrame.width)
+        XCTAssertEqual(field.value as? String, "Canvas fitting fixture")
+        let screen = XCTAttachment(screenshot: app.screenshot())
+        screen.name = "Infinite canvas fitted content with Return"
+        screen.lifetime = .keepAlways
+        add(screen)
+        back.tap()
+        XCTAssertEqual(field.frame.midX, originalFrame.midX, accuracy: 1)
+        XCTAssertEqual(field.frame.midY, originalFrame.midY, accuracy: 1)
+        XCTAssertEqual(field.frame.width, originalFrame.width, accuracy: 1)
+        XCTAssertEqual(field.value as? String, "Canvas fitting fixture")
+        // The More popover is closed: keyboard commands must belong to the editor itself.
+        app.typeKey("0", modifierFlags: .command)
+        XCTAssertTrue(back.waitForExistence(timeout: 5))
+        XCTAssertGreaterThan(field.frame.width, originalFrame.width)
+        app.typeKey(.leftArrow, modifierFlags: [.command, .option])
+        expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: back)
+        waitForExpectations(timeout: 5)
+        XCTAssertEqual(field.frame.width, originalFrame.width, accuracy: 1)
+        XCTAssertEqual(field.value as? String, "Canvas fitting fixture")
+    }
+
     override func setUpWithError() throws {
         continueAfterFailure = false
     }
@@ -136,6 +180,93 @@ final class EpistoriaAccessibilityUITests: XCTestCase {
     }
 
     @MainActor
+    func testTwoObjectSelectionDeletesAndRestoresTogether() throws {
+        let app = ephemeralApplication()
+        app.launch()
+        XCTAssertTrue(app.buttons["today.quick-note"].waitForExistence(timeout: 12))
+        app.buttons["today.quick-note"].tap()
+        XCTAssertTrue(app.textFields["note.title"].waitForExistence(timeout: 10))
+        let messages = ["First selected object", "Second selected object"]
+        for message in messages {
+            app.buttons["note.tool.text"].tap()
+            let field = app.textViews.matching(identifier: "Canvas text")
+                .matching(NSPredicate(format: "NOT (value IN %@)", messages)).firstMatch
+            XCTAssertTrue(field.waitForExistence(timeout: 5))
+            field.tap()
+            field.typeText(message)
+            app.buttons["note.tool.select"].tap()
+        }
+        let textObjects = app.textViews.matching(identifier: "Canvas text")
+        XCTAssertEqual(textObjects.count, 2)
+        let bounds = textObjects.element(boundBy: 0).frame.union(textObjects.element(boundBy: 1).frame)
+        let options = app.buttons["note.selection.options"]
+        if !options.exists { app.buttons["note.tool.select"].tap() }
+        XCTAssertTrue(options.waitForExistence(timeout: 3))
+        options.tap()
+        if !app.buttons["Rectangle"].exists { app.buttons["Boundary"].tap() }
+        app.buttons["Rectangle"].tap()
+        let origin = app.coordinate(withNormalizedOffset: .zero)
+        origin.withOffset(CGVector(dx: bounds.minX - 8, dy: bounds.minY - 8))
+            .press(forDuration: 0.1, thenDragTo: origin.withOffset(CGVector(dx: bounds.maxX + 8, dy: bounds.maxY + 8)))
+        options.tap()
+        let deletion = app.buttons["note.selection.delete"]
+        let duplicate = app.buttons["note.selection.duplicate"]
+        let move = app.buttons["note.selection.move"]
+        XCTAssertTrue(move.waitForExistence(timeout: 3))
+        XCTAssertTrue(move.isEnabled)
+        move.tap()
+        let handle = app.otherElements["note.selection.move-handle"]
+        XCTAssertTrue(handle.waitForExistence(timeout: 3))
+        let beforeMove = textObjects.allElementsBoundByIndex.map(\.frame)
+        let dragStart = handle.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        dragStart.press(forDuration: 0.1, thenDragTo: dragStart.withOffset(CGVector(dx: 40, dy: 30)))
+        let undoMove = app.buttons["note.selection.undo-move"]
+        XCTAssertTrue(undoMove.waitForExistence(timeout: 5))
+        for index in 0..<2 {
+            XCTAssertEqual(textObjects.element(boundBy: index).frame.midX, beforeMove[index].midX + 40, accuracy: 3)
+            XCTAssertEqual(textObjects.element(boundBy: index).frame.midY, beforeMove[index].midY + 30, accuracy: 3)
+        }
+        undoMove.tap()
+        expectation(for: NSPredicate(format: "label == %@", "Redo move"), evaluatedWith: undoMove)
+        waitForExpectations(timeout: 5)
+        for index in 0..<2 {
+            XCTAssertEqual(textObjects.element(boundBy: index).frame.midX, beforeMove[index].midX, accuracy: 3)
+            XCTAssertEqual(textObjects.element(boundBy: index).frame.midY, beforeMove[index].midY, accuracy: 3)
+        }
+        options.tap()
+        XCTAssertTrue(duplicate.waitForExistence(timeout: 3))
+        XCTAssertTrue(duplicate.isEnabled)
+        duplicate.tap()
+        let undoDuplicate = app.buttons["note.selection.undo-duplicate"]
+        XCTAssertTrue(undoDuplicate.waitForExistence(timeout: 5))
+        XCTAssertEqual(textObjects.count, 4)
+        undoDuplicate.tap()
+        expectation(for: NSPredicate(format: "count == 2"), evaluatedWith: textObjects)
+        waitForExpectations(timeout: 5)
+        XCTAssertEqual(Set(textObjects.allElementsBoundByIndex.compactMap { $0.value as? String }), Set(messages))
+        origin.withOffset(CGVector(dx: bounds.minX - 8, dy: bounds.minY - 8))
+            .press(forDuration: 0.1, thenDragTo: origin.withOffset(CGVector(dx: bounds.maxX + 8, dy: bounds.maxY + 8)))
+        options.tap()
+        XCTAssertTrue(deletion.waitForExistence(timeout: 3))
+        XCTAssertTrue(deletion.isEnabled)
+        XCTAssertTrue(deletion.label.contains("2 items"), deletion.label)
+        let selectedScreen = XCTAttachment(screenshot: app.screenshot())
+        selectedScreen.name = "Two objects selected for group Trash"
+        selectedScreen.lifetime = .keepAlways
+        add(selectedScreen)
+        deletion.tap()
+        let undo = app.buttons["note.selection.undo-delete"]
+        XCTAssertTrue(undo.waitForExistence(timeout: 5))
+        XCTAssertEqual(textObjects.count, 0)
+        undo.tap()
+        expectation(for: NSPredicate(format: "count == 2"), evaluatedWith: textObjects)
+        waitForExpectations(timeout: 5)
+        let restored = textObjects.allElementsBoundByIndex.compactMap { $0.value as? String }
+        XCTAssertEqual(Set(restored), Set(messages))
+        XCTAssertFalse(undo.exists)
+    }
+
+    @MainActor
     func testOpenNoteTabsSwitchCloseAndSurviveRelaunch() throws {
         let app = ephemeralApplication()
         app.launch()
@@ -239,6 +370,29 @@ final class EpistoriaAccessibilityUITests: XCTestCase {
         XCTAssertTrue(canvasText.waitForExistence(timeout: 5))
         canvasText.tap()
         canvasText.typeText("Navigation target")
+        app.buttons["note.tool.select"].tap()
+
+        let objectFrame = canvasText.frame
+        let selectionOptions = app.buttons["note.selection.options"]
+        if !selectionOptions.exists { app.buttons["note.tool.select"].tap() }
+        XCTAssertTrue(selectionOptions.waitForExistence(timeout: 3))
+        selectionOptions.tap()
+        if !app.buttons["Rectangle"].exists { app.buttons["Boundary"].tap() }
+        app.buttons["Rectangle"].tap()
+        let origin = app.coordinate(withNormalizedOffset: .zero)
+        origin.withOffset(CGVector(dx: objectFrame.minX - 8, dy: objectFrame.minY - 8))
+            .press(forDuration: 0.1, thenDragTo: origin.withOffset(CGVector(dx: objectFrame.maxX + 8, dy: objectFrame.maxY + 8)))
+        selectionOptions.tap()
+        let deleteSelection = app.buttons["note.selection.delete"]
+        XCTAssertTrue(deleteSelection.waitForExistence(timeout: 3))
+        XCTAssertTrue(deleteSelection.isEnabled)
+        deleteSelection.tap()
+        let undoGroup = app.buttons["note.selection.undo-delete"]
+        XCTAssertTrue(undoGroup.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.textViews["Canvas text"].exists)
+        undoGroup.tap()
+        XCTAssertTrue(app.textViews["Canvas text"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.textViews["Canvas text"].value as? String, "Navigation target")
         app.buttons["note.tool.select"].tap()
 
         let pages = app.buttons["note.tool.pages"]

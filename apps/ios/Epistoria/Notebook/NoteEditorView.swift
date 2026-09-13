@@ -49,6 +49,7 @@ private enum OCRRecognitionState: Equatable {
 }
 
 private enum NotebookLassoPurpose {
+    case editing
     case question
     case mathematics
 }
@@ -117,6 +118,7 @@ struct NoteCanvasEditorView: View {
     @State private var shapeLineWidth: Double = 3
     @State private var selectedMathSymbol = "√"
     @State private var canvasCommand: SpatialNotebookCommand?
+    @State private var viewportNotice: String?
     @State private var selectedItemId: UUID?
     @State private var editingItemId: UUID?
     @State private var viewportCenter = CGPoint(x: 297.5, y: 421)
@@ -144,6 +146,13 @@ struct NoteCanvasEditorView: View {
     @State private var pdfExportResult: NotePDFExportResult?
     @State private var pdfExportTask: Task<Void, Never>?
     @State private var lassoSelection = LassoSelection()
+    @State private var selectedObjectPayloads: [UUID: NoteBlockPayload] = [:]
+    @State private var groupTrashReceipt: [UUID] = []
+    @State private var groupDuplicateReceipt: [StoredEntity] = []
+    @State private var groupMoveReceipt: CanvasObjectMoveReceipt?
+    @State private var groupMoveUndone = false
+    @State private var groupDeletedIds: [UUID] = []
+    @State private var groupEditBusy = false
     @State private var selectionOptions = CanvasSelectionOptions()
     @State private var lassoPurpose = NotebookLassoPurpose.question
     @State private var showNoteQuerySheet = false
@@ -195,10 +204,12 @@ struct NoteCanvasEditorView: View {
 
     var body: some View {
         editorExportDialogs
+            .disabled(groupEditBusy)
     }
 
     private var editorChrome: some View {
         editorCanvasContent
+            .background { canvasNavigationShortcuts }
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { editorToolbar }
             .onChange(of: title) { _, value in
@@ -647,14 +658,19 @@ struct NoteCanvasEditorView: View {
             onLassoSelection: { selection in
                 currentPageIndex = pageIndex
                 lassoSelection = selection
+                selectedObjectPayloads = Dictionary(uniqueKeysWithValues: blocks.filter {
+                    selection.selectedBlockIds.contains($0.id)
+                }.map { ($0.id, $0.payload) })
             },
             onCanvasTap: { point in
                 Task { await placeActiveTool(at: point, pageIndex: pageIndex) }
             },
-            isReadOnly: isArchived,
+            isReadOnly: isArchived || groupEditBusy,
             snappingEnabled: snappingEnabled,
             holdShapesEnabled: holdShapesEnabled,
             selectionOptions: selectionOptions,
+            onGroupMove: { delta in Task { await moveSelectedObjects(by: delta) } },
+            onViewportNotice: { viewportNotice = $0 },
             initialViewport: pageConfiguration.pageFormat == .infinite ? initialCanvasViewport : nil,
             onViewportSettled: { viewport in
                 latestCanvasViewport = viewport
@@ -683,6 +699,8 @@ struct NoteCanvasEditorView: View {
             inkBlock(on: pageIndex) == nil ? .select : .ink
         case .lasso:
             pageIndex == currentPageIndex ? .lasso : .select
+        case .moveSelection:
+            pageIndex == currentPageIndex ? .moveSelection : .select
         case .select:
             .select
         case .shape:
@@ -914,14 +932,14 @@ struct NoteCanvasEditorView: View {
         GeometryReader { rail in
             VStack(spacing: 0) {
                 notebookRailButtons
-                if mode == .lasso {
+                if mode == .lasso || mode == .moveSelection {
                     Menu {
                         Picker("Boundary", selection: $selectionOptions.shape) {
                             ForEach(CanvasSelectionShape.allCases, id: \.self) { shape in
                                 Text(shape.rawValue).tag(shape)
                             }
                         }
-                        Section("Include") {
+                        Menu("Include content") {
                             ForEach(CanvasSelectionContent.allCases, id: \.self) { kind in
                                 Toggle(kind.rawValue, isOn: Binding(
                                     get: { selectionOptions.content.contains(kind) },
@@ -933,6 +951,28 @@ struct NoteCanvasEditorView: View {
                             }
                         }
                         Button("Restore Selection Defaults") { selectionOptions = CanvasSelectionOptions() }
+                        if lassoPurpose == .editing {
+                            Section("Selected objects") {
+                                Button(mode == .moveSelection ? "Finish moving" : "Move selected objects") {
+                                    mode = mode == .moveSelection ? .lasso : .moveSelection
+                                }
+                                .disabled(!canDeleteSelectedObjects)
+                                .accessibilityIdentifier("note.selection.move")
+                                Button("Duplicate \(lassoSelection.selectedBlockIds.count) items") {
+                                    Task { await duplicateSelectedObjects() }
+                                }
+                                .disabled(!canDeleteSelectedObjects)
+                                .accessibilityIdentifier("note.selection.duplicate")
+                                Button("Move \(lassoSelection.selectedBlockIds.count) items to Trash", role: .destructive) {
+                                    Task { await deleteSelectedObjects() }
+                                }
+                                .disabled(!canDeleteSelectedObjects)
+                                .accessibilityIdentifier("note.selection.delete")
+                                if selectedObjectPayloads.values.contains(where: { $0.canvasRole == .inkLayer }) {
+                                    Text("Partial ink editing is not available yet. Exclude Ink to select other objects.")
+                                }
+                            }
+                        }
                     } label: {
                         VStack(spacing: 4) {
                             Image(systemName: selectionOptions.shape == .freehand ? "lasso" : "rectangle.dashed")
@@ -944,7 +984,10 @@ struct NoteCanvasEditorView: View {
                     .accessibilityLabel("Selection options")
                     .accessibilityValue("\(selectionOptions.shape.rawValue), \(selectionOptions.content.count) content types")
                     .accessibilityIdentifier("note.selection.options")
-                    .onChange(of: selectionOptions) { _, _ in lassoSelection = LassoSelection() }
+                    .onChange(of: selectionOptions) { _, _ in
+                        lassoSelection = LassoSelection()
+                        mode = .lasso
+                    }
                 }
                 if let tool = quickOptionsTool {
                     NotebookQuickToolOptions(
@@ -1029,10 +1072,15 @@ struct NoteCanvasEditorView: View {
     private func notebookRailTool(_ tool: NotebookToolID) -> some View {
         switch tool {
         case .select:
-            compactRailToolButton(tool, selected: mode == .select) {
-                mode = .select
+            compactRailToolButton(tool, selected: mode == .select || (mode == .lasso && lassoPurpose == .editing)) {
+                if mode == .select {
+                    mode = .lasso
+                    lassoPurpose = .editing
+                    selectedItemId = nil
+                } else { mode = .select }
                 lassoSelection = LassoSelection()
             }
+            .accessibilityHint("Select one object. Tap again to draw a group selection.")
         case .pen:
             compactRailToolButton(tool, selected: mode == .ink && inkTool == .pen) {
                 handleInkToolTap(.pen)
@@ -1139,9 +1187,50 @@ struct NoteCanvasEditorView: View {
         .accessibilityIdentifier("note.tool.\(tool.rawValue)")
     }
 
+    private var canvasNavigationShortcuts: some View {
+        HStack {
+            Button("Fit all content") { fitCanvas(selectionOnly: false) }
+                .keyboardShortcut("0", modifiers: .command)
+            Button("Fit selection") { fitCanvas(selectionOnly: true) }
+                .keyboardShortcut("0", modifiers: [.command, .shift])
+                .disabled(selectedItemId == nil && lassoSelection.isEmpty)
+        }
+        .disabled(configuration.pageFormat != .infinite || isLoading || groupEditBusy)
+        .frame(width: 0, height: 0)
+        .clipped()
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+
+    private func fitCanvas(selectionOnly: Bool) {
+        guard configuration.pageFormat == .infinite, !isLoading, !groupEditBusy,
+              !selectionOnly || selectedItemId != nil || !lassoSelection.isEmpty else { return }
+        recordCurrentViewBeforeJump()
+        viewportNotice = nil
+        showMoreTools = false
+        sendCanvasCommand(selectionOnly ? .fitSelection : .fitContent)
+    }
+
     private var moreToolsPanel: some View {
         NavigationStack {
             List {
+                if configuration.pageFormat == .infinite {
+                    Section("Canvas view") {
+                        Button("Fit all content", systemImage: "arrow.up.left.and.arrow.down.right") {
+                            fitCanvas(selectionOnly: false)
+                        }
+                        .accessibilityIdentifier("note.view.fit-content")
+                        Button("Fit selection", systemImage: "viewfinder") {
+                            fitCanvas(selectionOnly: true)
+                        }
+                        .disabled(selectedItemId == nil && lassoSelection.isEmpty)
+                        .accessibilityIdentifier("note.view.fit-selection")
+                        Text("Fits within the current zoom range. Use Return to restore the previous view.")
+                            .font(.caption).foregroundStyle(.secondary)
+                        Text("Keyboard: ⌘0 fits all content; ⇧⌘0 fits the selection. ⌥⌘← returns to the previous view.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
                 Section("Tools") {
                     ForEach(NotebookToolID.optional) { tool in
                         Button {
@@ -2068,6 +2157,43 @@ struct NoteCanvasEditorView: View {
             .padding(.vertical, 11)
             .background(.regularMaterial, in: Capsule())
             .padding(.bottom, 8)
+        } else if let viewportNotice {
+            HStack {
+                Text(viewportNotice).font(.subheadline)
+                Button("Dismiss", systemImage: "xmark") { self.viewportNotice = nil }.labelStyle(.iconOnly)
+            }
+            .padding(12).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+        } else if groupMoveReceipt != nil {
+            HStack(spacing: 10) {
+                Text(groupMoveUndone ? "Move undone" : "Objects moved")
+                Button(groupMoveUndone ? "Redo move" : "Undo move") { Task { await reverseGroupMove() } }
+                    .accessibilityIdentifier("note.selection.undo-move")
+                Button("Dismiss", systemImage: "xmark") { groupMoveReceipt = nil }.labelStyle(.iconOnly)
+            }
+            .font(.subheadline).padding(12)
+            .background(.regularMaterial, in: Capsule())
+        } else if !groupDuplicateReceipt.isEmpty {
+            HStack(spacing: 10) {
+                Text("\(groupDuplicateReceipt.count) copies created")
+                Button("Undo duplicate") { Task { await undoDuplicatedObjects() } }
+                    .accessibilityIdentifier("note.selection.undo-duplicate")
+                Button("Dismiss", systemImage: "xmark") { groupDuplicateReceipt = [] }.labelStyle(.iconOnly)
+            }
+            .font(.subheadline).padding(12)
+            .background(.regularMaterial, in: Capsule())
+        } else if !groupTrashReceipt.isEmpty {
+            HStack(spacing: 10) {
+                Text("\(groupDeletedIds.count) items moved to Trash")
+                Button("Undo delete") { Task { await restoreDeletedObjects() } }
+                    .accessibilityIdentifier("note.selection.undo-delete")
+                Button("Dismiss", systemImage: "xmark") {
+                    groupTrashReceipt = []
+                    groupDeletedIds = []
+                }.labelStyle(.iconOnly)
+            }
+            .font(.subheadline)
+            .padding(12)
+            .background(.regularMaterial, in: Capsule())
         } else if let recentlyDeleted {
             HStack(spacing: 12) {
                 Label("Item removed", systemImage: "trash")
@@ -3195,6 +3321,157 @@ struct NoteCanvasEditorView: View {
             imagePreviews[block.id] = nil
             blocks.removeAll { $0.id == block.id }
             model.noteLocalMutation()
+        } catch { report(error) }
+    }
+
+    private var canDeleteSelectedObjects: Bool {
+        !isArchived && !groupEditBusy && !lassoSelection.isEmpty
+            && selectedObjectPayloads.count == lassoSelection.selectedBlockIds.count
+            && selectedObjectPayloads.values.allSatisfy { !$0.tombstone && $0.canvasRole != .inkLayer }
+    }
+
+    private func deleteSelectedObjects() async {
+        guard canDeleteSelectedObjects, lassoPurpose == .editing, let store = model.store else { return }
+        groupEditBusy = true
+        defer { groupEditBusy = false }
+        let selected = selectedObjectPayloads
+        do {
+            try await flushPendingChanges()
+            let saved = try await store.database.entities(ids: Array(selected.keys))
+            guard saved.count == selected.count else { throw LocalDatabaseError.staleLocalEdit }
+            for record in saved {
+                guard let captured = selected[record.id],
+                      try record.content == CanonicalJSON.encode(captured) else {
+                    throw LocalDatabaseError.staleLocalEdit
+                }
+            }
+            let receipt = try await store.moveCanvasObjectsToTrash(selected: saved, noteId: noteId)
+            groupTrashReceipt = receipt
+            groupMoveReceipt = nil
+            groupDuplicateReceipt = []
+            groupDeletedIds = saved.map(\.id)
+            recentlyDeleted = nil
+            recentlyDeletedTrashEntryId = nil
+            for id in selected.keys { imagePreviews[id] = nil }
+            blocks.removeAll { selected[$0.id] != nil }
+            lassoSelection = LassoSelection()
+            selectedObjectPayloads = [:]
+            selectedItemId = nil
+            model.noteLocalMutation()
+        } catch { report(error) }
+    }
+
+    private func duplicateSelectedObjects() async {
+        guard canDeleteSelectedObjects, lassoPurpose == .editing, let store = model.store else { return }
+        groupEditBusy = true
+        defer { groupEditBusy = false }
+        let selected = selectedObjectPayloads
+        do {
+            try await flushPendingChanges()
+            let saved = try await store.database.entities(ids: Array(selected.keys))
+            guard saved.count == selected.count else { throw LocalDatabaseError.staleLocalEdit }
+            for record in saved {
+                guard let captured = selected[record.id], try record.content == CanonicalJSON.encode(captured) else {
+                    throw LocalDatabaseError.staleLocalEdit
+                }
+            }
+            let copies = try await store.duplicateCanvasObjects(selected: saved, noteId: noteId)
+            groupDuplicateReceipt = copies
+            groupMoveReceipt = nil
+            groupTrashReceipt = []
+            groupDeletedIds = []
+            recentlyDeleted = nil
+            recentlyDeletedTrashEntryId = nil
+            model.noteLocalMutation()
+            for copy in copies { try await refreshBlock(copy.id) }
+            selectedObjectPayloads = try Dictionary(uniqueKeysWithValues: copies.map {
+                ($0.id, try CanonicalJSON.decode(NoteBlockPayload.self, from: $0.content))
+            })
+            lassoSelection = LassoSelection(selectedBlockIds: copies.map(\.id))
+            await loadImagePreviews(around: currentPageIndex)
+        } catch { report(error) }
+    }
+
+    private func moveSelectedObjects(by delta: CGPoint) async {
+        guard canDeleteSelectedObjects, lassoPurpose == .editing, let store = model.store else { return }
+        guard delta.x.isFinite, delta.y.isFinite, delta != .zero else { mode = .lasso; return }
+        groupEditBusy = true
+        defer { groupEditBusy = false; mode = .lasso }
+        let selected = selectedObjectPayloads
+        do {
+            try await flushPendingChanges()
+            let saved = try await store.database.entities(ids: Array(selected.keys))
+            guard saved.count == selected.count else { throw LocalDatabaseError.staleLocalEdit }
+            for record in saved {
+                guard let captured = selected[record.id], try record.content == CanonicalJSON.encode(captured) else {
+                    throw LocalDatabaseError.staleLocalEdit
+                }
+            }
+            let receipt = try await store.moveCanvasObjects(selected: saved, noteId: noteId, deltaX: Double(delta.x), deltaY: Double(delta.y))
+            groupMoveReceipt = receipt
+            groupMoveUndone = false
+            groupDuplicateReceipt = []
+            groupTrashReceipt = []
+            groupDeletedIds = []
+            recentlyDeleted = nil
+            recentlyDeletedTrashEntryId = nil
+            model.noteLocalMutation()
+            for record in receipt.after { try await refreshBlock(record.id) }
+            selectedObjectPayloads = try Dictionary(uniqueKeysWithValues: receipt.after.map {
+                ($0.id, try CanonicalJSON.decode(NoteBlockPayload.self, from: $0.content))
+            })
+        } catch { report(error) }
+    }
+
+    private func reverseGroupMove() async {
+        guard !groupEditBusy, !isArchived, let receipt = groupMoveReceipt, let store = model.store else { return }
+        groupEditBusy = true
+        defer { groupEditBusy = false; mode = .lasso }
+        do {
+            try await flushPendingChanges()
+            let inverse = try await store.undoCanvasObjectMove(receipt)
+            groupMoveReceipt = inverse
+            groupMoveUndone.toggle()
+            model.noteLocalMutation()
+            for record in inverse.after { try await refreshBlock(record.id) }
+            selectedObjectPayloads = try Dictionary(uniqueKeysWithValues: inverse.after.map {
+                ($0.id, try CanonicalJSON.decode(NoteBlockPayload.self, from: $0.content))
+            })
+            lassoSelection = LassoSelection(selectedBlockIds: inverse.after.map(\.id))
+        } catch { report(error) }
+    }
+
+    private func undoDuplicatedObjects() async {
+        guard !groupEditBusy, !isArchived, !groupDuplicateReceipt.isEmpty, let store = model.store else { return }
+        groupEditBusy = true
+        defer { groupEditBusy = false }
+        let copies = groupDuplicateReceipt
+        do {
+            try await flushPendingChanges()
+            _ = try await store.moveCanvasObjectsToTrash(selected: copies, noteId: noteId)
+            let ids = Set(copies.map(\.id))
+            blocks.removeAll { ids.contains($0.id) }
+            for id in ids { imagePreviews[id] = nil }
+            groupDuplicateReceipt = []
+            selectedObjectPayloads = [:]
+            lassoSelection = LassoSelection()
+            model.noteLocalMutation()
+        } catch { report(error) }
+    }
+
+    private func restoreDeletedObjects() async {
+        guard !groupEditBusy, !isArchived, let store = model.store else { return }
+        groupEditBusy = true
+        defer { groupEditBusy = false }
+        do {
+            try await flushPendingChanges()
+            try await store.restoreCanvasObjectGroup(entryIds: groupTrashReceipt)
+            let restoredIds = groupDeletedIds
+            groupTrashReceipt = []
+            groupDeletedIds = []
+            model.noteLocalMutation()
+            for id in restoredIds { try await refreshBlock(id) }
+            await loadImagePreviews(around: currentPageIndex)
         } catch { report(error) }
     }
 

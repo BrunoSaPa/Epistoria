@@ -821,8 +821,34 @@ devices may show exact matches only.
 
 ## Ask about part of a note
 
+To delete whole objects without AI, select **Select**, then tap it again to draw an editing
+selection. Open **Selection** beneath the rail, choose a rectangle or freehand boundary, and
+exclude Ink. Draw around the objects, reopen Selection, and choose **Move items to Trash**.
+Use **Undo delete** in the confirmation banner to restore that group. Dismissing the banner
+or closing the note leaves the deleted objects in Trash. This does not change the rail's ink
+undo/redo history. Partial-stroke editing is still in development.
+
+Choose **Duplicate items** in the same Selection menu to make independent copies, offset by
+24 document points. The copies become selected. **Undo duplicate** removes those copies to Trash;
+it does not remove the originals. A normal synchronization acknowledgement does not prevent undo.
+If a copy's content changes or has a conflict, the undo banner refuses to remove it. You can
+inspect and select the copies again for deletion.
+This is a separate action, not a unified undo/redo history.
+
+Choose **Move selected objects** to reposition the selection. Drag inside its outlined bounds;
+release to save all positions together. Use **Undo move** to restore the previous positions or
+**Redo move** to apply them again. These actions refuse to overwrite objects changed since the
+move. Original content and Source references stay unchanged. Partial ink movement is not included.
+With VoiceOver, use the movement handle's actions to move left, right, up, or down by 20 screen
+points. An unfinished drag is cancelled if the app loses focus or the canvas changes size.
+
+On an infinite canvas, open **More → Canvas view → Fit all content** to frame the note's content.
+Use **Fit selection** to frame selected objects or ink. **Return** restores the position and
+zoom from before the fit. These actions do not edit your note. If the content is too spread out
+for the minimum zoom, a notice explains that some content remains outside the view.
+
 In Ask or Math selection mode, open **Selection** beneath the left-rail tools. Choose Freehand
-or Rectangle, then choose the content types to include. Rectangle selection uses a drag between
+or Rectangle, then open **Include content** to choose its types. Rectangle selection uses a drag between
 opposite corners. Changing these options clears the previous selection; draw a new boundary
 before continuing. These options do not move or delete selected content.
 

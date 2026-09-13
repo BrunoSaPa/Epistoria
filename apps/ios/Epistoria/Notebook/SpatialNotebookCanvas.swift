@@ -8,6 +8,7 @@ enum SpatialNotebookMode: Equatable {
     case select
     case ink
     case lasso
+    case moveSelection
     case shape
     case symbol
 }
@@ -55,6 +56,8 @@ struct SpatialNotebookCommand: Equatable {
     enum Action: Equatable {
         case undo
         case redo
+        case fitContent
+        case fitSelection
         case restoreViewport(NoteCanvasViewport)
     }
 
@@ -118,6 +121,8 @@ struct SpatialNotebookCanvas: UIViewRepresentable {
     var snappingEnabled = true
     var holdShapesEnabled = false
     var selectionOptions = CanvasSelectionOptions()
+    var onGroupMove: ((CGPoint) -> Void)? = nil
+    var onViewportNotice: ((String) -> Void)? = nil
     var initialViewport: NoteCanvasViewport? = nil
     var onViewportSettled: ((NoteCanvasViewport) -> Void)? = nil
 
@@ -132,16 +137,19 @@ struct SpatialNotebookCanvas: UIViewRepresentable {
     }
 
     private func update(_ view: SpatialNotebookHostView) {
+        view.defersViewportCallbacks = true
         view.snappingEnabled = snappingEnabled
         view.holdShapesEnabled = holdShapesEnabled
         view.selectionOptions = selectionOptions
+        view.onGroupMove = onGroupMove
+        view.onViewportNotice = onViewportNotice
         view.initialViewport = initialViewport
         view.onViewportSettled = onViewportSettled
         view.onSelect = onSelect
         view.onViewportChanged = onViewportChanged
         view.onPlacementChanged = onPlacementChanged
         view.onTextChanged = onTextChanged
-        view.onTextEditingEnded = onTextEditingEnded
+        view.onTextEditingEnded = { id in DispatchQueue.main.async { onTextEditingEnded(id) } }
         view.onInkChanged = onInkChanged
         view.onPencilActivityChanged = onPencilActivityChanged
         view.onLassoSelection = onLassoSelection
@@ -185,6 +193,8 @@ final class SpatialNotebookHostView: UIView, UIScrollViewDelegate, PKCanvasViewD
     var onInkChanged: ((Data) -> Void)?
     var onPencilActivityChanged: ((Bool) -> Void)?
     var onLassoSelection: ((LassoSelection) -> Void)?
+    var onGroupMove: ((CGPoint) -> Void)?
+    var onViewportNotice: ((String) -> Void)?
     var selectionOptions = CanvasSelectionOptions() {
         didSet { lassoView.selectionShape = selectionOptions.shape }
     }
@@ -196,6 +206,10 @@ final class SpatialNotebookHostView: UIView, UIScrollViewDelegate, PKCanvasViewD
     private let pencilCanvas = PKCanvasView()
     private let focusHighlightView = UIView()
     private let lassoView = LassoGestureView()
+    private let groupMoveView = CanvasGroupMoveView()
+    private var groupMoveCenters: [UUID: CGPoint] = [:]
+    private var groupMoveHandleCenter = CGPoint.zero
+    private var groupMoveTranslation = CGPoint.zero
     private lazy var placementTap = UITapGestureRecognizer(
         target: self,
         action: #selector(handlePlacementTap(_:))
@@ -209,6 +223,12 @@ final class SpatialNotebookHostView: UIView, UIScrollViewDelegate, PKCanvasViewD
     private var lassoSelectedIds: Set<UUID> = []
     private var inkBlockId: UUID?
     private var worldDrawing = PKDrawing()
+    private var selectedInkBounds = CGRect.null
+    private var pendingFitSelectionOnly: Bool?
+    var defersViewportCallbacks = false
+    private var viewportReportScheduled = false
+    private var pendingViewportReport: (CGPoint, NoteCanvasViewport?)?
+    private var publishedViewportReport: (CGPoint, Double?)?
     private var lastExternalInkData: Data?
     /// Maps world/document coordinates into the current finite UIKit window. The window is
     /// silently recentered after an infinite-canvas gesture settles, so world coordinates can
@@ -298,15 +318,39 @@ final class SpatialNotebookHostView: UIView, UIScrollViewDelegate, PKCanvasViewD
             self?.finishLasso(in: region)
         }
         addSubview(lassoView)
+        addSubview(groupMoveView)
+        groupMoveView.isHidden = true
+        groupMoveView.onBegan = { [weak self] in
+            guard let self else { return }
+            self.groupMoveCenters = Dictionary(uniqueKeysWithValues: self.lassoSelectedIds.compactMap { id in
+                self.itemViews[id].map { (id, $0.center) }
+            })
+            self.groupMoveHandleCenter = self.groupMoveView.center
+        }
+        groupMoveView.onTranslation = { [weak self] translation in self?.previewGroupMove(translation) }
+        groupMoveView.onEnded = { [weak self] translation in
+            guard let self else { return }
+            if let translation {
+                let start = self.contentView.convert(CGPoint.zero, from: self)
+                let end = self.contentView.convert(translation, from: self)
+                self.onGroupMove?(CGPoint(x: end.x - start.x, y: end.y - start.y))
+            } else {
+                self.previewGroupMove(.zero)
+                self.groupMoveCenters = [:]
+            }
+        }
         heldShapes = HeldShapeController(canvas: pencilCanvas, container: self)
         NotificationCenter.default.addObserver(self, selector: #selector(interruptHeldShape),
             name: UIApplication.willResignActiveNotification, object: nil)
     }
 
-    @objc private func interruptHeldShape() { heldShapes?.interrupt() }
+    @objc private func interruptHeldShape() {
+        heldShapes?.interrupt()
+        groupMoveView.interrupt()
+    }
 
     override func willMove(toWindow newWindow: UIWindow?) {
-        if newWindow == nil { heldShapes?.interrupt() }
+        if newWindow == nil { interruptHeldShape() }
         super.willMove(toWindow: newWindow)
     }
 
@@ -320,7 +364,7 @@ final class SpatialNotebookHostView: UIView, UIScrollViewDelegate, PKCanvasViewD
         lassoView.frame = bounds
         guard bounds.width > 0, bounds.height > 0 else { return }
         let sizeChanged = bounds.size != lastLayoutSize
-        if sizeChanged { heldShapes?.interrupt() }
+        if sizeChanged { interruptHeldShape() }
         lastLayoutSize = bounds.size
         if geometryNeedsInitialPosition {
             // `setZoomScale` can synchronously trigger another layout pass. Mark the one-time
@@ -339,6 +383,8 @@ final class SpatialNotebookHostView: UIView, UIScrollViewDelegate, PKCanvasViewD
         }
         applyPendingFocusIfPossible()
         if let viewport = pendingViewport { restoreViewport(viewport) }
+        if let selectionOnly = pendingFitSelectionOnly { fitCanvasContent(selectionOnly: selectionOnly) }
+        if !groupMoveView.isDragging && !isReadOnly { updateGroupMoveBounds() }
     }
 
     func apply(
@@ -367,6 +413,9 @@ final class SpatialNotebookHostView: UIView, UIScrollViewDelegate, PKCanvasViewD
             || configuration.paperColor != self.configuration.paperColor
             || configuration.paperSpacing != self.configuration.paperSpacing
         let pageChanged = pageIndex != self.pageIndex
+        if pageChanged || surfaceChanged || mode != self.mode || lassoSelectedIds != self.lassoSelectedIds || isReadOnly {
+            groupMoveView.interrupt()
+        }
         if pageChanged || surfaceChanged || mode != self.mode || inkTool != .pen || isReadOnly {
             heldShapes?.interrupt()
         }
@@ -386,6 +435,7 @@ final class SpatialNotebookHostView: UIView, UIScrollViewDelegate, PKCanvasViewD
         )
         self.selectedItemId = selectedItemId
         self.lassoSelectedIds = lassoSelectedIds
+        if lassoSelectedIds.isEmpty { selectedInkBounds = .null }
         if inkBlockId != self.inkBlockId || pageChanged { lastExternalInkData = nil }
         self.inkBlockId = inkBlockId
         self.isReadOnly = isReadOnly
@@ -689,14 +739,40 @@ final class SpatialNotebookHostView: UIView, UIScrollViewDelegate, PKCanvasViewD
         pencilCanvas.isUserInteractionEnabled = drawing
         itemViews.values.forEach { $0.setInteractionEnabled(mode == .select && !isReadOnly) }
         lassoView.isHidden = mode != .lasso
+        groupMoveView.isHidden = mode != .moveSelection || lassoSelectedIds.isEmpty
+        groupMoveView.isUserInteractionEnabled = !isReadOnly
+        if mode == .moveSelection && (groupMoveView.isDragging || isReadOnly) && !groupMoveCenters.isEmpty {
+            previewGroupMove(groupMoveTranslation)
+        } else {
+            groupMoveCenters = [:]
+            groupMoveTranslation = .zero
+            updateGroupMoveBounds()
+        }
         placementTap.isEnabled = (mode == .shape || mode == .symbol) && !isReadOnly
-        scrollView.isScrollEnabled = allowsViewportNavigation && mode != .lasso
+        scrollView.isScrollEnabled = allowsViewportNavigation && mode != .lasso && mode != .moveSelection
 
         if drawing {
             pencilCanvas.becomeFirstResponder()
         } else {
             if pencilCanvas.isFirstResponder { pencilCanvas.resignFirstResponder() }
         }
+    }
+
+    private func updateGroupMoveBounds() {
+        let frames = lassoSelectedIds.compactMap { itemViews[$0] }.map { convert($0.bounds, from: $0) }
+        if let first = frames.first {
+            groupMoveView.frame = frames.dropFirst().reduce(first) { $0.union($1) }.insetBy(dx: -6, dy: -6)
+        }
+    }
+
+    private func previewGroupMove(_ translation: CGPoint) {
+        groupMoveTranslation = translation
+        let start = contentView.convert(CGPoint.zero, from: self)
+        let end = contentView.convert(translation, from: self)
+        for (id, center) in groupMoveCenters {
+            itemViews[id]?.center = CGPoint(x: center.x + end.x - start.x, y: center.y + end.y - start.y)
+        }
+        groupMoveView.center = CGPoint(x: groupMoveHandleCenter.x + translation.x, y: groupMoveHandleCenter.y + translation.y)
     }
 
     private func applyCommand(_ command: SpatialNotebookCommand?) {
@@ -708,7 +784,12 @@ final class SpatialNotebookHostView: UIView, UIScrollViewDelegate, PKCanvasViewD
             pencilCanvas.undoManager?.undo()
         case .redo:
             pencilCanvas.undoManager?.redo()
+        case .fitContent:
+            requestCanvasFit(selectionOnly: false, commandId: command.id)
+        case .fitSelection:
+            requestCanvasFit(selectionOnly: true, commandId: command.id)
         case let .restoreViewport(viewport):
+            pendingFitSelectionOnly = nil
             pendingFocus = nil
             lastFocus = nil
             focusHighlightView.isHidden = true
@@ -724,6 +805,50 @@ final class SpatialNotebookHostView: UIView, UIScrollViewDelegate, PKCanvasViewD
         scrollView.setZoomScale(viewport.zoom, animated: false)
         centerViewport(on: CGPoint(x: viewport.centerX, y: viewport.centerY), animated: false)
         reportViewport()
+    }
+
+    private func requestCanvasFit(selectionOnly: Bool, commandId: UUID) {
+        guard defersViewportCallbacks else { fitCanvasContent(selectionOnly: selectionOnly); return }
+        // Zooming can synchronously lay out UIKit and trigger SwiftUI callbacks. Leave the
+        // representable's update before changing the viewport; a newer command supersedes this.
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.lastCommandID == commandId else { return }
+            self.fitCanvasContent(selectionOnly: selectionOnly)
+        }
+    }
+
+    private func fitCanvasContent(selectionOnly: Bool) {
+        guard configuration.pageFormat == .infinite else { return }
+        pendingViewport = nil
+        guard hasUsableViewportGeometry, !geometryNeedsInitialPosition,
+              scrollView.bounds.width > 0, scrollView.bounds.height > 0 else {
+            pendingFitSelectionOnly = selectionOnly
+            return
+        }
+        pendingFitSelectionOnly = nil
+        groupMoveView.interrupt()
+        var target = CGRect.null
+        for (id, view) in itemViews where !selectionOnly || id == selectedItemId || lassoSelectedIds.contains(id) {
+            target = target.union(contentView.convert(view.bounds, from: view)
+                .offsetBy(dx: -documentOrigin.x, dy: -documentOrigin.y))
+        }
+        let inkBounds = selectionOnly ? selectedInkBounds : worldDrawing.bounds
+        if !inkBounds.isNull && !inkBounds.isInfinite { target = target.union(inkBounds) }
+        guard !target.isNull, !target.isInfinite, target.width.isFinite, target.height.isFinite else { return }
+        let fit = min(max(bounds.width - 48, 1) / max(target.width, 1),
+                      max(bounds.height - 48, 1) / max(target.height, 1))
+        pendingFocus = nil
+        lastFocus = nil
+        focusHighlightView.isHidden = true
+        restoreViewport(NoteCanvasViewport(centerX: target.midX, centerY: target.midY,
+            zoom: min(max(fit, Self.minimumCanvasZoomScale), Self.maximumCanvasZoomScale)))
+        if fit < Self.minimumCanvasZoomScale {
+            let notice = "Minimum zoom reached. Some content remains outside the view."
+            DispatchQueue.main.async { [weak self] in
+                self?.onViewportNotice?(notice)
+                UIAccessibility.post(notification: .announcement, argument: notice)
+            }
+        }
     }
 
     @objc private func handlePlacementTap(_ recognizer: UITapGestureRecognizer) {
@@ -840,6 +965,7 @@ final class SpatialNotebookHostView: UIView, UIScrollViewDelegate, PKCanvasViewD
             selectionOptions.content.contains(.ink) && stroke.renderBounds.intersects(worldRect)
                 && worldRegion.intersectsLine(stroke.path.map { $0.location.applying(stroke.transform) })
         }
+        selectedInkBounds = PKDrawing(strokes: selectedStrokes.map(\.element)).bounds.intersection(worldRect)
         if let inkBlockId, let image = cropDrawing(PKDrawing(strokes: selectedStrokes.map(\.element)), to: worldRect) {
             selected.append(inkBlockId)
             drawingImages[inkBlockId] = maskSelectionPNG(image, region: worldRegion, cropRect: worldRect)
@@ -920,10 +1046,30 @@ final class SpatialNotebookHostView: UIView, UIScrollViewDelegate, PKCanvasViewD
 
     private func reportViewport() {
         let center = currentWorldCenter()
-        onViewportChanged?(center)
+        var viewport: NoteCanvasViewport?
         if configuration.pageFormat == .infinite {
-            let viewport = NoteCanvasViewport(centerX: center.x, centerY: center.y, zoom: scrollView.zoomScale)
-            if viewport.isValid { onViewportSettled?(viewport) }
+            let candidate = NoteCanvasViewport(centerX: center.x, centerY: center.y, zoom: scrollView.zoomScale)
+            if candidate.isValid { viewport = candidate }
+        }
+        guard defersViewportCallbacks else {
+            onViewportChanged?(center)
+            if let viewport { onViewportSettled?(viewport) }
+            return
+        }
+        // UIKit can report geometry during updateUIView/layout. Publish one settled value on
+        // the next main-loop pass, never mutate SwiftUI state inside its own update.
+        pendingViewportReport = (center, viewport)
+        guard !viewportReportScheduled else { return }
+        viewportReportScheduled = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.viewportReportScheduled = false
+            guard let (center, viewport) = self.pendingViewportReport else { return }
+            self.pendingViewportReport = nil
+            if let prior = self.publishedViewportReport, prior.0 == center, prior.1 == viewport?.zoom { return }
+            self.publishedViewportReport = (center, viewport?.zoom)
+            self.onViewportChanged?(center)
+            if let viewport { self.onViewportSettled?(viewport) }
         }
     }
 

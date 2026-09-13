@@ -1318,6 +1318,137 @@ public actor EpistoriaStore {
         noteId: UUID,
         at date: Date = .now
     ) async throws -> [UUID] {
+        let checked = try await checkedCanvasObjects(selected: selected, noteId: noteId)
+        let groupId = UUID()
+        var writes: [LocalEntityWrite] = []
+        var expectations = checked.expectations
+        var trashIds: [UUID] = []
+        for (record, original) in checked.blocks {
+            var block = original
+            block.tombstone = true
+            block.updatedAt = date
+            let trashId = UUID()
+            let entry = TrashEntryPayload(targetId: record.id, targetType: .noteBlock,
+                deletionGroupId: groupId, previousParentId: noteId,
+                displayName: "Canvas item", estimatedByteCount: Int64(record.content.count), now: date)
+            writes.append(try localWrite(id: record.id, payload: block, parentId: noteId,
+                relationIds: noteBlockRelationIds(block, pageId: block.pageId)))
+            writes.append(try localWrite(id: trashId, payload: entry, parentId: noteId,
+                relationIds: [noteId, record.id]))
+            expectations.append(.absent(trashId))
+            trashIds.append(trashId)
+        }
+        try await database.saveLocalBatch(writes, expecting: expectations)
+        return trashIds
+    }
+
+    /// Makes independent blocks while reusing immutable assets and Evidence references.
+    /// The returned saved-state receipt can guard a subsequent undo without reading newer edits.
+    public func duplicateCanvasObjects(
+        selected: [StoredEntity], noteId: UUID,
+        offsetX: Double = 24, offsetY: Double = 24, at date: Date = .now
+    ) async throws -> [StoredEntity] {
+        guard offsetX.isFinite, offsetY.isFinite, abs(offsetX) <= 1_000_000,
+              abs(offsetY) <= 1_000_000 else { throw LocalDatabaseError.invalidRow }
+        let checked = try await checkedCanvasObjects(selected: selected, noteId: noteId)
+        var expectations = checked.expectations
+        var writes: [LocalEntityWrite] = []
+        var receipt: [StoredEntity] = []
+        for (_, original) in checked.blocks {
+            var block = original
+            guard var placement = block.canvasPlacement else { throw LocalDatabaseError.invalidRow }
+            placement.x += offsetX
+            placement.y += offsetY
+            guard [placement.x, placement.y, placement.width, placement.height, placement.rotationRadians].allSatisfy(\.isFinite),
+                  placement.width > 0, placement.height > 0,
+                  abs(placement.x) <= 1_000_000_000, abs(placement.y) <= 1_000_000_000 else {
+                throw LocalDatabaseError.invalidRow
+            }
+            block.canvasPlacement = placement
+            block.createdAt = date
+            block.updatedAt = date
+            let id = UUID()
+            block.orderKey = original.orderKey + "." + id.uuidString.lowercased()
+            let write = try localWrite(id: id, payload: block, parentId: noteId,
+                relationIds: noteBlockRelationIds(block, pageId: block.pageId))
+            writes.append(write)
+            expectations.append(.absent(id))
+            receipt.append(StoredEntity(id: id, entityType: .noteBlock, parentId: noteId,
+                relationIds: write.relationIds, content: write.content, revision: 0,
+                tombstone: false,
+                clientModifiedAt: Date(timeIntervalSince1970: date.timeIntervalSince1970),
+                syncState: .pending))
+        }
+        try await database.saveLocalBatch(writes, expecting: expectations)
+        return receipt
+    }
+
+    /// Applies one document-space translation to all selected objects as a single checked write.
+    public func moveCanvasObjects(
+        selected: [StoredEntity], noteId: UUID, deltaX: Double, deltaY: Double, at date: Date = .now
+    ) async throws -> CanvasObjectMoveReceipt {
+        guard deltaX.isFinite, deltaY.isFinite, abs(deltaX) <= 1_000_000,
+              abs(deltaY) <= 1_000_000 else { throw LocalDatabaseError.invalidRow }
+        var placements: [UUID: NoteCanvasPlacement] = [:]
+        for record in selected {
+            let block = try CanonicalJSON.decode(NoteBlockPayload.self, from: record.content)
+            guard var placement = block.canvasPlacement else { throw LocalDatabaseError.invalidRow }
+            placement.x += deltaX
+            placement.y += deltaY
+            placements[record.id] = placement
+        }
+        return try await applyCanvasObjectPlacements(selected: selected, noteId: noteId,
+            placements: placements, at: date)
+    }
+
+    /// Restores absolute placements, not an inverse delta applied to possibly changed content.
+    /// Its result is the inverse receipt and can support redo through the same checked path.
+    public func undoCanvasObjectMove(_ receipt: CanvasObjectMoveReceipt, at date: Date = .now) async throws -> CanvasObjectMoveReceipt {
+        var placements: [UUID: NoteCanvasPlacement] = [:]
+        for record in receipt.before {
+            let block = try CanonicalJSON.decode(NoteBlockPayload.self, from: record.content)
+            guard let placement = block.canvasPlacement else { throw LocalDatabaseError.invalidRow }
+            placements[record.id] = placement
+        }
+        return try await applyCanvasObjectPlacements(selected: receipt.after, noteId: receipt.noteId,
+            placements: placements, at: date)
+    }
+
+    private func applyCanvasObjectPlacements(
+        selected: [StoredEntity], noteId: UUID, placements: [UUID: NoteCanvasPlacement], at date: Date
+    ) async throws -> CanvasObjectMoveReceipt {
+        let checked = try await checkedCanvasObjects(selected: selected, noteId: noteId)
+        guard Set(placements.keys) == Set(selected.map(\.id)) else { throw LocalDatabaseError.invalidRow }
+        var writes: [LocalEntityWrite] = []
+        var after: [StoredEntity] = []
+        for (record, original) in checked.blocks {
+            guard let placement = placements[record.id],
+                  [placement.x, placement.y, placement.width, placement.height, placement.rotationRadians].allSatisfy(\.isFinite),
+                  placement.width > 0, placement.height > 0,
+                  abs(placement.x) <= 1_000_000_000, abs(placement.y) <= 1_000_000_000 else {
+                throw LocalDatabaseError.invalidRow
+            }
+            var block = original
+            block.canvasPlacement = placement
+            block.updatedAt = date
+            let write = try localWrite(id: record.id, payload: block, parentId: noteId,
+                relationIds: noteBlockRelationIds(block, pageId: block.pageId))
+            writes.append(write)
+            var result = record
+            result.content = write.content
+            result.parentId = write.parentId
+            result.relationIds = write.relationIds
+            result.clientModifiedAt = Date(timeIntervalSince1970: date.timeIntervalSince1970)
+            result.syncState = .pending
+            after.append(result)
+        }
+        try await database.saveLocalBatch(writes, expecting: checked.expectations)
+        return CanvasObjectMoveReceipt(noteId: noteId, before: selected, after: after)
+    }
+
+    private func checkedCanvasObjects(selected: [StoredEntity], noteId: UUID) async throws -> (
+        blocks: [(StoredEntity, NoteBlockPayload)], expectations: [LocalEntityExpectation]
+    ) {
         guard !selected.isEmpty, Set(selected.map(\.id)).count == selected.count else {
             throw LocalDatabaseError.invalidRow
         }
@@ -1326,16 +1457,14 @@ public actor EpistoriaStore {
               try CanonicalJSON.decode(NotePayload.self, from: noteRecord.content).archivedAt == nil else {
             throw LocalDatabaseError.staleLocalEdit
         }
-        let groupId = UUID()
-        var writes: [LocalEntityWrite] = []
         var expectations: [LocalEntityExpectation] = [.available(noteRecord)]
         var checkedPages = Set<UUID>()
-        var trashIds: [UUID] = []
+        var blocks: [(StoredEntity, NoteBlockPayload)] = []
         for record in selected {
             guard record.entityType == .noteBlock, !record.tombstone, record.syncState != .conflict else {
                 throw LocalDatabaseError.staleLocalEdit
             }
-            var block = try CanonicalJSON.decode(NoteBlockPayload.self, from: record.content)
+            let block = try CanonicalJSON.decode(NoteBlockPayload.self, from: record.content)
             guard block.noteId == noteId, !block.tombstone, block.canvasRole != .inkLayer else {
                 throw LocalDatabaseError.invalidRow
             }
@@ -1348,22 +1477,67 @@ public actor EpistoriaStore {
                 guard page.noteId == noteId, page.trashedAt == nil else { throw LocalDatabaseError.staleLocalEdit }
                 expectations.append(.available(pageRecord))
             }
-            block.tombstone = true
-            block.updatedAt = date
-            let trashId = UUID()
-            let entry = TrashEntryPayload(targetId: record.id, targetType: .noteBlock,
-                deletionGroupId: groupId, previousParentId: noteId,
-                displayName: "Canvas item", estimatedByteCount: Int64(record.content.count), now: date)
-            writes.append(try localWrite(id: record.id, payload: block, parentId: noteId,
-                relationIds: noteBlockRelationIds(block, pageId: block.pageId)))
-            writes.append(try localWrite(id: trashId, payload: entry, parentId: noteId,
-                relationIds: [noteId, record.id]))
             expectations.append(.available(record))
-            expectations.append(.absent(trashId))
-            trashIds.append(trashId)
+            blocks.append((record, block))
         }
-        try await database.saveLocalBatch(writes, expecting: expectations)
-        return trashIds
+        return (blocks, expectations)
+    }
+
+    /// Restores an explicit whole-object deletion receipt as one local transaction.
+    /// Never discovers extra targets from a mutable group query or overwrites a restored item.
+    public func restoreCanvasObjectGroup(entryIds: [UUID], at date: Date = .now) async throws {
+        guard !entryIds.isEmpty, Set(entryIds).count == entryIds.count else {
+            throw LocalDatabaseError.invalidRow
+        }
+        var writes: [LocalEntityWrite] = []
+        var expectations: [LocalEntityExpectation] = []
+        var checkedParents = Set<UUID>()
+        var checkedPages = Set<UUID>()
+        var targets = Set<UUID>()
+        var groupId: UUID?
+        var owningNoteId: UUID?
+        for id in entryIds {
+            guard let entryRecord = try await database.entity(id: id), !entryRecord.tombstone,
+                  entryRecord.entityType == .trashEntry, entryRecord.syncState != .conflict else {
+                throw LocalDatabaseError.staleLocalEdit
+            }
+            let entry = try CanonicalJSON.decode(TrashEntryPayload.self, from: entryRecord.content)
+            guard entry.targetType == .noteBlock, targets.insert(entry.targetId).inserted,
+                  groupId == nil || groupId == entry.deletionGroupId else { throw LocalDatabaseError.invalidRow }
+            groupId = entry.deletionGroupId
+            guard let blockRecord = try await database.entity(id: entry.targetId), !blockRecord.tombstone,
+                  blockRecord.entityType == .noteBlock, blockRecord.syncState != .conflict else {
+                throw LocalDatabaseError.staleLocalEdit
+            }
+            var block = try CanonicalJSON.decode(NoteBlockPayload.self, from: blockRecord.content)
+            guard block.tombstone, block.canvasRole != .inkLayer, entry.previousParentId == block.noteId,
+                  owningNoteId == nil || owningNoteId == block.noteId else { throw LocalDatabaseError.staleLocalEdit }
+            owningNoteId = block.noteId
+            if checkedParents.insert(block.noteId).inserted {
+                guard let noteRecord = try await database.entity(id: block.noteId), !noteRecord.tombstone,
+                      noteRecord.entityType == .note, noteRecord.syncState != .conflict,
+                      try CanonicalJSON.decode(NotePayload.self, from: noteRecord.content).archivedAt == nil else {
+                    throw LocalDatabaseError.staleLocalEdit
+                }
+                expectations.append(.available(noteRecord))
+            }
+            if let pageId = block.pageId, checkedPages.insert(pageId).inserted {
+                guard let pageRecord = try await database.entity(id: pageId), !pageRecord.tombstone,
+                      pageRecord.entityType == .notePage, pageRecord.syncState != .conflict else {
+                    throw LocalDatabaseError.staleLocalEdit
+                }
+                let page = try CanonicalJSON.decode(NotePagePayload.self, from: pageRecord.content)
+                guard page.noteId == block.noteId, page.trashedAt == nil else { throw LocalDatabaseError.staleLocalEdit }
+                expectations.append(.available(pageRecord))
+            }
+            block.tombstone = false
+            block.updatedAt = date
+            writes.append(try localWrite(id: blockRecord.id, payload: block, parentId: block.noteId,
+                relationIds: noteBlockRelationIds(block, pageId: block.pageId)))
+            expectations.append(.unchanged(blockRecord))
+            expectations.append(.unchanged(entryRecord))
+        }
+        try await database.saveLocalBatch(writes, deleting: entryIds, deletedAt: date, expecting: expectations)
     }
 
     public func trashEntries() async throws -> [IdentifiedPayload<TrashEntryPayload>] {

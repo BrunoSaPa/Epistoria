@@ -49,6 +49,12 @@ Epistoria remains in personal beta. The following limits apply to the current pr
   reordering, per-page templates, and recoverable deletion. Physical-device stress testing of
   very large page collections is still open.
 - Very large Pencil documents have a current per-page ink limit.
+- Whole-object duplication uses a fixed offset rather than fitting copies to a page. Check copies
+  near page edges before export. Undo duplicate rejects content changes or conflicts; inspect
+  and select the copies again to remove them. Physical two-device undo validation remains open.
+- Whole-object group selection supports Trash and an explicit Undo delete banner. It cannot
+  edit part of an ink layer. The rail's undo/redo is not yet a unified history for group edits.
+  Physical Pencil, mixed-content UI, narrow-window and accessibility validation remain open.
 - The pixel eraser has a round adjustable footprint. Square, angled, and custom eraser tips are
   not available. Whole-stroke erasing remains a separate mode.
 - Share Sheet capture accepts up to 10 supported items at a time. Each item must be 32 MB or
@@ -58,7 +64,13 @@ Epistoria remains in personal beta. The following limits apply to the current pr
 - Text and handwriting recognition are available for local search and review. Formula recognition
   remains development-gated until a permissively licensed on-device model passes physical-iPad
   accuracy, latency, memory, and thermal checks.
-- Existing shapes support appearance editing and PDF output. Alignment applies to individual
+- Existing shapes support appearance editing and PDF output.
+- Canvas fitting currently applies to infinite notes, within the 25%–400% zoom range. Widely
+  separated content may not fit completely; the app reports that limit. Fixed-page fit controls,
+  additional fitting keyboard shortcuts and physical-device navigation validation remain open.
+- Whole-object selection movement has a focused Simulator drag/undo test. Physical Pencil,
+  pointer, rotation, background interruption and VoiceOver movement still need validation.
+- Existing alignment applies to individual
   object movement, not resizing, spacing distribution or lasso-group movement. Freehand Ask and
   Math selections use sampled ink paths, not the full rendered stroke outline; thick or curved
   stroke boundary cases still need physical Pencil validation. Source links use the selection's

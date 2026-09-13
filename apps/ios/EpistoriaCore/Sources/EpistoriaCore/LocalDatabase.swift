@@ -91,6 +91,7 @@ public struct BoundedEntitySnapshot: Equatable, Sendable {
 /// Local-only optimistic concurrency guard. Sync revisions alone do not identify local edits.
 public enum LocalEntityExpectation: Equatable, Sendable {
     case unchanged(StoredEntity)
+    /// Requires unchanged local state and availability, but permits a forward sync acknowledgement.
     case available(StoredEntity)
     case absent(UUID)
 
@@ -670,7 +671,14 @@ public actor SQLCipherDatabase {
                     case let .unchanged(expected):
                         guard current == expected else { throw LocalDatabaseError.staleLocalEdit }
                     case let .available(expected):
-                        guard current == expected, try !entities(ids: [expected.id]).isEmpty else {
+                        guard var acknowledged = current, acknowledged.syncState != .conflict,
+                              expected.syncState != .conflict, acknowledged.revision >= expected.revision,
+                              try !entities(ids: [expected.id]).isEmpty else {
+                            throw LocalDatabaseError.staleLocalEdit
+                        }
+                        acknowledged.revision = expected.revision
+                        acknowledged.syncState = expected.syncState
+                        guard acknowledged == expected else {
                             throw LocalDatabaseError.staleLocalEdit
                         }
                     case .absent:

@@ -1,5 +1,39 @@
 # Release notes
 
+## 2026-09-13 — 0.1.0 infinite-canvas fitting
+
+- Fit content or a selection from More, then use Return to restore the previous view.
+- Report when content exceeds the available zoom range.
+- Move fitting outside the interface update to avoid a reproduced layout crash.
+
+## 2026-09-12 — 0.1.0 whole-object movement
+
+- Move selected whole objects together using a drag handle over the selection.
+- Restore or reapply their positions with explicit Undo move and Redo move actions.
+- Preserve original content and refuse a group undo if an object changed.
+- Cancel unfinished drags on interruptions and provide directional VoiceOver movement actions.
+- Physical interaction validation and unified editing history remain open.
+
+## 2026-09-12 — 0.1.0 undo after synchronization
+
+- Allow Undo duplicate after unchanged copies finish synchronizing.
+- Continue rejecting changed, conflicted, or unavailable copies.
+- Fix an intermittent timestamp-precision mismatch in duplication receipts.
+
+## 2026-09-12 — 0.1.0 whole-object duplication
+
+- Duplicate selected objects together with a consistent offset.
+- Keep independent block identities while reusing original assets and Evidence references.
+- Undo duplication by moving unchanged copies to Trash; leave originals untouched.
+- Keep partial ink duplication and unified undo/redo in development.
+
+## 2026-09-12 — 0.1.0 whole-object selection deletion
+
+- Tap Select again to draw a whole-object editing selection.
+- Move selected objects to Trash together and restore them with Undo delete.
+- Reject changed selections without overwriting newer content.
+- Keep partial ink editing and integrated group undo/redo in development.
+
 ## 2026-09-10 — 0.1.0 canvas deletion checks
 
 - Reject a canvas-item Trash action if its saved content changed before the action finished.
