@@ -1,6 +1,8 @@
 import EpistoriaCore
 import SwiftUI
 
+typealias NotebookPageFitMode = NotePageFitMode
+
 enum ContinuousNotebookPageSelection {
     static let pageGap: CGFloat = 16
     static let outerPadding: CGFloat = 8
@@ -8,6 +10,11 @@ enum ContinuousNotebookPageSelection {
     static func pageWidth(viewportWidth: CGFloat) -> CGFloat {
         guard viewportWidth.isFinite else { return 1 }
         return max(1, viewportWidth - 2 * outerPadding)
+    }
+    static func pageWidth(viewport: CGSize, aspectRatio: CGFloat, fitMode: NotebookPageFitMode) -> CGFloat {
+        let width = pageWidth(viewportWidth: viewport.width)
+        guard fitMode == .page, viewport.height.isFinite, aspectRatio.isFinite, aspectRatio > 0 else { return width }
+        return min(width, max(1, viewport.height - 2 * outerPadding) / aspectRatio)
     }
     static func readingPosition(pageIds: [UUID], heights: [CGFloat], offset: CGFloat) -> NoteReadingPosition? {
         guard offset.isFinite, pageIds.count == heights.count else { return nil }
@@ -57,6 +64,7 @@ struct ContinuousNotebookPages<PageContent: View>: View {
     @Binding var currentPageIndex: Int
     @Binding var requestedPageIndex: Int?
     @Binding var requestedReadingPosition: NoteReadingPosition?
+    var fitMode: NotebookPageFitMode = .width
     let onPageVisible: (Int) -> Void
     @ViewBuilder let pageContent: (Int, NoteCanvasConfiguration) -> PageContent
 
@@ -68,16 +76,16 @@ struct ContinuousNotebookPages<PageContent: View>: View {
     var body: some View {
         GeometryReader { viewport in
             let heights = pageConfigurations.map {
-                ContinuousNotebookPageSelection.pageWidth(viewportWidth: viewport.size.width)
-                    * CGFloat($0.pageHeight ?? 842) / CGFloat($0.pageWidth ?? 595)
+                let ratio = CGFloat($0.pageHeight ?? 842) / CGFloat($0.pageWidth ?? 595)
+                return ContinuousNotebookPageSelection.pageWidth(viewport: viewport.size, aspectRatio: ratio, fitMode: fitMode) * ratio
             }
             ScrollViewReader { reader in
                 ScrollView(.vertical) {
                     LazyVStack(spacing: ContinuousNotebookPageSelection.pageGap) {
                         ForEach(Array(pageConfigurations.enumerated()), id: \.offset) { pageIndex, configuration in
-                            let pageWidth = ContinuousNotebookPageSelection.pageWidth(viewportWidth: viewport.size.width)
                             let ratio = CGFloat(configuration.pageHeight ?? 842)
                                 / CGFloat(configuration.pageWidth ?? 595)
+                            let pageWidth = ContinuousNotebookPageSelection.pageWidth(viewport: viewport.size, aspectRatio: ratio, fitMode: fitMode)
                             let pageHeight = pageWidth * ratio
                             pageContent(pageIndex, configuration)
                                 .frame(width: pageWidth, height: pageHeight)

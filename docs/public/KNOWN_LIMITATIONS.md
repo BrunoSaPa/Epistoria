@@ -1,5 +1,9 @@
 # Known limitations
 
+- The notebook PDF side panel supports PDF selection and existing PDF evidence. Creating excerpts
+  inside the panel, saved source reading positions, and physical-device panel
+  validation remain unfinished. The cited version must already be downloaded to this iPad.
+
 Epistoria remains in personal beta. The following limits apply to the current product direction.
 
 ## Availability
@@ -65,9 +69,10 @@ Epistoria remains in personal beta. The following limits apply to the current pr
   remains development-gated until a permissively licensed on-device model passes physical-iPad
   accuracy, latency, memory, and thermal checks.
 - Existing shapes support appearance editing and PDF output.
-- Canvas fitting currently applies to infinite notes, within the 25%–400% zoom range. Widely
-  separated content may not fit completely; the app reports that limit. Fixed-page fit controls,
-  additional fitting keyboard shortcuts and physical-device navigation validation remain open.
+- Infinite-canvas fitting uses the 25%–400% zoom range. Widely separated content may not fit
+  completely; the app reports that limit. Fixed-page fit mode and reading position are local
+  to each device, not synchronized. Physical-device navigation and large
+  mixed-format page collections still need validation.
 - Whole-object selection movement has a focused Simulator drag/undo test. Physical Pencil,
   pointer, rotation, background interruption and VoiceOver movement still need validation.
 - Existing alignment applies to individual

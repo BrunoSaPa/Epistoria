@@ -54,8 +54,9 @@ or tab groups are planned.
    and writing positions, insert excerpts as reusable Evidence, and return to the same note
    position and zoom. Start with PDFs and existing Evidence rather than replacing every reader.
 4. **Canvas navigation — in progress.** Infinite-canvas content/selection fitting and Return are
-   implemented within the existing zoom range. Complete fixed-page fitting, larger content
-   overviews and keyboard navigation. Use the existing view menu and keyboard shortcuts rather than more rail
+   implemented within the existing zoom range. Fixed-page Fit page/Fit width and keyboard
+   commands and device-local fit-mode restoration are implemented. Complete larger
+   content overviews and validate physical navigation. Use the existing view menu and keyboard shortcuts rather than more rail
    buttons. Group alignment and connectors follow reliable selection.
 5. **Portable output.** Preserve page titles and bookmarks as PDF navigation where supported;
    include readable Evidence attribution; clarify visual PDF versus editable notebook archive;

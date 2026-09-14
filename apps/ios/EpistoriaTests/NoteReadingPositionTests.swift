@@ -5,6 +5,24 @@ import Foundation
 
 @MainActor
 struct NoteReadingPositionTests {
+    @Test(arguments: [CGSize(width: 1200, height: 650), CGSize(width: 700, height: 1000), CGSize(width: 320, height: 600)])
+    func fitPagePreservesPaperRatioWithinTheViewport(viewport: CGSize) {
+        let ratio: CGFloat = 842.0 / 595.0
+        let width = ContinuousNotebookPageSelection.pageWidth(viewport: viewport, aspectRatio: ratio, fitMode: .page)
+        #expect(width <= viewport.width - 16)
+        #expect(width * ratio <= viewport.height - 16 + 0.001)
+        #expect(width > 0)
+        #expect(ContinuousNotebookPageSelection.pageWidth(viewport: viewport, aspectRatio: ratio, fitMode: .width) == viewport.width - 16)
+    }
+
+    @Test func returnHistoryPreservesTheFixedPageFitMode() {
+        let id = UUID()
+        let position = NoteReadingPosition(pageId: id, fraction: 0.4)
+        var history = NotebookJumpHistory()
+        history.record(.page(position, fitMode: .page))
+        #expect(history.previous(pageIds: [id], infinite: false) == .page(position, fitMode: .page))
+    }
+
     @Test func jumpHistoryReturnsLatestValidLocationAndRemainsBounded() {
         let first = UUID(), removed = UUID()
         var history = NotebookJumpHistory()
@@ -81,12 +99,21 @@ struct NoteReadingPositionTests {
         let key = Data(repeating: 41, count: 32)
         let database = try SQLCipherDatabase(url: url, key: key)
         let note = UUID(), page = UUID()
-        let saved = NoteReadingPosition(pageId: page, fraction: 0.6, recordedAt: Date(timeIntervalSince1970: 100))
+        let saved = NoteReadingPosition(pageId: page, fraction: 0.6, recordedAt: Date(timeIntervalSince1970: 100), fitMode: .page)
         try await database.saveNoteReadingPosition(noteId: note, position: saved)
         try await database.saveNoteReadingPosition(noteId: note, position: NoteReadingPosition(pageId: page, fraction: 0.1, recordedAt: Date(timeIntervalSince1970: 50)))
         let reopened = try SQLCipherDatabase(url: url, key: key)
         #expect(try await reopened.noteReadingPosition(noteId: note) == saved)
         #expect(try await reopened.noteReadingPosition(noteId: UUID()) == nil)
         #expect(try await reopened.pendingMutations().isEmpty)
+    }
+
+    @Test func existingLocalPositionsDefaultToWidthWithoutLosingTheirLocation() throws {
+        let id = UUID()
+        let data = try JSONSerialization.data(withJSONObject: ["pageId": id.uuidString, "fraction": 0.4, "recordedAt": 0])
+        let position = try JSONDecoder().decode(NoteReadingPosition.self, from: data)
+        #expect(position.pageId == id)
+        #expect(position.fraction == 0.4)
+        #expect(position.fitMode == .width)
     }
 }

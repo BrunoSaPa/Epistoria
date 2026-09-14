@@ -1,5 +1,26 @@
 # Release notes
 
+## 2026-09-13 — 0.1.0 PDF evidence beside notes
+
+- Open a PDF evidence source beside the note without leaving the editor.
+- Browse source pages independently and close the panel to uncover the full canvas.
+- Require the cited saved version to be available on the iPad; never substitute a newer PDF.
+- Select a saved PDF from More → Open PDF beside note, with Load more for larger libraries.
+- Excerpt creation inside this panel remains planned.
+
+## 2026-09-13 — 0.1.0 PDF citation navigation
+
+- Keep cited PDF regions on their original page when scrolling through the source.
+- Open the requested PDF page before updating the page counter.
+- Ignore queued page updates after closing the reader.
+
+## 2026-09-13 — 0.1.0 page fitting and keyboard navigation
+
+- Fit fixed pages to the viewport or its width while retaining continuous scrolling.
+- Restore fixed-page fit mode and position with Return.
+- Remember fixed-page fit mode when reopening the note on the same device.
+- Use canvas fitting shortcuts while More is closed; the menu explains the available keys.
+
 ## 2026-09-13 — 0.1.0 infinite-canvas fitting
 
 - Fit content or a selection from More, then use Return to restore the previous view.

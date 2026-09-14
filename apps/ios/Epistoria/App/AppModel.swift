@@ -359,6 +359,20 @@ final class AppModel {
                 // initialization screen can create the required readable archive safely.
                 phase = .onboarding
             } else {
+                if ProcessInfo.processInfo.arguments.contains("-ui-testing-pdf-panel"),
+                   let assetManager {
+                    let bounds = CGRect(x: 0, y: 0, width: 420, height: 594)
+                    let bytes = UIGraphicsPDFRenderer(bounds: bounds).pdfData { context in
+                        for page in 1...3 {
+                            context.beginPage()
+                            ("Synthetic source page \(page)" as NSString).draw(
+                                at: CGPoint(x: 32, y: 40),
+                                withAttributes: [.font: UIFont.systemFont(ofSize: 22)]
+                            )
+                        }
+                    }
+                    _ = try await assetManager.importSource(data: bytes, filename: "Panel test source.pdf")
+                }
                 await beginReadyWork()
             }
         } catch {

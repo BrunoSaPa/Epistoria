@@ -5,6 +5,10 @@ the current personal beta.
 
 ## Spatial notebooks
 
+- Open existing PDF Evidence beside the note, browse its saved source version, and close the
+  panel without leaving the canvas. The cited PDF must be available locally.
+- Use More → Open PDF beside note to select a saved PDF without creating an Evidence card.
+
 - Choose A4 or US Letter paper in portrait or landscape orientation.
 - Use an infinite canvas when a fixed page is not appropriate.
 - Select plain, ruled, grid, dotted, or isometric paper.
@@ -212,6 +216,9 @@ the current personal beta.
 
 - On an infinite canvas, open **More → Canvas view** to fit all content or the current selection
   within the supported zoom range. Use **Return** to restore the prior position and zoom.
+- For fixed pages, **More → Page view** offers Fit page and Fit width without changing the paper
+  or stopping continuous scrolling. Return restores the previous reading position and fit mode.
+  Fixed-page reading position and fit mode survive reopening on the same device.
 
 - Tap Select again to draw an editing selection. Choose its boundary and content filters from
   Selection beneath the left-rail tools.

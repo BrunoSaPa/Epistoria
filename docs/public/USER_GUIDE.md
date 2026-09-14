@@ -95,6 +95,15 @@ between tabs. These view settings stay on this iPad.
 Pencil writing stays separate from the text or image below it. Removing an item requires
 confirmation and provides temporary undo while the note remains open.
 
+On a PDF Evidence item, select **Open source** to read its cited version in the right-side
+panel. Its page arrows move through the source independently of the notebook. Select **Close
+source panel** to uncover the canvas. If the saved version is unavailable, download it in
+Library and retry. Other source types still open in the source reader sheet.
+
+To open another PDF, use **More → Open PDF beside note**. Select a source, or select **Load more
+sources** to browse additional records. The panel opens the version selected at that moment;
+reading does not create an Evidence card or modify the PDF.
+
 Shapes and symbols are stored as notebook items. Switch to **Select** to move, resize, rotate, or
 remove them. Select a symbol again in Select mode to edit it as text.
 
@@ -846,6 +855,15 @@ On an infinite canvas, open **More → Canvas view → Fit all content** to fram
 Use **Fit selection** to frame selected objects or ink. **Return** restores the position and
 zoom from before the fit. These actions do not edit your note. If the content is too spread out
 for the minimum zoom, a notice explains that some content remains outside the view.
+
+For A4 and Letter notes, use **More → Page view → Fit page** to show the whole page or **Fit width**
+to use the available writing width. Pages remain in one continuous scroll. **Return** restores
+the previous reading position and fit mode. The reading position and fit mode are saved on this
+iPad and restored when you reopen the note; the paper and your content do not change.
+
+Keyboard shortcuts work with More closed: **Command–0** fits the page or infinite-canvas content;
+**Command–1** fits fixed-page width; **Command–Shift–0** fits an infinite-canvas selection;
+**Option–Command–Left Arrow** returns to the previous view.
 
 In Ask or Math selection mode, open **Selection** beneath the left-rail tools. Choose Freehand
 or Rectangle, then open **Include content** to choose its types. Rectangle selection uses a drag between

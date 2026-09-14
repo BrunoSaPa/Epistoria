@@ -2,6 +2,124 @@ import XCTest
 
 final class EpistoriaAccessibilityUITests: XCTestCase {
     @MainActor
+    func testPDFPanelKeepsNotebookAvailableWhileReading() throws {
+        XCUIDevice.shared.orientation = .landscapeLeft
+        defer { XCUIDevice.shared.orientation = .portrait }
+        let app = ephemeralApplication(additionalArguments: ["-ui-testing-pdf-panel"])
+        app.launch()
+        XCTAssertTrue(app.buttons["today.quick-note"].waitForExistence(timeout: 15))
+        app.buttons["today.quick-note"].tap()
+        let page = app.descendants(matching: .any).matching(identifier: "note.page.1").firstMatch
+        XCTAssertTrue(page.waitForExistence(timeout: 10))
+        let original = page.frame
+        app.buttons["note.tool.more"].tap()
+        let open = app.buttons["note.more.open-source"]
+        if !open.isHittable { app.swipeUp() }
+        open.tap()
+        let source = app.buttons["Panel test source"]
+        XCTAssertTrue(source.waitForExistence(timeout: 8))
+        source.tap()
+        XCTAssertTrue(app.staticTexts["Page 1 of 3"].waitForExistence(timeout: 10))
+        XCTAssertEqual(page.frame.width, original.width, accuracy: 2)
+        XCTAssertTrue(app.buttons["note.tool.pen"].isHittable)
+        app.buttons["Next source page"].tap()
+        XCTAssertTrue(app.staticTexts["Page 2 of 3"].waitForExistence(timeout: 5))
+        app.buttons["note.tool.pen"].tap()
+        let start = page.coordinate(withNormalizedOffset: CGVector(dx: 0.12, dy: 0.25))
+        let end = page.coordinate(withNormalizedOffset: CGVector(dx: 0.28, dy: 0.35))
+        start.press(forDuration: 0.1, thenDragTo: end)
+        XCTAssertTrue(app.staticTexts["Page 2 of 3"].exists)
+        app.buttons["note.tool.text"].tap()
+        let text = app.textViews.matching(identifier: "Canvas text").firstMatch
+        XCTAssertTrue(text.waitForExistence(timeout: 5))
+        text.tap()
+        text.typeText("Reading alongside my source")
+        XCTAssertTrue((text.value as? String)?.contains("Reading alongside my source") == true)
+        app.buttons["note.tool.pen"].tap()
+        XCTAssertTrue(app.staticTexts["Page 2 of 3"].waitForExistence(timeout: 5))
+        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        shot.name = "PDF beside writable notebook"
+        shot.lifetime = .keepAlways
+        add(shot)
+        app.buttons["note.source.close"].tap()
+        XCTAssertFalse(app.buttons["note.source.close"].exists)
+        XCTAssertEqual(page.frame.width, original.width, accuracy: 2)
+        XCTAssertEqual(page.frame.minY, original.minY, accuracy: 2)
+        XCTAssertTrue(app.buttons["note.tool.pen"].isHittable)
+    }
+
+    @MainActor
+    func testPDFPickerEmptyStateAndCancelReturnToNote() throws {
+        let app = ephemeralApplication()
+        app.launch()
+        XCTAssertTrue(app.buttons["today.quick-note"].waitForExistence(timeout: 12))
+        app.buttons["today.quick-note"].tap()
+        let page = app.descendants(matching: .any).matching(identifier: "note.page.1").firstMatch
+        XCTAssertTrue(page.waitForExistence(timeout: 10))
+        let width = page.frame.width
+        app.buttons["note.tool.more"].tap()
+        let open = app.buttons["note.more.open-source"]
+        if !open.isHittable { app.swipeUp() }
+        XCTAssertTrue(open.waitForExistence(timeout: 5))
+        open.tap()
+        XCTAssertTrue(app.staticTexts["No available PDF sources. Import a PDF in Library."].waitForExistence(timeout: 5))
+        app.buttons["Cancel"].tap()
+        XCTAssertTrue(page.waitForExistence(timeout: 5))
+        XCTAssertEqual(page.frame.width, width, accuracy: 2)
+        XCTAssertTrue(app.buttons["note.tool.pen"].isHittable)
+    }
+
+    @MainActor
+    func testFixedPageFitAndReturnKeepContinuousCanvas() throws {
+        XCUIDevice.shared.orientation = .landscapeLeft
+        defer { XCUIDevice.shared.orientation = .portrait }
+        let app = ephemeralApplication()
+        app.launch()
+        expectation(for: NSPredicate { _, _ in app.frame.width > app.frame.height }, evaluatedWith: app)
+        waitForExpectations(timeout: 10)
+        XCTAssertTrue(app.buttons["today.quick-note"].waitForExistence(timeout: 12))
+        app.buttons["today.quick-note"].tap()
+        let page = app.descendants(matching: .any).matching(identifier: "note.page.1").firstMatch
+        XCTAssertTrue(page.waitForExistence(timeout: 10))
+        let originalWidth = page.frame.width
+        app.buttons["note.tool.more"].tap()
+        let fit = app.buttons["note.view.fit-page"]
+        XCTAssertTrue(fit.waitForExistence(timeout: 5))
+        fit.tap()
+        let back = app.buttons["note.return-view"]
+        XCTAssertTrue(back.waitForExistence(timeout: 5))
+        XCTAssertLessThan(page.frame.width, originalWidth)
+        XCTAssertLessThan(page.frame.height, app.frame.height)
+        XCTAssertGreaterThanOrEqual(page.frame.minX, app.frame.minX)
+        XCTAssertLessThanOrEqual(page.frame.maxX, app.frame.maxX)
+        XCTAssertGreaterThanOrEqual(page.frame.minY, app.frame.minY)
+        XCTAssertLessThanOrEqual(page.frame.maxY, app.frame.maxY)
+        let screen = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        screen.name = "Fixed page fits landscape viewport"
+        screen.lifetime = .keepAlways
+        add(screen)
+        back.tap()
+        XCTAssertEqual(page.frame.width, originalWidth, accuracy: 2)
+        app.typeKey("0", modifierFlags: .command)
+        XCTAssertTrue(back.waitForExistence(timeout: 5))
+        XCTAssertLessThan(page.frame.width, originalWidth)
+        app.typeKey("1", modifierFlags: .command)
+        XCTAssertEqual(page.frame.width, originalWidth, accuracy: 2)
+        app.typeKey("0", modifierFlags: .command)
+        XCTAssertLessThan(page.frame.width, originalWidth)
+        let fittedWidth = page.frame.width
+        app.navigationBars.buttons["Today"].tap()
+        let recent = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "today.recent-note.")).firstMatch
+        XCTAssertTrue(recent.waitForExistence(timeout: 5))
+        app.terminate()
+        app.launch()
+        XCTAssertTrue(recent.waitForExistence(timeout: 12))
+        recent.tap()
+        XCTAssertTrue(page.waitForExistence(timeout: 10))
+        XCTAssertEqual(page.frame.width, fittedWidth, accuracy: 2)
+    }
+
+    @MainActor
     func testInfiniteCanvasFitAndReturnPreserveContentAndPosition() throws {
         let app = ephemeralApplication()
         app.launch()
@@ -34,6 +152,22 @@ final class EpistoriaAccessibilityUITests: XCTestCase {
         XCTAssertEqual(field.frame.midY, originalFrame.midY, accuracy: 1)
         XCTAssertEqual(field.frame.width, originalFrame.width, accuracy: 1)
         XCTAssertEqual(field.value as? String, "Canvas fitting fixture")
+        app.typeKey("0", modifierFlags: [.command, .shift])
+        XCTAssertFalse(back.exists, "An empty selection must not add navigation history.")
+        let options = app.buttons["note.selection.options"]
+        if !options.exists { app.buttons["note.tool.select"].tap() }
+        options.tap()
+        if !app.buttons["Rectangle"].exists { app.buttons["Boundary"].tap() }
+        app.buttons["Rectangle"].tap()
+        let origin = app.coordinate(withNormalizedOffset: .zero)
+        origin.withOffset(CGVector(dx: originalFrame.minX - 8, dy: originalFrame.minY - 8))
+            .press(forDuration: 0.1, thenDragTo: origin.withOffset(CGVector(dx: originalFrame.maxX + 8, dy: originalFrame.maxY + 8)))
+        app.typeKey("0", modifierFlags: [.command, .shift])
+        XCTAssertTrue(back.waitForExistence(timeout: 5))
+        XCTAssertGreaterThan(field.frame.width, originalFrame.width)
+        app.typeKey(.leftArrow, modifierFlags: [.command, .option])
+        expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: back)
+        waitForExpectations(timeout: 5)
         // The More popover is closed: keyboard commands must belong to the editor itself.
         app.typeKey("0", modifierFlags: .command)
         XCTAssertTrue(back.waitForExistence(timeout: 5))

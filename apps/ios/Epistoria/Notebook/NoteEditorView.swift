@@ -119,6 +119,7 @@ struct NoteCanvasEditorView: View {
     @State private var selectedMathSymbol = "√"
     @State private var canvasCommand: SpatialNotebookCommand?
     @State private var viewportNotice: String?
+    @State private var fixedPageFitMode: NotebookPageFitMode = .width
     @State private var selectedItemId: UUID?
     @State private var editingItemId: UUID?
     @State private var viewportCenter = CGPoint(x: 297.5, y: 421)
@@ -178,6 +179,8 @@ struct NoteCanvasEditorView: View {
     @State private var activeHighlightText: String?
     @State private var activeFocusRectangles: [AnnotationRectangle]
     @State private var openedEvidenceId: UUID?
+    @State private var openedPDF: NotebookPDFTarget?
+    @State private var showPDFPicker = false
     @State private var inspectedEvidenceId: UUID?
     @State private var inspectedEvidenceBacklinks: [EvidenceBacklink] = []
 
@@ -258,6 +261,28 @@ struct NoteCanvasEditorView: View {
             }
             .overlay(alignment: .trailing) {
                 if showTutor { tutorOverlay }
+            }
+            .overlay(alignment: .trailing) {
+                if let target = openedPDFTarget {
+                    GeometryReader { geometry in
+                        HStack(spacing: 0) {
+                            Spacer(minLength: 0)
+                            NotebookPDFPanel(model: model, target: target) {
+                                openedEvidenceId = nil
+                                openedPDF = nil
+                            }
+                            .id(target.id)
+                            .frame(width: min(460, geometry.size.width * 0.55))
+                            .transition(reduceMotion ? .opacity : .move(edge: .trailing))
+                        }
+                    }
+                }
+            }
+            .onChange(of: openedEvidenceId) { _, id in
+                if id != nil { openedPDF = nil; showTutor = false; showEvidenceShelf = false }
+            }
+            .onChange(of: showTutor) { _, visible in
+                if visible { openedEvidenceId = nil; openedPDF = nil }
             }
             .safeAreaInset(edge: .bottom, spacing: 0) { transientBottomMessage }
             .sensoryFeedback(.selection, trigger: currentPageIndex)
@@ -353,6 +378,15 @@ struct NoteCanvasEditorView: View {
                         Task { await addEquation(content: expression) }
                     }
                 )
+            }
+            .sheet(isPresented: $showPDFPicker) {
+                NotebookPDFPicker(model: model) { target in
+                    openedEvidenceId = nil
+                    openedPDF = target
+                    showTutor = false
+                    showEvidenceShelf = false
+                    showPDFPicker = false
+                }
             }
             .sheet(isPresented: $showOrganization) {
                 NoteOrganizationView(model: model, noteId: noteId) {
@@ -450,7 +484,7 @@ struct NoteCanvasEditorView: View {
             }
             .sheet(
                 isPresented: Binding(
-                    get: { openedEvidenceId != nil },
+                    get: { openedEvidenceId != nil && openedPDFEvidence == nil },
                     set: { if !$0 { openedEvidenceId = nil } }
                 )
             ) {
@@ -469,6 +503,15 @@ struct NoteCanvasEditorView: View {
                     }
                 }
             }
+    }
+
+    private var openedPDFEvidence: IdentifiedPayload<EvidencePayload>? {
+        evidence.first { $0.id == openedEvidenceId && $0.payload.locator.kind == .pdf }
+    }
+
+    private var openedPDFTarget: NotebookPDFTarget? {
+        if let item = openedPDFEvidence { return NotebookPDFTarget(id: item.id, evidence: item.payload) }
+        return openedPDF
     }
 
     private var editorDestructiveDialogs: some View {
@@ -583,11 +626,16 @@ struct NoteCanvasEditorView: View {
                 pageConfigurations: pageConfigurations,
                 pageIds: pages.map(\.id),
                 initialReadingPosition: initialReadingPosition,
-                onReadingPositionChanged: { latestReadingPosition = $0 },
+                onReadingPositionChanged: { position in
+                    var position = position
+                    position.fitMode = fixedPageFitMode
+                    latestReadingPosition = position
+                },
                 onReadingPaused: { persistReadingPosition() },
                 currentPageIndex: $currentPageIndex,
                 requestedPageIndex: $requestedPageIndex,
                 requestedReadingPosition: $requestedReadingPosition,
+                fitMode: fixedPageFitMode,
                 onPageVisible: { pageIndex in
                     Task { await prepareVisiblePage(pageIndex) }
                 }
@@ -1189,13 +1237,19 @@ struct NoteCanvasEditorView: View {
 
     private var canvasNavigationShortcuts: some View {
         HStack {
-            Button("Fit all content") { fitCanvas(selectionOnly: false) }
+            Button(configuration.pageFormat == .infinite ? "Fit all content" : "Fit page") {
+                if configuration.pageFormat == .infinite { fitCanvas(selectionOnly: false) }
+                else { fitFixedPages(.page) }
+            }
                 .keyboardShortcut("0", modifiers: .command)
             Button("Fit selection") { fitCanvas(selectionOnly: true) }
                 .keyboardShortcut("0", modifiers: [.command, .shift])
-                .disabled(selectedItemId == nil && lassoSelection.isEmpty)
+                .disabled(configuration.pageFormat != .infinite || (selectedItemId == nil && lassoSelection.isEmpty))
+            Button("Fit width") { fitFixedPages(.width) }
+                .keyboardShortcut("1", modifiers: .command)
+                .disabled(configuration.pageFormat == .infinite)
         }
-        .disabled(configuration.pageFormat != .infinite || isLoading || groupEditBusy)
+        .disabled(isLoading || groupEditBusy)
         .frame(width: 0, height: 0)
         .clipped()
         .allowsHitTesting(false)
@@ -1209,6 +1263,18 @@ struct NoteCanvasEditorView: View {
         viewportNotice = nil
         showMoreTools = false
         sendCanvasCommand(selectionOnly ? .fitSelection : .fitContent)
+    }
+
+    private func fitFixedPages(_ fitMode: NotebookPageFitMode) {
+        guard configuration.pageFormat != .infinite, !isLoading, !groupEditBusy,
+              let pageId = pageId(at: currentPageIndex) else { return }
+        recordCurrentViewBeforeJump()
+        showMoreTools = false
+        fixedPageFitMode = fitMode
+        let position = NoteReadingPosition(pageId: pageId, fraction: 0, fitMode: fitMode)
+        latestReadingPosition = position
+        requestedReadingPosition = position
+        persistReadingPosition()
     }
 
     private var moreToolsPanel: some View {
@@ -1231,6 +1297,16 @@ struct NoteCanvasEditorView: View {
                             .font(.caption).foregroundStyle(.secondary)
                     }
                 }
+                if configuration.pageFormat != .infinite {
+                    Section("Page view") {
+                        Button("Fit page", systemImage: "doc.viewfinder") { fitFixedPages(.page) }
+                            .accessibilityIdentifier("note.view.fit-page")
+                        Button("Fit width", systemImage: "arrow.left.and.right") { fitFixedPages(.width) }
+                            .accessibilityIdentifier("note.view.fit-width")
+                        Text("⌘0 fits the page; ⌘1 fits its width. Pages continue to scroll together. Return restores the previous view.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
                 Section("Tools") {
                     ForEach(NotebookToolID.optional) { tool in
                         Button {
@@ -1243,6 +1319,11 @@ struct NoteCanvasEditorView: View {
                     }
                 }
                 Section("Note") {
+                    Button("Open PDF beside note", systemImage: "rectangle.split.2x1") {
+                        showMoreTools = false
+                        showPDFPicker = true
+                    }
+                    .accessibilityIdentifier("note.more.open-source")
                     Button("Find in Note", systemImage: "doc.text.magnifyingglass") {
                         showMoreTools = false
                         showFindInNote = true
@@ -2456,13 +2537,14 @@ struct NoteCanvasEditorView: View {
                     }
                 } else if let saved = try await store.database.noteReadingPosition(noteId: noteId),
                           pages.contains(where: { $0.id == saved.pageId }) {
-                    jumpHistory.record(.page(saved))
+                    jumpHistory.record(.page(saved, fitMode: saved.fitMode))
                 }
             }
             if isInitialLoad, activeFocusedBlockId == nil, configuration.pageFormat != .infinite {
                 if let saved = try? await store.database.noteReadingPosition(noteId: noteId),
                    let index = pages.firstIndex(where: { $0.id == saved.pageId }) {
                     initialReadingPosition = saved
+                    fixedPageFitMode = saved.fitMode
                     latestReadingPosition = saved
                     currentPageIndex = index
                 }
@@ -2526,9 +2608,9 @@ struct NoteCanvasEditorView: View {
         if configuration.pageFormat == .infinite {
             if let viewport = latestCanvasViewport { jumpHistory.record(.canvas(viewport)) }
         } else if let position = latestReadingPosition {
-            jumpHistory.record(.page(position))
+            jumpHistory.record(.page(position, fitMode: fixedPageFitMode))
         } else if let page = pages.first(where: { $0.id == pageId(at: currentPageIndex) }) {
-            jumpHistory.record(.page(NoteReadingPosition(pageId: page.id, fraction: 0)))
+            jumpHistory.record(.page(NoteReadingPosition(pageId: page.id, fraction: 0), fitMode: fixedPageFitMode))
         }
     }
 
@@ -2542,7 +2624,14 @@ struct NoteCanvasEditorView: View {
         editingItemId = nil
         requestedPageIndex = nil
         switch previous {
-        case let .page(position): requestedReadingPosition = position
+        case let .page(position, fitMode):
+            fixedPageFitMode = fitMode
+            var restored = position
+            restored.fitMode = fitMode
+            restored.recordedAt = .now
+            latestReadingPosition = restored
+            requestedReadingPosition = restored
+            persistReadingPosition()
         case let .canvas(viewport): canvasCommand = SpatialNotebookCommand(action: .restoreViewport(viewport))
         }
     }

@@ -4,7 +4,7 @@ import Foundation
 /// Navigation-only snapshots for the current editor, never notebook content or undo history.
 struct NotebookJumpHistory {
     enum Location: Equatable {
-        case page(NoteReadingPosition)
+        case page(NoteReadingPosition, fitMode: NotebookPageFitMode = .width)
         case canvas(NoteCanvasViewport)
     }
     private(set) var locations: [Location] = []
@@ -18,7 +18,7 @@ struct NotebookJumpHistory {
     mutating func previous(pageIds: Set<UUID>, infinite: Bool) -> Location? {
         while let location = locations.popLast() {
             switch location {
-            case let .page(position) where !infinite && pageIds.contains(position.pageId): return location
+            case let .page(position, _) where !infinite && pageIds.contains(position.pageId): return location
             case let .canvas(viewport) where infinite && viewport.isValid: return location
             default: continue
             }
